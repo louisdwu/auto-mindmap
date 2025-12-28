@@ -1,0 +1,29 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="biliGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#fb7299;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#ff9db5;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  
+  <!-- Rounded Square Background (Bilibili style) -->
+  <rect x="8" y="8" width="112" height="112" rx="24" fill="url(#biliGradient)" />
+  
+  <!-- Screen/Display Area -->
+  <rect x="24" y="24" width="80" height="50" rx="6" fill="white" fill-opacity="0.9" />
+  
+  <!-- Subtitle Lines -->
+  <rect x="34" y="38" width="60" height="4" rx="2" fill="#fb7299" />
+  <rect x="34" y="50" width="40" height="4" rx="2" fill="#fb7299" />
+  
+  <!-- Mindmap Node (Connecting to the screen) -->
+  <circle cx="64" cy="88" r="10" fill="white" />
+  
+  <!-- Connecting lines to sub-nodes -->
+  <line x1="64" y1="88" x2="38" y2="102" stroke="white" stroke-width="4" stroke-linecap="round" />
+  <line x1="64" y1="88" x2="90" y2="102" stroke="white" stroke-width="4" stroke-linecap="round" />
+  
+  <!-- Sub-nodes -->
+  <circle cx="38" cy="102" r="6" fill="white" />
+  <circle cx="90" cy="102" r="6" fill="white" />
+</svg>

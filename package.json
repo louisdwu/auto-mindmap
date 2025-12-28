@@ -1,0 +1,46 @@
+{
+  "name": "auto-mindmap",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "B站字幕自动生成思维导图插件",
+  "author": "Your Name",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/bilibili-subtitle-mindmap"
+  },
+  "keywords": [
+    "chrome-extension",
+    "bilibili",
+    "mindmap",
+    "subtitle",
+    "ai"
+  ],
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "generate-icons": "node scripts/generate-icons.js",
+    "test": "vitest"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "uuid": "^9.0.0"
+  },
+  "devDependencies": {
+    "@crxjs/vite-plugin": "^2.0.0-beta.19",
+    "@types/chrome": "^0.0.246",
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "@types/uuid": "^9.0.0",
+    "@vitejs/plugin-react": "^4.0.0",
+    "autoprefixer": "^10.4.14",
+    "jsdom": "^27.4.0",
+    "postcss": "^8.4.24",
+    "sharp": "^0.34.5",
+    "tailwindcss": "^3.3.2",
+    "typescript": "^5.0.0",
+    "vite": "^4.3.9",
+    "vitest": "^1.6.0"
+  }
+}
