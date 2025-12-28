@@ -1,11 +1,12 @@
-import { PluginConfig, LLMConfig, DEFAULT_LLM_CONFIG, DEFAULT_CONFIG } from '../types/config';
+import { PluginConfig, LLMConfig, DEFAULT_LLM_CONFIG, DEFAULT_CONFIG, ExtensionState, DEFAULT_EXTENSION_STATE } from '../types/config';
 import { MindmapData } from '../types/mindmap';
 
 const STORAGE_KEYS = {
   CONFIG: 'plugin_config',
   LLM_CONFIGS: 'llm_configs',  // 存储多个 LLM 配置
   MINDMAPS: 'mindmaps',
-  LATEST_MINDMAP_ID: 'latest_mindmap_id'
+  LATEST_MINDMAP_ID: 'latest_mindmap_id',
+  EXTENSION_STATE: 'extension_state'  // 扩展运行时状态
 };
 
 export class StorageService {
@@ -337,5 +338,223 @@ export class StorageService {
       STORAGE_KEYS.MINDMAPS,
       STORAGE_KEYS.LATEST_MINDMAP_ID
     ]);
+  }
+
+  /**
+   * 获取扩展状态
+   */
+  static async getExtensionState(): Promise<ExtensionState> {
+    const result = await chrome.storage.local.get(STORAGE_KEYS.EXTENSION_STATE);
+    return result[STORAGE_KEYS.EXTENSION_STATE] || DEFAULT_EXTENSION_STATE;
+  }
+
+  /**
+   * 保存扩展状态
+   */
+  static async saveExtensionState(state: ExtensionState): Promise<void> {
+    await chrome.storage.local.set({
+      [STORAGE_KEYS.EXTENSION_STATE]: state
+    });
+  }
+
+  /**
+   * 获取暂停状态
+   */
+  static async isPaused(): Promise<boolean> {
+    const state = await this.getExtensionState();
+    return state.isPaused;
+  }
+
+  /**
+   * 设置暂停状态
+   */
+  static async setPaused(isPaused: boolean): Promise<void> {
+    const state = await this.getExtensionState();
+    await this.saveExtensionState({
+      ...state,
+      isPaused
+    });
+  }
+
+  /**
+   * 切换暂停状态
+   */
+  static async togglePaused(): Promise<boolean> {
+    const state = await this.getExtensionState();
+    const newPausedState = !state.isPaused;
+    await this.saveExtensionState({
+      ...state,
+      isPaused: newPausedState
+    });
+    return newPausedState;
+  }
+
+  /**
+   * 导出配置数据
+   * 导出所有配置，包括插件配置和 LLM 配置列表
+   */
+  static async exportConfig(): Promise<{
+    version: string;
+    exportDate: string;
+    pluginConfig: PluginConfig | null;
+    llmConfigs: LLMConfig[];
+  }> {
+    const pluginConfig = await this.getConfig();
+    const llmConfigs = await this.getLLMConfigs();
+    
+    return {
+      version: '1.0',
+      exportDate: new Date().toISOString(),
+      pluginConfig,
+      llmConfigs
+    };
+  }
+
+  /**
+   * 导入配置数据
+   * @param data 导入的配置数据
+   * @param options 导入选项
+   */
+  static async importConfig(
+    data: {
+      version?: string;
+      pluginConfig?: PluginConfig | null;
+      llmConfigs?: LLMConfig[];
+    },
+    options: {
+      overwriteExisting?: boolean;  // 是否覆盖现有配置
+      mergeLLMConfigs?: boolean;    // 是否合并 LLM 配置（而非替换）
+    } = {}
+  ): Promise<{
+    success: boolean;
+    message: string;
+    importedLLMConfigsCount: number;
+  }> {
+    const { overwriteExisting = true, mergeLLMConfigs = false } = options;
+    
+    try {
+      let importedLLMConfigsCount = 0;
+      
+      // 导入插件配置
+      if (data.pluginConfig && overwriteExisting) {
+        await this.saveConfig(data.pluginConfig);
+      }
+      
+      // 导入 LLM 配置
+      if (data.llmConfigs && data.llmConfigs.length > 0) {
+        if (mergeLLMConfigs) {
+          // 合并模式：添加不存在的配置
+          const existingConfigs = await this.getLLMConfigsRaw();
+          const existingIds = new Set(existingConfigs.map(c => c.id));
+          
+          for (const config of data.llmConfigs) {
+            if (!existingIds.has(config.id)) {
+              // 生成新 ID 避免冲突
+              const newConfig = {
+                ...config,
+                id: `imported_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+                name: config.name + ' (导入)',
+                updatedAt: Date.now()
+              };
+              existingConfigs.push(newConfig);
+              importedLLMConfigsCount++;
+            }
+          }
+          
+          await chrome.storage.sync.set({
+            [STORAGE_KEYS.LLM_CONFIGS]: existingConfigs
+          });
+        } else {
+          // 替换模式：直接替换所有配置
+          const configsToImport = data.llmConfigs.map(config => ({
+            ...config,
+            updatedAt: Date.now()
+          }));
+          
+          await chrome.storage.sync.set({
+            [STORAGE_KEYS.LLM_CONFIGS]: configsToImport
+          });
+          
+          importedLLMConfigsCount = configsToImport.length;
+          
+          // 确保选中的配置 ID 有效
+          const pluginConfig = await this.getConfig();
+          if (pluginConfig) {
+            const selectedExists = configsToImport.some(c => c.id === pluginConfig.selectedLLMConfigId);
+            if (!selectedExists && configsToImport.length > 0) {
+              await this.saveConfig({
+                ...pluginConfig,
+                selectedLLMConfigId: configsToImport[0].id
+              });
+            }
+          }
+        }
+      }
+      
+      return {
+        success: true,
+        message: '配置导入成功',
+        importedLLMConfigsCount
+      };
+    } catch (error) {
+      console.error('[StorageService] 导入配置失败:', error);
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : '导入失败',
+        importedLLMConfigsCount: 0
+      };
+    }
+  }
+
+  /**
+   * 下载配置文件
+   * 使用浏览器下载 API 将配置保存为 JSON 文件
+   */
+  static async downloadConfigFile(): Promise<void> {
+    const exportData = await this.exportConfig();
+    const jsonString = JSON.stringify(exportData, null, 2);
+    const blob = new Blob([jsonString], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    
+    const filename = `auto_mindmap_config_${new Date().toISOString().slice(0, 10)}.json`;
+    
+    // 创建下载链接并触发下载
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  /**
+   * 从文件读取配置
+   * @param file 要导入的文件
+   */
+  static async readConfigFromFile(file: File): Promise<{
+    version?: string;
+    pluginConfig?: PluginConfig | null;
+    llmConfigs?: LLMConfig[];
+  }> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      
+      reader.onload = (e) => {
+        try {
+          const content = e.target?.result as string;
+          const data = JSON.parse(content);
+          resolve(data);
+        } catch (error) {
+          reject(new Error('无法解析配置文件，请确保文件格式正确'));
+        }
+      };
+      
+      reader.onerror = () => {
+        reject(new Error('读取文件失败'));
+      };
+      
+      reader.readAsText(file);
+    });
   }
 }

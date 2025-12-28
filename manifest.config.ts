@@ -34,7 +34,7 @@ export default defineManifest({
   ],
   options_page: 'options.html',
   action: {
-    default_popup: 'options.html',
+    default_title: '点击暂停/恢复自动思维导图',
     default_icon: {
       16: 'icons/icon16.png',
       32: 'icons/icon32.png',

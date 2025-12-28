@@ -90,6 +90,18 @@ function scheduleDownload(videoUrl: string) {
   
   // 延迟执行，合并短时间内的多次请求
   pendingTimeout = setTimeout(async () => {
+    // 首先检查是否处于暂停状态
+    try {
+      const isPaused = await StorageService.isPaused();
+      if (isPaused) {
+        console.log('[Content] 插件已暂停，跳过自动生成思维导图');
+        pendingUrls.clear();
+        return;
+      }
+    } catch (error) {
+      console.error('[Content] Failed to check pause state:', error);
+    }
+
     // Check for exclusion keywords
     try {
       const config = await StorageService.getConfig();

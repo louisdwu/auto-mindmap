@@ -119,3 +119,12 @@ export const DEFAULT_CONFIG: PluginConfig = {
   },
   exclusionKeywords: []
 };
+
+// 扩展状态（用于存储运行时状态，如暂停状态）
+export interface ExtensionState {
+  isPaused: boolean;
+}
+
+export const DEFAULT_EXTENSION_STATE: ExtensionState = {
+  isPaused: false
+};

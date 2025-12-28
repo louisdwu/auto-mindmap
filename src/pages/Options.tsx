@@ -12,6 +12,7 @@ function Options() {
   const [isAddingNew, setIsAddingNew] = useState(false);
   const [saved, setSaved] = useState(false);
   const [newKeyword, setNewKeyword] = useState('');
+  const [importStatus, setImportStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
   useEffect(() => {
     loadConfig();
@@ -180,6 +181,55 @@ function Options() {
       ...config,
       exclusionKeywords: keywords.filter(k => k !== keyword)
     });
+  };
+
+  const handleExportConfig = async () => {
+    try {
+      await StorageService.downloadConfigFile();
+      setImportStatus({ type: 'success', message: '配置已导出' });
+      setTimeout(() => setImportStatus(null), 3000);
+    } catch (error) {
+      console.error('导出配置失败:', error);
+      setImportStatus({ type: 'error', message: '导出失败' });
+      setTimeout(() => setImportStatus(null), 3000);
+    }
+  };
+
+  const handleImportConfig = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    try {
+      const data = await StorageService.readConfigFromFile(file);
+      const result = await StorageService.importConfig(data, {
+        overwriteExisting: true,
+        mergeLLMConfigs: false
+      });
+
+      if (result.success) {
+        // 重新加载配置
+        await loadConfig();
+        await loadLLMConfigs();
+        setImportStatus({
+          type: 'success',
+          message: `配置导入成功，共导入 ${result.importedLLMConfigsCount} 个 LLM 配置`
+        });
+      } else {
+        setImportStatus({ type: 'error', message: result.message });
+      }
+    } catch (error) {
+      console.error('导入配置失败:', error);
+      setImportStatus({
+        type: 'error',
+        message: error instanceof Error ? error.message : '导入失败'
+      });
+    }
+
+    // 清除文件输入
+    event.target.value = '';
+    
+    // 3秒后清除状态
+    setTimeout(() => setImportStatus(null), 3000);
   };
 
   return (
@@ -735,6 +785,95 @@ function Options() {
           清除所有已下载的字幕和思维导图数据
         </p>
       </div>
+
+      {/* 配置导出/导入 */}
+      <section style={{ marginTop: '30px', paddingTop: '20px', borderTop: '1px solid #e5e7eb' }}>
+        <h2 style={{ marginBottom: '15px' }}>配置备份与恢复</h2>
+        
+        <div style={{ display: 'flex', gap: '15px', alignItems: 'flex-start', flexWrap: 'wrap' }}>
+          {/* 导出按钮 */}
+          <div>
+            <button
+              onClick={handleExportConfig}
+              style={{
+                padding: '10px 20px',
+                background: '#8b5cf6',
+                color: 'white',
+                border: 'none',
+                borderRadius: '6px',
+                fontSize: '14px',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px'
+              }}
+            >
+              <span>📤</span> 导出配置
+            </button>
+            <p style={{ fontSize: '12px', color: '#6b7280', marginTop: '5px' }}>
+              将所有配置导出为 JSON 文件
+            </p>
+          </div>
+          
+          {/* 导入按钮 */}
+          <div>
+            <label
+              style={{
+                padding: '10px 20px',
+                background: '#06b6d4',
+                color: 'white',
+                border: 'none',
+                borderRadius: '6px',
+                fontSize: '14px',
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px'
+              }}
+            >
+              <span>📥</span> 导入配置
+              <input
+                type="file"
+                accept=".json"
+                onChange={handleImportConfig}
+                style={{ display: 'none' }}
+              />
+            </label>
+            <p style={{ fontSize: '12px', color: '#6b7280', marginTop: '5px' }}>
+              从 JSON 文件恢复配置
+            </p>
+          </div>
+        </div>
+
+        {/* 导入状态提示 */}
+        {importStatus && (
+          <div
+            style={{
+              marginTop: '15px',
+              padding: '12px 16px',
+              borderRadius: '6px',
+              backgroundColor: importStatus.type === 'success' ? '#dcfce7' : '#fee2e2',
+              color: importStatus.type === 'success' ? '#166534' : '#991b1b',
+              fontSize: '14px'
+            }}
+          >
+            {importStatus.type === 'success' ? '✓' : '✗'} {importStatus.message}
+          </div>
+        )}
+        
+        <div style={{
+          marginTop: '15px',
+          padding: '12px',
+          background: '#f3f4f6',
+          borderRadius: '6px',
+          border: '1px solid #e5e7eb'
+        }}>
+          <p style={{ fontSize: '13px', color: '#4b5563', margin: 0 }}>
+            <strong>提示：</strong>导出的配置文件包含所有 LLM 配置（包括 API 密钥）和插件设置。
+            请妥善保管导出的文件，避免泄露敏感信息。
+          </p>
+        </div>
+      </section>
 
     </div>
   );

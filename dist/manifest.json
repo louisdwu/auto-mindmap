@@ -1,6 +1,6 @@
 {
-  "name": "B站字幕思维导图",
-  "description": "自动下载B站视频字幕并生成思维导图",
+  "name": "自动思维导图",
+  "description": "自动使用视频字幕并生成思维导图",
   "version": "1.0.0",
   "manifest_version": 3,
   "permissions": [
@@ -22,7 +22,7 @@
   "content_scripts": [
     {
       "js": [
-        "assets/index.ts-loader-0d071529.js"
+        "assets/index.ts-loader-0a3edcb3.js"
       ],
       "matches": [
         "https://*.bilibili.com/*"
@@ -35,7 +35,7 @@
   ],
   "options_page": "options.html",
   "action": {
-    "default_popup": "options.html",
+    "default_title": "点击暂停/恢复自动思维导图",
     "default_icon": {
       "16": "icons/icon16.png",
       "32": "icons/icon32.png",
@@ -55,9 +55,9 @@
         "https://*.bilibili.com/*"
       ],
       "resources": [
-        "assets/storageService-59ff9c65.js",
+        "assets/storageService-b18f33a8.js",
         "assets/client-a68773c9.js",
-        "assets/index.ts-4f32b85f.js"
+        "assets/index.ts-0ed20017.js"
       ],
       "use_dynamic_url": false
     }
