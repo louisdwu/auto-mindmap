@@ -348,7 +348,6 @@
 .mm-node[data-level="1"] {
   font-size: 18px;
   font-weight: 500;
-  color: #333;
   padding: 6px 14px;
 }
 
@@ -356,7 +355,6 @@
 .mm-node[data-level="2"] {
   font-size: 16px;
   font-weight: 500;
-  color: #444;
   padding: 5px 12px;
 }
 
@@ -364,7 +362,6 @@
 .mm-node[data-level="3"] {
   font-size: 14px;
   font-weight: 400;
-  color: #555;
   padding: 4px 10px;
 }
 
@@ -374,7 +371,6 @@
 .mm-node[data-level="6"] {
   font-size: 13px;
   font-weight: 400;
-  color: #666;
   padding: 4px 10px;
 }
 
@@ -388,17 +384,17 @@
   border-radius: 1px;
 }
 
-/* 分支颜色 */
-.branch-0 { color: #b3005b; }
-.branch-1 { color: #ff80cc; }
-.branch-2 { color: #2b00b3; }
-.branch-3 { color: #2b00b3; }
-.branch-4 { color: #cc80ff; }
+/* 分支颜色 - 同一分支内各层级颜色保持一致 */
+.mm-node.branch-0:not(.root) { color: #b3005b; }
+.mm-node.branch-1:not(.root) { color: #ff80cc; }
+.mm-node.branch-2:not(.root) { color: #2b00b3; }
+.mm-node.branch-3:not(.root) { color: #5c3daf; }
+.mm-node.branch-4:not(.root) { color: #cc80ff; }
 
 .mm-node.branch-0 .mm-node-underline { background: #b3005b; }
 .mm-node.branch-1 .mm-node-underline { background: #ff80cc; }
 .mm-node.branch-2 .mm-node-underline { background: #2b00b3; }
-.mm-node.branch-3 .mm-node-underline { background: #2b00b3; }
+.mm-node.branch-3 .mm-node-underline { background: #5c3daf; }
 .mm-node.branch-4 .mm-node-underline { background: #cc80ff; }
 
 /* 移除节点前的圆点相关样式 */

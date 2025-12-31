@@ -55,14 +55,15 @@ export class TaskManager {
   /**
    * 创建下载字幕任务
    */
-  async createDownloadTask(videoUrl: string): Promise<Task> {
+  async createDownloadTask(videoUrl: string, tabId?: number): Promise<Task> {
     const task: Task = {
       id: uuidv4(),
       type: 'download_subtitle',
       status: 'pending',
       data: { videoUrl },
       createdAt: Date.now(),
-      updatedAt: Date.now()
+      updatedAt: Date.now(),
+      tabId
     };
 
     this.tasks.set(task.id, task);
@@ -75,14 +76,15 @@ export class TaskManager {
   /**
    * 创建生成思维导图任务
    */
-  async createMindmapTask(videoUrl: string, subtitleText: string, videoTitle: string): Promise<Task> {
+  async createMindmapTask(videoUrl: string, subtitleText: string, videoTitle: string, tabId?: number): Promise<Task> {
     const task: Task = {
       id: uuidv4(),
       type: 'generate_mindmap',
       status: 'pending',
       data: { videoUrl, subtitleText, videoTitle },
       createdAt: Date.now(),
-      updatedAt: Date.now()
+      updatedAt: Date.now(),
+      tabId
     };
 
     this.tasks.set(task.id, task);
@@ -156,8 +158,8 @@ export class TaskManager {
 
     task.result = result;
 
-    // 下载完成后，自动创建生成思维导图任务
-    await this.createMindmapTask(videoUrl, result.subtitleText, result.videoTitle);
+    // 下载完成后，自动创建生成思维导图任务，传递原始任务的 tabId
+    await this.createMindmapTask(videoUrl, result.subtitleText, result.videoTitle, task.tabId);
   }
 
   /**
@@ -201,8 +203,8 @@ export class TaskManager {
 
     task.result = mindmapData;
 
-    // 通知content script
-    this.notifyContentScript(mindmapData);
+    // 通知content script，传递任务的 tabId
+    this.notifyContentScript(mindmapData, task.tabId);
   }
 
   /**
@@ -236,31 +238,59 @@ export class TaskManager {
   /**
    * 通知content script有新的思维导图
    */
-  private async notifyContentScript(mindmapData: any) {
-    // 获取当前活动的tab
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-
-    if (tab && tab.id) {
+  private async notifyContentScript(mindmapData: any, tabId?: number) {
+    // 如果有 tabId，直接发送到该标签页
+    if (tabId) {
       try {
-        await chrome.tabs.sendMessage(tab.id, {
+        await chrome.tabs.sendMessage(tabId, {
           type: 'MINDMAP_GENERATED',
           payload: {
             mindmapId: mindmapData.id,
             mindmapData
           }
         });
-        console.log('[TaskManager] 已通知 content script 思维导图生成完成');
+        console.log('[TaskManager] 已通知 content script 思维导图生成完成 (tabId:', tabId, ')');
+        return;
       } catch (error: any) {
-        // 忽略 "Receiving end does not exist" 错误
-        // 这通常发生在用户切换到其他标签页或 content script 尚未加载时
-        // 思维导图数据已保存在 storage 中，用户刷新页面后仍可获取
-        if (error?.message?.includes('Receiving end does not exist')) {
-          console.log('[TaskManager] Content script 未就绪，思维导图已保存到存储中');
+        // 如果目标标签页不存在或已关闭，忽略错误
+        if (error?.message?.includes('Receiving end does not exist') ||
+            error?.message?.includes('No tab with id')) {
+          console.log('[TaskManager] 目标标签页不可用，思维导图已保存到存储中');
         } else {
           console.error('[TaskManager] 通知 content script 失败:', error);
         }
+        return;
       }
     }
+
+    // 如果没有 tabId（兼容旧任务），回退到查找匹配 URL 的标签页
+    const videoUrl = mindmapData.videoUrl;
+    if (videoUrl) {
+      try {
+        const tabs = await chrome.tabs.query({});
+        for (const tab of tabs) {
+          if (tab.id && tab.url && tab.url.includes(videoUrl.split('?')[0])) {
+            try {
+              await chrome.tabs.sendMessage(tab.id, {
+                type: 'MINDMAP_GENERATED',
+                payload: {
+                  mindmapId: mindmapData.id,
+                  mindmapData
+                }
+              });
+              console.log('[TaskManager] 已通知匹配URL的标签页 (tabId:', tab.id, ')');
+              return;
+            } catch {
+              // 继续尝试其他标签页
+            }
+          }
+        }
+      } catch (error) {
+        console.error('[TaskManager] 查找匹配标签页失败:', error);
+      }
+    }
+
+    console.log('[TaskManager] 未找到可通知的标签页，思维导图已保存到存储中');
   }
 
   /**

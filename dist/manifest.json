@@ -22,14 +22,14 @@
   "content_scripts": [
     {
       "js": [
-        "assets/index.ts-loader-0a3edcb3.js"
+        "assets/index.ts-loader-fad7f413.js"
       ],
       "matches": [
         "https://*.bilibili.com/*"
       ],
       "run_at": "document_idle",
       "css": [
-        "assets/index-63ee10db.css"
+        "assets/index-01fb3107.css"
       ]
     }
   ],
@@ -57,7 +57,7 @@
       "resources": [
         "assets/storageService-b18f33a8.js",
         "assets/client-a68773c9.js",
-        "assets/index.ts-0ed20017.js"
+        "assets/index.ts-f63d5424.js"
       ],
       "use_dynamic_url": false
     }

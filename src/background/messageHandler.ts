@@ -8,8 +8,8 @@ export class MessageHandler {
   }
 
   private init() {
-    chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-      this.handleMessage(message)
+    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+      this.handleMessage(message, sender)
         .then(sendResponse)
         .catch(error => {
           console.error('[MessageHandler] Error:', error);
@@ -21,14 +21,17 @@ export class MessageHandler {
   }
 
   private async handleMessage(
-    message: ExtensionMessage
+    message: ExtensionMessage,
+    sender?: chrome.runtime.MessageSender
   ): Promise<any> {
+    const tabId = sender?.tab?.id;
+
     switch (message?.type) {
       case 'DOWNLOAD_SUBTITLE':
-        return await this.handleDownloadSubtitle(message.payload);
-      
+        return await this.handleDownloadSubtitle(message.payload, tabId);
+
       case 'GENERATE_MINDMAP_DIRECT':
-        return await this.handleGenerateMindmapDirect(message.payload);
+        return await this.handleGenerateMindmapDirect(message.payload, tabId);
 
       case 'GET_LATEST_MINDMAP':
         return await this.handleGetLatestMindmap();
@@ -48,8 +51,8 @@ export class MessageHandler {
     }
   }
 
-  private async handleDownloadSubtitle(payload: { videoUrl: string }) {
-    const task = await this.taskManager.createDownloadTask(payload.videoUrl);
+  private async handleDownloadSubtitle(payload: { videoUrl: string }, tabId?: number) {
+    const task = await this.taskManager.createDownloadTask(payload.videoUrl, tabId);
     return { taskId: task.id };
   }
 
@@ -97,8 +100,8 @@ export class MessageHandler {
     return { task };
   }
 
-  private async handleGenerateMindmapDirect(payload: { videoUrl: string, subtitleText: string, videoTitle: string }) {
-    const task = await this.taskManager.createMindmapTask(payload.videoUrl, payload.subtitleText, payload.videoTitle);
+  private async handleGenerateMindmapDirect(payload: { videoUrl: string, subtitleText: string, videoTitle: string }, tabId?: number) {
+    const task = await this.taskManager.createMindmapTask(payload.videoUrl, payload.subtitleText, payload.videoTitle, tabId);
     return { taskId: task.id };
   }
 }

@@ -22,4 +22,6 @@ export interface Task {
   error?: string;
   createdAt: number;
   updatedAt: number;
+  /** 发起任务的标签页ID，用于将结果发送回正确的标签页 */
+  tabId?: number;
 }

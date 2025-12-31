@@ -72,8 +72,30 @@ function FloatingBallApp() {
       if (message.type === 'MINDMAP_GENERATED') {
         const data = message.payload?.mindmapData;
         if (data) {
-          setMindmapData(data);
-          setShowNotification(true);
+          // 验证思维导图是否属于当前视频，避免其他标签页的思维导图覆盖当前状态
+          const currentUrl = window.location.href;
+          const mindmapVideoUrl = data.videoUrl;
+
+          // 比较视频URL（去掉可能变化的参数进行比较）
+          const normalizeUrl = (url: string) => {
+            try {
+              const u = new URL(url);
+              // 对于 B站，主要比较 bvid/avid
+              if (u.hostname.includes('bilibili.com')) {
+                return u.pathname;
+              }
+              return u.origin + u.pathname;
+            } catch {
+              return url;
+            }
+          };
+
+          if (normalizeUrl(currentUrl) === normalizeUrl(mindmapVideoUrl)) {
+            setMindmapData(data);
+            setShowNotification(true);
+          } else {
+            console.log('[FloatingBall] 收到其他视频的思维导图通知，忽略');
+          }
         }
         fetchCurrentTask();
       }
