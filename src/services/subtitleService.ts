@@ -139,13 +139,18 @@ export class SubtitleService {
   }
 
   /**
-   * 完整的字幕下载流程
+   * 完整的字幕下载流程（仅支持 Bilibili）
+   * YouTube 使用拦截器方式获取字幕，不通过此方法
    */
   static async downloadChineseSubtitle(videoUrl: string): Promise<{
     videoUrl: string;
     videoTitle: string;
     subtitleText: string;
   }> {
+    if (videoUrl.includes('youtube.com')) {
+      throw new Error('YouTube 字幕请等待视频播放自动获取');
+    }
+
     // 1. 提取视频ID
     const videoId = this.extractVideoId(videoUrl);
     if (!videoId) {

@@ -154,6 +154,13 @@ export class TaskManager {
   private async executeDownloadTask(task: Task) {
     const { videoUrl } = task.data;
 
+    // 如果是 YouTube 视频，跳过下载步骤（因为已经通过 GENERATE_MINDMAP_DIRECT 处理）
+    if (videoUrl.includes('youtube.com') || videoUrl.includes('youtu.be')) {
+      console.log('[TaskManager] YouTube video detected, skipping manual download task.');
+      // 标记为完成，但不创建后续任务，因为 YouTube 流程是独立的
+      return;
+    }
+
     const result = await SubtitleService.downloadChineseSubtitle(videoUrl);
 
     task.result = result;

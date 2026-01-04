@@ -11,6 +11,7 @@
   ],
   "host_permissions": [
     "https://*.bilibili.com/*",
+    "https://www.youtube.com/*",
     "https://api.bilibili.com/*",
     "https://api.xiaomimimo.com/*",
     "<all_urls>"
@@ -22,15 +23,39 @@
   "content_scripts": [
     {
       "js": [
-        "assets/index.ts-loader-fad7f413.js"
+        "assets/index.ts-loader-e5bf2ae1.js"
       ],
       "matches": [
-        "https://*.bilibili.com/*"
+        "https://*.bilibili.com/*",
+        "https://www.youtube.com/*"
       ],
       "run_at": "document_idle",
       "css": [
         "assets/index-01fb3107.css"
       ]
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "matches": [
+        "https://www.youtube.com/*"
+      ],
+      "resources": [
+        "src/content/youtubeInterceptor.js"
+      ],
+      "use_dynamic_url": false
+    },
+    {
+      "matches": [
+        "https://*.bilibili.com/*",
+        "https://www.youtube.com/*"
+      ],
+      "resources": [
+        "assets/storageService-b18f33a8.js",
+        "assets/client-a68773c9.js",
+        "assets/index.ts-8ef00560.js"
+      ],
+      "use_dynamic_url": false
     }
   ],
   "options_page": "options.html",
@@ -48,18 +73,5 @@
     "32": "icons/icon32.png",
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
-  },
-  "web_accessible_resources": [
-    {
-      "matches": [
-        "https://*.bilibili.com/*"
-      ],
-      "resources": [
-        "assets/storageService-b18f33a8.js",
-        "assets/client-a68773c9.js",
-        "assets/index.ts-f63d5424.js"
-      ],
-      "use_dynamic_url": false
-    }
-  ]
+  }
 }

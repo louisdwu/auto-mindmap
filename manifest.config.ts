@@ -17,6 +17,7 @@ export default defineManifest({
   ],
   host_permissions: [
     'https://*.bilibili.com/*',
+    'https://www.youtube.com/*',
     'https://api.bilibili.com/*',
     'https://api.xiaomimimo.com/*',
     "<all_urls>"
@@ -27,9 +28,18 @@ export default defineManifest({
   },
   content_scripts: [
     {
-      matches: ['https://*.bilibili.com/*'],
+      matches: [
+        'https://*.bilibili.com/*',
+        'https://www.youtube.com/*'
+      ],
       js: ['src/content/index.ts'],
       run_at: 'document_idle'
+    }
+  ],
+  web_accessible_resources: [
+    {
+      resources: ['src/content/youtubeInterceptor.js'],
+      matches: ['https://www.youtube.com/*']
     }
   ],
   options_page: 'options.html',

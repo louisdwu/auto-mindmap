@@ -1,9 +1,11 @@
 import { StorageService } from '../services/storageService';
+import { YouTubeUtils } from '../utils/youtubeUtils';
 
 // 防止重复请求的状态
 let pendingUrls = new Set<string>();
 let processedUrls = new Set<string>();
 let pendingTimeout: ReturnType<typeof setTimeout> | null = null;
+let processedYouTubeUrls = new Set<string>();
 
 // 提取视频ID用于去重
 function extractVideoId(url: string): string | null {
@@ -17,6 +19,19 @@ function extractVideoId(url: string): string | null {
 }
 
 export function initEventListener() {
+  // 监听 YouTube 字幕消息
+  window.addEventListener('message', async (event) => {
+    if (event.data.type === 'YOUTUBE_SUBTITLE_DATA') {
+      // 检查是否是当前视频的有效字幕请求
+      const payload = event.data.payload;
+      if (payload && payload.url && YouTubeUtils.isSubtitleUrl(payload.url)) {
+        console.log('[Content] Received YouTube subtitle data');
+        // 使用防抖处理 YouTube 字幕
+        debouncedHandleYouTubeSubtitle(payload);
+      }
+    }
+  });
+
   // 检测当前页面是否是B站视频播放页，如果是则自动开始
   if (isBilibiliVideoPage(window.location.href)) {
     console.log('[Content] Detected Bilibili video page, auto-starting...');
@@ -160,5 +175,86 @@ async function downloadSubtitle(videoUrl: string) {
     console.log('[Content] Download task created:', response.taskId);
   } catch (error) {
     console.error('[Content] Download failed:', error);
+  }
+}
+
+// YouTube 字幕处理防抖
+let youtubeSubtitleTimeout: ReturnType<typeof setTimeout> | null = null;
+const YOUTUBE_DEBOUNCE_TIME = 2000;
+
+function debouncedHandleYouTubeSubtitle(payload: { url: string, data: any }) {
+  if (youtubeSubtitleTimeout) {
+    clearTimeout(youtubeSubtitleTimeout);
+  }
+
+  youtubeSubtitleTimeout = setTimeout(() => {
+    handleYouTubeSubtitle(payload);
+  }, YOUTUBE_DEBOUNCE_TIME);
+}
+
+// 处理 YouTube 字幕数据
+async function handleYouTubeSubtitle(payload: { url: string, data: any }) {
+  try {
+    const currentVideoUrl = window.location.href;
+    const videoId = YouTubeUtils.extractVideoId(currentVideoUrl);
+    
+    if (!videoId) {
+      console.log('[Content] Cannot extract video ID from current URL');
+      return;
+    }
+
+    // 检查是否已经处理过该视频
+    if (processedYouTubeUrls.has(videoId)) {
+      console.log('[Content] YouTube video already processed:', videoId);
+      return;
+    }
+
+    const videoTitle = document.title.replace(' - YouTube', '');
+    
+    // 构造请求完整字幕的 URL
+    // 去除 'sq' 参数（分片序号），强制 'fmt=json3'
+    let fullSubtitleUrl = payload.url;
+    try {
+      const urlObj = new URL(payload.url);
+      urlObj.searchParams.delete('sq');
+      urlObj.searchParams.set('fmt', 'json3');
+      fullSubtitleUrl = urlObj.toString();
+      console.log('[Content] Constructed full subtitle URL:', fullSubtitleUrl);
+    } catch (e) {
+      console.warn('[Content] Failed to construct full subtitle URL, using original:', e);
+    }
+
+    // 重新请求完整字幕
+    console.log('[Content] Fetching full subtitle...');
+    const response = await fetch(fullSubtitleUrl);
+    const fullData = await response.json();
+
+    // 解析字幕
+    const subtitleText = YouTubeUtils.parseSubtitle(fullData);
+
+    if (!subtitleText) {
+        console.log('[Content] Parsed subtitle text is empty');
+        return;
+    }
+
+    console.log('[Content] Parsed YouTube subtitle, length:', subtitleText.length);
+
+    // 标记为已处理
+    processedYouTubeUrls.add(videoId);
+
+    // 直接触发生成思维导图
+    const responseMsg = await chrome.runtime.sendMessage({
+      type: 'GENERATE_MINDMAP_DIRECT',
+      payload: {
+        videoUrl: currentVideoUrl,
+        subtitleText: subtitleText,
+        videoTitle: videoTitle
+      }
+    });
+    
+    console.log('[Content] Mindmap generation task created:', responseMsg.taskId);
+
+  } catch (error) {
+    console.error('[Content] Error handling YouTube subtitle:', error);
   }
 }

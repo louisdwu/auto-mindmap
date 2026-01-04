@@ -5,6 +5,14 @@ import './styles.css';
 // 初始化
 console.log('[Content] Script loaded');
 
+// 注入 YouTube 拦截器
+if (window.location.hostname.includes('youtube.com')) {
+  const script = document.createElement('script');
+  script.src = chrome.runtime.getURL('src/content/youtubeInterceptor.js');
+  (document.head || document.documentElement).appendChild(script);
+  console.log('[Content] YouTube interceptor injected');
+}
+
 // 初始化事件监听
 initEventListener();
 
