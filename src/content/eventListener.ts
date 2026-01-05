@@ -195,6 +195,13 @@ function debouncedHandleYouTubeSubtitle(payload: { url: string, data: any }) {
 // 处理 YouTube 字幕数据
 async function handleYouTubeSubtitle(payload: { url: string, data: any }) {
   try {
+    // 检查是否暂停
+    const isPaused = await StorageService.isPaused();
+    if (isPaused) {
+      console.log('[Content] 插件已暂停，跳过 YouTube 字幕处理');
+      return;
+    }
+
     const currentVideoUrl = window.location.href;
     const videoId = YouTubeUtils.extractVideoId(currentVideoUrl);
     
