@@ -106,6 +106,7 @@ export const DEFAULT_CONFIG: PluginConfig = {
 4. 保持逻辑层次清晰
 5. 使用简洁的语言
 6. 不要使用任何特殊语法或Mermaid
+7. 重要：在节点文本内容中，不要使用Markdown格式符号（如 *、**、\` 等），只保留纯文本
 
 字幕内容：
 {subtitle_content}

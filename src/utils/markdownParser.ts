@@ -16,6 +16,30 @@ export interface INodeData {
 }
 
 /**
+ * 清理文本中的Markdown格式符号
+ * 去除粗体、斜体、代码等Markdown格式标记
+ */
+function cleanMarkdownFormatting(text: string): string {
+  let cleaned = text;
+  
+  // 移除粗体标记 (**text** 或 __text__)
+  cleaned = cleaned.replace(/\*\*([^*]+)\*\*/g, '$1');
+  cleaned = cleaned.replace(/__([^_]+)__/g, '$1');
+  
+  // 移除斜体标记 (*text* 或 _text_)
+  cleaned = cleaned.replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, '$1');
+  cleaned = cleaned.replace(/(?<!_)_([^_]+)_(?!_)/g, '$1');
+  
+  // 移除行内代码标记 (`text`)
+  cleaned = cleaned.replace(/`([^`]+)`/g, '$1');
+  
+  // 移除删除线标记 (~~text~~)
+  cleaned = cleaned.replace(/~~([^~]+)~~/g, '$1');
+  
+  return cleaned.trim();
+}
+
+/**
  * 解析 Markdown 字符串为树形结构
  * 支持多种格式：# 标题、列表项、缩进
  * @param markdown Markdown 格式的字符串
@@ -41,7 +65,7 @@ export function parseMarkdown(markdown: string): INodeData {
 
     const headingMatch = trimmedLine.match(/^(#{1,6})\s+(.*)$/);
     if (headingMatch) {
-      const text = headingMatch[2].trim().replace(/\s*-\s*$/, '');
+      const text = cleanMarkdownFormatting(headingMatch[2].trim().replace(/\s*-\s*$/, ''));
       if (text) {
         // 使用第一个 # 标题作为中心主题
         rootNode = {
@@ -72,7 +96,7 @@ export function parseMarkdown(markdown: string): INodeData {
     const headingMatch = trimmedLine.match(/^(#{1,6})\s+(.*)$/);
     if (headingMatch) {
       const level = headingMatch[1].length;
-      const text = headingMatch[2].trim().replace(/\s*-\s*$/, '');
+      const text = cleanMarkdownFormatting(headingMatch[2].trim().replace(/\s*-\s*$/, ''));
 
       if (text) {
         // 如果是第一个 # 标题，跳过（已作为中心主题）
@@ -91,7 +115,7 @@ export function parseMarkdown(markdown: string): INodeData {
     // 2. 匹配列表项格式（- 或 *）
     const listMatch = trimmedLine.match(/^[-*]\s+(.*)$/);
     if (listMatch) {
-      const text = listMatch[1].trim();
+      const text = cleanMarkdownFormatting(listMatch[1].trim());
 
       // 计算缩进层级（每2个空格或1个tab算一级）
       const indentLevel = calculateIndentLevel(line);
@@ -112,7 +136,8 @@ export function parseMarkdown(markdown: string): INodeData {
       if (indentLevel > 0 && trimmedLine) {
         // 纯文本的层级 = 基础层级 + 缩进层级
         const actualLevel = currentBaseLevel + indentLevel;
-        processNode(trimmedLine, actualLevel, stack, nodeIdCounter++);
+        const text = cleanMarkdownFormatting(trimmedLine);
+        processNode(text, actualLevel, stack, nodeIdCounter++);
       }
     }
   }
@@ -157,7 +182,7 @@ function processNode(
   // 创建新节点
   const newNode: INodeData = {
     id: `node-${idCounter}`,
-    text: text,
+    text: cleanMarkdownFormatting(text),
     level: level,
     children: [],
     expanded: false

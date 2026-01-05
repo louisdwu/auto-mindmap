@@ -167,6 +167,26 @@ async function downloadSubtitle(videoUrl: string) {
   console.log('[Content] Downloading subtitle for:', videoUrl);
   
   try {
+    // 首先检查是否启用缓存，以及是否已有缓存的思维导图
+    const config = await StorageService.getConfig();
+    if (config?.settings.enableCache) {
+      console.log('[Content] 缓存已启用，检查是否有已缓存的思维导图...');
+      const cachedResponse = await chrome.runtime.sendMessage({
+        type: 'GET_LATEST_MINDMAP_BY_URL',
+        payload: { videoUrl }
+      });
+      
+      if (cachedResponse && cachedResponse.mindmap) {
+        console.log('[Content] 找到缓存的思维导图，跳过下载字幕:', cachedResponse.mindmap.id);
+        // 触发通知，告知用户有已缓存的思维导图
+        window.dispatchEvent(new CustomEvent('mindmap-generated', {
+          detail: { mindmapData: cachedResponse.mindmap }
+        }));
+        return;
+      }
+      console.log('[Content] 没有找到缓存的思维导图，继续下载字幕...');
+    }
+    
     const response = await chrome.runtime.sendMessage({
       type: 'DOWNLOAD_SUBTITLE',
       payload: { videoUrl }
@@ -214,6 +234,28 @@ async function handleYouTubeSubtitle(payload: { url: string, data: any }) {
     if (processedYouTubeUrls.has(videoId)) {
       console.log('[Content] YouTube video already processed:', videoId);
       return;
+    }
+
+    // 检查是否启用缓存，以及是否已有缓存的思维导图
+    const config = await StorageService.getConfig();
+    if (config?.settings.enableCache) {
+      console.log('[Content] YouTube: 缓存已启用，检查是否有已缓存的思维导图...');
+      const cachedResponse = await chrome.runtime.sendMessage({
+        type: 'GET_LATEST_MINDMAP_BY_URL',
+        payload: { videoUrl: currentVideoUrl }
+      });
+      
+      if (cachedResponse && cachedResponse.mindmap) {
+        console.log('[Content] YouTube: 找到缓存的思维导图，跳过生成:', cachedResponse.mindmap.id);
+        // 标记为已处理，避免后续重复检查
+        processedYouTubeUrls.add(videoId);
+        // 触发通知，告知用户有已缓存的思维导图
+        window.dispatchEvent(new CustomEvent('mindmap-generated', {
+          detail: { mindmapData: cachedResponse.mindmap }
+        }));
+        return;
+      }
+      console.log('[Content] YouTube: 没有找到缓存的思维导图，继续生成...');
     }
 
     const videoTitle = document.title.replace(' - YouTube', '');

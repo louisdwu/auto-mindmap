@@ -52,6 +52,16 @@ export class MessageHandler {
   }
 
   private async handleDownloadSubtitle(payload: { videoUrl: string }, tabId?: number) {
+    // 双重保险：在后台也检查缓存
+    const config = await StorageService.getConfig();
+    if (config?.settings.enableCache) {
+      const cachedMindmap = await StorageService.getLatestMindmapByUrl(payload.videoUrl);
+      if (cachedMindmap) {
+        console.log('[MessageHandler] 找到缓存的思维导图，跳过下载字幕:', cachedMindmap.id);
+        return { taskId: null, cached: true, mindmap: cachedMindmap };
+      }
+    }
+    
     const task = await this.taskManager.createDownloadTask(payload.videoUrl, tabId);
     return { taskId: task.id };
   }
@@ -101,6 +111,16 @@ export class MessageHandler {
   }
 
   private async handleGenerateMindmapDirect(payload: { videoUrl: string, subtitleText: string, videoTitle: string }, tabId?: number) {
+    // 双重保险：在后台也检查缓存
+    const config = await StorageService.getConfig();
+    if (config?.settings.enableCache) {
+      const cachedMindmap = await StorageService.getLatestMindmapByUrl(payload.videoUrl);
+      if (cachedMindmap) {
+        console.log('[MessageHandler] 找到缓存的思维导图，跳过生成:', cachedMindmap.id);
+        return { taskId: null, cached: true, mindmap: cachedMindmap };
+      }
+    }
+    
     const task = await this.taskManager.createMindmapTask(payload.videoUrl, payload.subtitleText, payload.videoTitle, tabId);
     return { taskId: task.id };
   }
