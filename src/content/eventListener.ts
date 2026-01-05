@@ -258,7 +258,8 @@ async function handleYouTubeSubtitle(payload: { url: string, data: any }) {
       console.log('[Content] YouTube: 没有找到缓存的思维导图，继续生成...');
     }
 
-    const videoTitle = document.title.replace(' - YouTube', '');
+    let videoTitle = document.title.replace(' - YouTube', '');
+    videoTitle = videoTitle.replace(/^\(\d+\)\s*/, '');
     
     // 构造请求完整字幕的 URL
     // 去除 'sq' 参数（分片序号），强制 'fmt=json3'

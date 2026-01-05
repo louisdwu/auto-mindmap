@@ -31,6 +31,7 @@ export const YouTubeUtils = {
       .map((event: any) => event.segs.map((seg: any) => seg.utf8).join(''))
       .join('\n')
       .replace(/\n+/g, '\n')
+      .replace(/^\s*_1__\s*/, '')
       .trim();
   },
 

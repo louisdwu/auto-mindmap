@@ -292,19 +292,39 @@ export class StorageService {
       })));
     }
     
-    // 提取视频ID（从URL中获取 /video/BVxxx 或 /video/avxxx）
+    // 提取视频ID（支持 Bilibili 和 YouTube）
     const extractVideoId = (url: string): string | null => {
       try {
+        if (!url) return null;
         const urlObj = new URL(url);
-        const match = urlObj.pathname.match(/\/video\/(BV[\w]+|av\d+)/i);
-        return match ? match[1] : null;
+        
+        // Bilibili: /video/BVxxx 或 /video/avxxx
+        const biliMatch = urlObj.pathname.match(/\/video\/(BV[\w]+|av\d+)/i);
+        if (biliMatch) return biliMatch[1];
+        
+        // YouTube
+        if (urlObj.hostname.includes('youtube.com') || urlObj.hostname.includes('youtu.be')) {
+          // 优先尝试获取 v 参数
+          const v = urlObj.searchParams.get('v');
+          if (v) return v;
+          
+          // 处理 youtu.be/VIDEO_ID 或 youtube.com/embed/VIDEO_ID
+          const pathParts = urlObj.pathname.split('/').filter(Boolean);
+          if (pathParts.length > 0) {
+            // 对于 youtu.be，pathname 就是 /VIDEO_ID
+            if (urlObj.hostname === 'youtu.be') return pathParts[0];
+            // 对于 embed，pathname 是 /embed/VIDEO_ID
+            if (pathParts[0] === 'embed') return pathParts[1];
+          }
+        }
+
+        return null;
       } catch {
         return null;
       }
     };
 
     const currentVideoId = extractVideoId(videoUrl);
-    console.log('[StorageService] 提取的视频ID:', currentVideoId);
     
     // 找到匹配URL的最新思维导图
     const matching = mindmaps.filter(m => {
