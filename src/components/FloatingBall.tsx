@@ -9,12 +9,14 @@ interface FloatingBallProps {
     errorMessage?: string;
   };
   onClick: () => void;
+  isFullscreen: boolean;
 }
 
 export const FloatingBall: React.FC<FloatingBallProps> = ({
   showNotification,
   currentTask,
-  onClick
+  onClick,
+  isFullscreen
 }) => {
   const [showTooltip, setShowTooltip] = useState(false);
   const [showErrorModal, setShowErrorModal] = useState(false);
@@ -94,7 +96,7 @@ export const FloatingBall: React.FC<FloatingBallProps> = ({
           boxShadow: '0 4px 15px rgba(0, 0, 0, 0.3)',
           cursor: 'pointer',
           zIndex: 999998,
-          display: 'flex',
+          display: isFullscreen ? 'none' : 'flex',
           alignItems: 'center',
           justifyContent: 'center',
           transition: 'transform 0.2s, box-shadow 0.2s'
@@ -164,7 +166,7 @@ export const FloatingBall: React.FC<FloatingBallProps> = ({
       </div>
 
       {/* 悬浮提示 */}
-      {showTooltip && (
+      {showTooltip && !isFullscreen && (
         <div
           style={{
             position: 'fixed',
@@ -193,7 +195,7 @@ export const FloatingBall: React.FC<FloatingBallProps> = ({
       )}
 
       {/* 错误详情弹窗 */}
-      {showErrorModal && (
+      {showErrorModal && !isFullscreen && (
         <div
           style={{
             position: 'fixed',

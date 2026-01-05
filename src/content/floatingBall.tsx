@@ -27,6 +27,7 @@ function FloatingBallApp() {
   const [showViewer, setShowViewer] = useState(false);
   const [mindmapData, setMindmapData] = useState<any>(null);
   const [currentTask, setCurrentTask] = useState<CurrentTask | undefined>();
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   // 获取当前正在运行的任务
   const fetchCurrentTask = useCallback(async () => {
@@ -67,6 +68,13 @@ function FloatingBallApp() {
   }, [showNotification, showViewer]);
 
   useEffect(() => {
+    // 监听全屏变化
+    const handleFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+
     // 监听思维导图生成事件 (来自后台的主动通知)
     const handleMindmapMsg = (message: any) => {
       if (message.type === 'MINDMAP_GENERATED') {
@@ -134,6 +142,7 @@ function FloatingBallApp() {
     const intervalId = setInterval(fetchCurrentTask, 1000);
 
     return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
       chrome.runtime.onMessage.removeListener(handleMindmapMsg);
       window.removeEventListener('mindmap-generated', handleLocalGenerated);
       clearInterval(intervalId);
@@ -203,6 +212,7 @@ function FloatingBallApp() {
         showNotification={showNotification}
         currentTask={currentTask}
         onClick={handleBallClick}
+        isFullscreen={isFullscreen}
       />
       {showViewer && mindmapData && (
         <MindmapViewer
