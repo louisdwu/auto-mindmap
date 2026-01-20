@@ -23,9 +23,22 @@ interface TreeNode {
 export const MindmapRenderer: React.FC<MindmapRendererProps> = ({
   markdown,
   onNodeClick,
-  layoutOptions = {},
+  layoutOptions: userLayoutOptions,
   styleName = 'modern'
 }) => {
+  // Memoize layout options to prevent unnecessary re-effects
+  const layoutOptions = useMemo(() => {
+    const defaultOptions = {
+      direction: 'right' as const,
+      horizontalSpacing: 140,
+      verticalSpacing: 20,
+      nodeWidth: 100,
+      nodeHeight: 32,
+      centerOffset: 0,
+      levelSpacingMultiplier: 0.85
+    };
+    return { ...defaultOptions, ...userLayoutOptions };
+  }, [userLayoutOptions]);
   const containerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   // 使用 ref 来跟踪拖动状态，避免重新渲染导致事件丢失
@@ -69,23 +82,11 @@ export const MindmapRenderer: React.FC<MindmapRendererProps> = ({
     setTreeData(tree);
   }, [markdown]);
 
-  // 计算布局 - 使用优化的默认值
+  // 计算布局
   useEffect(() => {
     if (!treeData) return;
 
-    // 合并默认布局选项，提供足够间距避免重叠
-    const defaultOptions = {
-      direction: 'right' as const,
-      horizontalSpacing: 140,
-      verticalSpacing: 20,  // 基础间距，实际间距会根据节点虚拟高度动态调整
-      nodeWidth: 100,
-      nodeHeight: 32,
-      centerOffset: 0,
-      levelSpacingMultiplier: 0.85
-    };
-
-    const mergedOptions = { ...defaultOptions, ...layoutOptions };
-    const layout = calculateLayout(treeData as unknown as INodeData, mergedOptions);
+    const layout = calculateLayout(treeData as unknown as INodeData, layoutOptions);
     setPositions(layout);
 
     // 自动居中并自适应缩放 - 仅在初始加载时执行一次
@@ -95,42 +96,42 @@ export const MindmapRenderer: React.FC<MindmapRendererProps> = ({
       if (container && bounds.width > 0 && bounds.height > 0) {
         const containerWidth = container.clientWidth;
         const containerHeight = container.clientHeight;
-        
+
         // 计算缩放比例，保证第一层级内容完全显示
         // 获取所有一级节点（level 1）的位置
         let minY = Infinity;
         let maxY = -Infinity;
         // let minX = Infinity;
         // let maxX = -Infinity;
-        
+
         // 遍历所有位置，找到一级节点的边界
         layout.forEach((pos) => {
           if (pos.level <= 1) { // 包含根节点和一级节点
-             minY = Math.min(minY, pos.y - pos.height / 2);
-             maxY = Math.max(maxY, pos.y + pos.height / 2);
-             // minX = Math.min(minX, pos.x - pos.width / 2);
-             // maxX = Math.max(maxX, pos.x + pos.width / 2);
+            minY = Math.min(minY, pos.y - pos.height / 2);
+            maxY = Math.max(maxY, pos.y + pos.height / 2);
+            // minX = Math.min(minX, pos.x - pos.width / 2);
+            // maxX = Math.max(maxX, pos.x + pos.width / 2);
           }
         });
-        
+
         const contentHeight = maxY - minY;
         // const contentWidth = maxX - minX;
-        
+
         // 计算适应屏幕的高度缩放比例
         // 留出一定的边距 (例如上下各 50px)
         const paddingY = 100;
         let fitScale = 1;
-        
+
         if (contentHeight > 0) {
-            fitScale = (containerHeight - paddingY) / contentHeight;
+          fitScale = (containerHeight - paddingY) / contentHeight;
         }
-        
+
         // 限制缩放比例在合理范围内
         fitScale = Math.min(1.5, Math.max(0.5, fitScale));
-        
+
         // 应用计算出的缩放比例
         setScale(fitScale);
-        
+
         // 计算居中位置 (使用新的 scale)
         // 将根节点定位在画布左侧垂直居中位置
         // 修正：确保左侧内容不被遮挡。
@@ -145,7 +146,7 @@ export const MindmapRenderer: React.FC<MindmapRendererProps> = ({
         // leftEdgeX * scale + offsetX = 50
         // (minX - nodeWidth/2) * scale + offsetX = 50
         // offsetX = 50 - (minX - somePadding) * scale
-        
+
         // 简单策略：让根节点位于 containerWidth * 0.2，但如果 minX 很大（负值），则需要更多偏移
         // 计算左侧所需的空间
         // bounds.minX 是布局中最左侧节点的 x 坐标（相对于根节点 (0,0)）
@@ -153,17 +154,17 @@ export const MindmapRenderer: React.FC<MindmapRendererProps> = ({
         // 偏移量 offset.x 实际上是根节点在屏幕上的位置（因为 transformOrigin 是 0 0，且根节点在布局坐标系中是 0,0）
         // 但要注意最外层的 transform 是 translate(offset.x, offset.y) scale(scale)
         // 所以 offset.x 就是根节点的屏幕 x 坐标
-        
+
         // 我们需要保证：最左侧节点的屏幕坐标 > 0
         // 最左侧节点的屏幕坐标 = minX * fitScale + offset.x
         // 所以 offset.x > -minX * fitScale
-        
+
         // 额外添加 50px 的安全边距
         const leftSpaceNeeded = Math.abs(Math.min(0, bounds.minX)) * fitScale + 50;
-        
+
         // 默认让根节点在 20% 处，但必须大于 leftSpaceNeeded
         let centerX = Math.max(containerWidth * 0.2, leftSpaceNeeded);
-        
+
         const centerY = containerHeight * 0.5;
 
         setOffset({ x: centerX, y: centerY });
@@ -197,7 +198,7 @@ export const MindmapRenderer: React.FC<MindmapRendererProps> = ({
   const handleNodeClick = useCallback((node: TreeNode, e: React.MouseEvent) => {
     e.stopPropagation();
     e.preventDefault();
-    
+
     setSelectedNodeId(node.id);
     onNodeClick?.(node as unknown as INodeData);
 
@@ -216,14 +217,14 @@ export const MindmapRenderer: React.FC<MindmapRendererProps> = ({
   // 处理拖拽开始
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     if (e.button !== 0) return;
-    
+
     // 记录拖动开始状态
     dragRef.current.isDragging = true;
     dragRef.current.startX = e.clientX;
     dragRef.current.startY = e.clientY;
     dragRef.current.offsetX = offset.x;
     dragRef.current.offsetY = offset.y;
-    
+
     setIsDragging(true);
   }, [offset]);
 
@@ -231,10 +232,10 @@ export const MindmapRenderer: React.FC<MindmapRendererProps> = ({
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       if (!dragRef.current.isDragging) return;
-      
+
       const dx = e.clientX - dragRef.current.startX;
       const dy = e.clientY - dragRef.current.startY;
-      
+
       setOffset({
         x: dragRef.current.offsetX + dx,
         y: dragRef.current.offsetY + dy
@@ -279,16 +280,16 @@ export const MindmapRenderer: React.FC<MindmapRendererProps> = ({
       // 缩放模式
       const delta = e.deltaY > 0 ? 0.9 : 1.1;
       const newScale = Math.max(0.1, Math.min(5, scale * delta));
-      
+
       if (newScale !== scale && containerRef.current) {
         const rect = containerRef.current.getBoundingClientRect();
         const mouseX = e.clientX - rect.left;
         const mouseY = e.clientY - rect.top;
-        
+
         // 计算鼠标相对于当前 offset 的位置（在 1:1 比例下）
         const mouseRelX = (mouseX - offset.x) / scale;
         const mouseRelY = (mouseY - offset.y) / scale;
-        
+
         // 更新 scale 并调整 offset，使鼠标下的点保持不动
         setScale(newScale);
         setOffset({
@@ -345,8 +346,8 @@ export const MindmapRenderer: React.FC<MindmapRendererProps> = ({
     });
 
     if (minX === Infinity) {
-       setExpandingNodeId(null);
-       return;
+      setExpandingNodeId(null);
+      return;
     }
 
     const container = containerRef.current;
@@ -366,101 +367,77 @@ export const MindmapRenderer: React.FC<MindmapRendererProps> = ({
     let targetY = offset.y;
 
     // Horizontal logic
-    // Determine expansion direction based on bounds relative to parent
-    const isRightExpansion = (maxX - parentPos.x) > (parentPos.x - minX);
+    // Horizontal logic
+    // Determine expansion direction based on node position relative to parent (more reliable than bounds)
+    // If child x > parent x, it's a right expansion.
+    // Note: positions uses a coordinate system where root is at centerOffset (0).
+    const isRightExpansion = firstChildId && positions.get(firstChildId)!.x > parentPos.x;
+
 
     if (fitLeft <= fitRight) {
-        // Content fits in width
-        // Only adjust if currently out of bounds
-        // 注意：这里逻辑有点反直觉，fitLeft 是最大允许的 offset.x (对应左边缘在 padding 处)
-        // fitRight 是最小允许的 offset.x (对应右边缘在 viewportWidth - padding 处)
-        // 如果 offset.x > fitLeft，说明内容偏右了，需要左移 (减小 offset.x) 到 fitLeft
-        // 如果 offset.x < fitRight，说明内容偏左了，需要右移 (增大 offset.x) 到 fitRight
-        
-        // 修正逻辑：
-        // fitLeft 是让 minX 出现在左边缘所需的 offset
-        // fitRight 是让 maxX 出现在右边缘所需的 offset
-        // 因为 scale 是正数，minX < maxX，所以 -minX > -maxX，所以 fitLeft > fitRight
-        
-        // 如果 offset.x > fitLeft，说明内容太靠右，minX 的屏幕坐标 > padding。这通常是可以接受的，除非我们想强制紧凑。
-        // 如果 offset.x < fitRight，说明内容太靠左，maxX 的屏幕坐标 < viewportWidth - padding。
-        
-        // 我们的目标是：如果内容超出屏幕，则平移。
-        // 内容左边缘屏幕坐标: minX * scale + offset.x
-        // 内容右边缘屏幕坐标: maxX * scale + offset.x
-        
-        const contentLeftScreen = minX * scale + offset.x;
-        const contentRightScreen = maxX * scale + offset.x;
-        
-        if (contentLeftScreen < padding) {
-             // 左侧被遮挡，向右移
-             targetX = fitLeft;
-        } else if (contentRightScreen > viewportWidth - padding) {
-             // 右侧被遮挡，向左移
-             targetX = fitRight;
-        }
+      // Content fits in width
+      const contentLeftScreen = minX * scale + offset.x;
+      const contentRightScreen = maxX * scale + offset.x;
+
+      if (contentLeftScreen < padding) {
+        // 左侧被遮挡，向右移
+        targetX = fitLeft;
+      } else if (contentRightScreen > viewportWidth - padding) {
+        // 右侧被遮挡，向左移
+        targetX = fitRight;
+      }
     } else {
-        // Content too wide (fitLeft > fitRight actually, wait fitLeft = P - min*S, fitRight = W - P - max*S)
-        // fitLeft - fitRight = P - min*S - (W - P - max*S) = 2P - W + S(max-min)
-        // 如果内容很宽 S(max-min) > W - 2P，则 fitLeft > fitRight
-        
-        if (isRightExpansion) {
-          // Expanding to right:
-          // 我们希望看到新展开的内容（右侧），但也要保留父节点（左侧）。
-          // 这里的策略是：优先保证父节点不被移出屏幕，同时尽可能显示新内容。
-          // 或者：优先显示新内容（右侧），只要父节点还在屏幕内？
-          
-          // 简单策略：让新展示出来的区域尽可能在屏幕内。
-          // 对于右侧展开，我们希望 maxX 尽可能在屏幕内 (align to right edge)，但不能让 minX (parent) 跑出屏幕左侧太远?
-          // 题目要求："使得新展示出来的下级项目能完整展示在屏幕内"
-          
-          // 强制右侧对齐到视口右边缘 (fitRight)
-          targetX = fitRight;
-          
-          // 但是，如果这样导致父节点（minX 附近）完全看不到了怎么办？
-          // 检查父节点位置
-          const parentScreenX = parentPos.x * scale + targetX;
-           if (parentScreenX < padding) {
-             // 父节点被挤出去了，拉回来一点，让父节点至少在边缘
-             targetX = padding - parentPos.x * scale;
-           }
-        } else {
-          // Expanding to left: Align to left edge (fitLeft)
-          targetX = fitLeft;
-          
-           // Check parent visibility
-           const parentScreenX = parentPos.x * scale + targetX;
-           if (parentScreenX > viewportWidth - padding) {
-               targetX = (viewportWidth - padding) - parentPos.x * scale;
-           }
+      // Content too wide
+      if (isRightExpansion) {
+        // Expanding to right: Align right edge to viewport right edge (with padding)
+        // But ensure parent is visible if possible
+        targetX = fitRight;
+
+        // Check parent visibility
+        const parentScreenX = parentPos.x * scale + targetX;
+        if (parentScreenX < padding) {
+          // Parent is pushed off-screen left, pull back to show parent
+          // Try to put parent at left padding
+          targetX = padding - parentPos.x * scale;
         }
+      } else {
+        // Expanding to left: Align left edge to viewport left edge
+        targetX = fitLeft;
+
+        // Check parent visibility
+        const parentScreenX = parentPos.x * scale + targetX;
+        if (parentScreenX > viewportWidth - padding) {
+          // Parent is pushed off-screen right
+          targetX = (viewportWidth - padding) - parentPos.x * scale;
+        }
+      }
     }
 
     // Vertical logic - prioritize Top
     const contentTopScreen = minY * scale + offset.y;
     const contentBottomScreen = maxY * scale + offset.y;
-    
+
     if (contentTopScreen < padding) {
-        targetY = fitTop;
+      targetY = fitTop;
     } else if (contentBottomScreen > viewportHeight - padding) {
-        // 如果底部被遮挡
-        if (contentTopScreen > padding) {
-            // 如果顶部有空间，向上移，但不要移过头 (fitBottom)
-            // 优先保证顶部可见? 还是保证底部可见?
-            // 通常展开子节点，不仅关注子节点，也关注整体结构。
-            // 简单策略：底部对齐
-             targetY = fitBottom;
-             
-             // 二次检查：如果这样导致顶部看不见了（内容太高），优先显示顶部
-             if (minY * scale + targetY < padding) {
-                 targetY = fitTop;
-             }
+      // 如果底部被遮挡
+      if (contentTopScreen > padding) {
+        // 如果顶部有空间，向上移，但不要移过头 (fitBottom)
+        // 优先保证顶部可见? 还是保证底部可见?
+        // 通常展开子节点，不仅关注子节点，也关注整体结构。
+        // 简单策略：底部对齐
+        targetY = fitBottom;
+
+        // 二次检查：如果这样导致顶部看不见了（内容太高），优先显示顶部
+        if (minY * scale + targetY < padding) {
+          targetY = fitTop;
         }
+      }
     }
 
     // Apply only if changed
     if (Math.abs(targetX - offset.x) > 1 || Math.abs(targetY - offset.y) > 1) {
-        setOffset({ x: targetX, y: targetY });
+      setOffset({ x: targetX, y: targetY });
     }
 
     setExpandingNodeId(null);
@@ -482,7 +459,7 @@ export const MindmapRenderer: React.FC<MindmapRendererProps> = ({
       const layout = calculateLayout(treeData as unknown as INodeData, mergedOptions);
       const bounds = calculateLayoutBounds(layout);
       const container = containerRef.current;
-      
+
       if (container && bounds.width > 0 && bounds.height > 0) {
         const containerWidth = container.clientWidth;
         const containerHeight = container.clientHeight;
@@ -490,24 +467,24 @@ export const MindmapRenderer: React.FC<MindmapRendererProps> = ({
         // 重新计算自适应缩放 (逻辑同上)
         let minY = Infinity;
         let maxY = -Infinity;
-        
+
         layout.forEach((pos) => {
           if (pos.level <= 1) {
-             minY = Math.min(minY, pos.y - pos.height / 2);
-             maxY = Math.max(maxY, pos.y + pos.height / 2);
+            minY = Math.min(minY, pos.y - pos.height / 2);
+            maxY = Math.max(maxY, pos.y + pos.height / 2);
           }
         });
-        
+
         const contentHeight = maxY - minY;
         const paddingY = 100;
         let fitScale = 1;
-        
+
         if (contentHeight > 0) {
-            fitScale = (containerHeight - paddingY) / contentHeight;
+          fitScale = (containerHeight - paddingY) / contentHeight;
         }
-        
+
         fitScale = Math.min(1.5, Math.max(0.5, fitScale));
-        
+
         // 应用缩放和居中
         setScale(fitScale);
         // 计算左侧所需的空间
@@ -614,14 +591,14 @@ export const MindmapRenderer: React.FC<MindmapRendererProps> = ({
   // 获取节点所属的分支索引
   const getBranchIndex = useCallback((nodeId: string): number => {
     if (!treeData || nodeId === 'root') return -1;
-    
+
     // 查找该节点属于哪个一级分支
     for (let i = 0; i < treeData.children.length; i++) {
       const isDescendant = (node: TreeNode, targetId: string): boolean => {
         if (node.id === targetId) return true;
         return node.children.some(child => isDescendant(child, targetId));
       };
-      
+
       if (isDescendant(treeData.children[i], nodeId)) {
         return i % 5; // 只有5种预定义颜色
       }
@@ -632,10 +609,10 @@ export const MindmapRenderer: React.FC<MindmapRendererProps> = ({
   // 渲染连接线 - 包括主干线和分支线
   const renderLinks = useMemo(() => {
     const links: React.ReactNode[] = [];
-    
+
     // 按父节点分组子节点，用于生成主干线
     const childrenByParent = new Map<string, NodePosition[]>();
-    
+
     positions.forEach((pos) => {
       if (pos.parentId) {
         const children = childrenByParent.get(pos.parentId) || [];
@@ -643,7 +620,7 @@ export const MindmapRenderer: React.FC<MindmapRendererProps> = ({
         childrenByParent.set(pos.parentId, children);
       }
     });
-    
+
     // 生成主干线
     childrenByParent.forEach((children, parentId) => {
       const parentPos = positions.get(parentId);
@@ -726,7 +703,7 @@ export const MindmapRenderer: React.FC<MindmapRendererProps> = ({
         }
       };
       const displayHeight = getDisplayHeight(pos.level, isRoot);
-      
+
       nodes.push(
         <div
           key={pos.id}
