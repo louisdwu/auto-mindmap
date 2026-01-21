@@ -29,6 +29,20 @@ function FloatingBallApp() {
   const [currentTask, setCurrentTask] = useState<CurrentTask | undefined>();
   const [isFullscreen, setIsFullscreen] = useState(false);
 
+  // 标准化 URL 用于比较
+  const normalizeUrl = useCallback((url: string) => {
+    try {
+      const u = new URL(url);
+      // 对于 B站，主要比较 bvid/avid
+      if (u.hostname.includes('bilibili.com')) {
+        return u.pathname;
+      }
+      return u.origin + u.pathname;
+    } catch {
+      return url;
+    }
+  }, []);
+
   // 获取当前正在运行的任务
   const fetchCurrentTask = useCallback(async () => {
     try {
@@ -38,25 +52,33 @@ function FloatingBallApp() {
 
       if (response && response.task) {
         const task = response.task;
+        const currentUrl = window.location.href;
+        const taskUrl = task.data?.videoUrl;
 
-        let videoTitle: string | undefined;
-        if (task.data) {
-          videoTitle = task.data.videoTitle || task.data.subtitleText?.substring(0, 30) || '处理中...';
-        }
+        // 校验任务是否属于当前页面
+        if (taskUrl && normalizeUrl(currentUrl) === normalizeUrl(taskUrl)) {
+          let videoTitle: string | undefined;
+          if (task.data) {
+            videoTitle = task.data.videoTitle || task.data.subtitleText?.substring(0, 30) || '处理中...';
+          }
 
-        const newTaskState = {
-          type: task.type,
-          status: task.status,
-          videoTitle,
-          result: task.result,
-          errorMessage: task.error  // 传递错误信息给组件
-        };
+          const newTaskState = {
+            type: task.type,
+            status: task.status,
+            videoTitle,
+            result: task.result,
+            errorMessage: task.error  // 传递错误信息给组件
+          };
 
-        setCurrentTask(newTaskState);
+          setCurrentTask(newTaskState);
 
-        // 如果任务刚刚完成，触发通知
-        if (task.status === 'completed' && !showNotification && !showViewer) {
-          setShowNotification(true);
+          // 如果任务刚刚完成，触发通知
+          if (task.status === 'completed' && !showNotification && !showViewer) {
+            setShowNotification(true);
+          }
+        } else {
+          // 如果任务不属于当前页面，清除当前任务状态
+          setCurrentTask(undefined);
         }
       } else {
         setCurrentTask(undefined);
@@ -65,7 +87,7 @@ function FloatingBallApp() {
       console.error('[FloatingBall] Failed to get current task:', error);
       setCurrentTask(undefined);
     }
-  }, [showNotification, showViewer]);
+  }, [showNotification, showViewer, normalizeUrl]);
 
   useEffect(() => {
     // 监听全屏变化
@@ -83,20 +105,6 @@ function FloatingBallApp() {
           // 验证思维导图是否属于当前视频，避免其他标签页的思维导图覆盖当前状态
           const currentUrl = window.location.href;
           const mindmapVideoUrl = data.videoUrl;
-
-          // 比较视频URL（去掉可能变化的参数进行比较）
-          const normalizeUrl = (url: string) => {
-            try {
-              const u = new URL(url);
-              // 对于 B站，主要比较 bvid/avid
-              if (u.hostname.includes('bilibili.com')) {
-                return u.pathname;
-              }
-              return u.origin + u.pathname;
-            } catch {
-              return url;
-            }
-          };
 
           if (normalizeUrl(currentUrl) === normalizeUrl(mindmapVideoUrl)) {
             setMindmapData(data);
@@ -164,6 +172,13 @@ function FloatingBallApp() {
       return;
     }
 
+    // 如果任务正在运行中
+    if (currentTask?.status === 'running' || currentTask?.status === 'processing') {
+      console.log('[FloatingBall] 任务正在运行中');
+      alert('任务正在进行中，请稍候...');
+      return;
+    }
+
     try {
       console.log('[FloatingBall] 尝试获取当前URL的思维导图');
       const response = await chrome.runtime.sendMessage({
@@ -178,23 +193,24 @@ function FloatingBallApp() {
         setMindmapData(response.mindmap);
         setShowViewer(true);
       } else {
-        console.log('[FloatingBall] 未找到匹配的思维导图，尝试获取最新的');
-        const fallbackResponse = await chrome.runtime.sendMessage({
-          type: 'GET_LATEST_MINDMAP'
-        });
+        // 如果没有找到当前视频的思维导图，且没有任务在运行，提示手动生成
+        console.log('[FloatingBall] 本页暂无思维导图');
+        const confirmGenerate = window.confirm('本页暂无思维导图，是否立即生成？');
 
-        console.log('[FloatingBall] GET_LATEST_MINDMAP 响应:', fallbackResponse);
-
-        if (fallbackResponse && fallbackResponse.mindmap) {
-          console.log('[FloatingBall] 找到最新的思维导图');
-          setMindmapData(fallbackResponse.mindmap);
-          setShowViewer(true);
-        } else if (currentTask?.status === 'running') {
-          console.log('[FloatingBall] 任务正在运行中');
-          alert('任务正在进行中，请稍候...');
-        } else {
-          console.log('[FloatingBall] 没有找到任何思维导图数据');
-          alert('暂无该视频的思维导图内容，请点击下载字幕生成');
+        if (confirmGenerate) {
+          console.log('[FloatingBall] 用户确认强制生成');
+          try {
+            const downloadResponse = await chrome.runtime.sendMessage({
+              type: 'DOWNLOAD_SUBTITLE',
+              payload: { videoUrl: window.location.href }
+            });
+            console.log('[FloatingBall] 强制生成请求已发送:', downloadResponse);
+            alert('生成任务已开始，请稍候...');
+            fetchCurrentTask(); // 立即刷新状态
+          } catch (err) {
+            console.error('[FloatingBall] 发送生成请求失败:', err);
+            alert('启动生成任务失败，请稍后重试');
+          }
         }
       }
     } catch (error) {
