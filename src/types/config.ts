@@ -10,6 +10,7 @@ export interface LLMConfig {
   model: string;
   timeout?: number;     // 超时时间（秒）
   maxTokens?: number;   // 最大生成 Token 数
+  num_ctx?: number;     // 上下文窗口大小 (Context Window)
   temperature?: number; // 温度
   createdAt: number;    // 创建时间戳
   updatedAt: number;    // 更新时间戳
@@ -61,18 +62,21 @@ export function createDefaultLLMConfig(provider: LLMProvider = 'openai'): LLMCon
       provider: 'custom',
       apiUrl: '',
       model: '',
+      num_ctx: 4096,
     },
     lmstudio: {
       name: 'LM Studio (本地)',
       provider: 'lmstudio',
       apiUrl: 'http://localhost:1234/v1',
       model: 'qwen_qwen3.5-9b',
+      num_ctx: 8192,
     },
     ollama: {
       name: 'Ollama (本地/云端)',
       provider: 'ollama',
       apiUrl: 'http://localhost:11434/api',
       model: 'llama3',
+      num_ctx: 8192,
     },
   };
 
@@ -97,6 +101,7 @@ export const DEFAULT_LLM_CONFIG: LLMConfig = {
   model: 'gpt-3.5-turbo',
   timeout: 60,
   maxTokens: 4096,
+  num_ctx: 4096,
   temperature: 0.7,
   createdAt: 0,
   updatedAt: 0,

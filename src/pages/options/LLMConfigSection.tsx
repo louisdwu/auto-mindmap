@@ -109,11 +109,13 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
                   updates.apiUrl = 'http://localhost:1234/v1';
                   updates.model = 'qwen_qwen3.5-9b';
                   updates.maxTokens = 4096;
+                  updates.num_ctx = 8192;
                   updates.temperature = 0.7;
                 } else if (provider === 'ollama') {
                   updates.apiUrl = 'http://localhost:11434/api';
                   updates.model = 'llama3';
                   updates.maxTokens = 4096;
+                  updates.num_ctx = 8192;
                   updates.temperature = 0.7;
                 } else if (provider === 'custom') {
                   updates.apiUrl = '';
@@ -252,6 +254,25 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
               />
               <p className="form-hint">控制输出的随机性。思维导图建议 0.5 - 0.7 之间。</p>
             </div>
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">上下文窗口大小 (Context Window)</label>
+            <input
+              className="form-input"
+              type="number"
+              value={editingConfig.num_ctx || 4096}
+              onChange={(e) => onUpdateEditingConfig({ num_ctx: parseInt(e.target.value) || 4096 })}
+              min="512"
+              max="131072"
+              step="512"
+            />
+            <p className="form-hint">
+              模型允许的总 Token 数（输入+输出）。Ollama 默认 4096。长视频建议设为 16384 或更大。
+              {editingConfig.provider === 'openai' || editingConfig.provider === 'gemini' 
+                ? ' (对于 OpenAI/Gemini，此参数通常由模型硬性决定，插件配置仅作参考)' 
+                : ' (对于 Ollama/LM Studio，此参数会发送给后端生效)'}
+            </p>
           </div>
 
           {/* 保存按钮 */}

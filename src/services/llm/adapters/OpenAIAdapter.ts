@@ -48,12 +48,20 @@ export class OpenAIAdapter extends BaseAdapter implements ILLMAdapter {
     }
     messages.push({ role: 'user', content: finalPrompt });
 
-    const requestBody = {
+    const requestBody: any = {
       model: llmConfig.model.trim(),
       messages: messages,
       temperature: llmConfig.temperature ?? 0.7,
       max_tokens: llmConfig.maxTokens ?? 2000
     };
+
+    // 针对 LM Studio 或自定义 OpenAI 兼容后端，尝试传递上下文长度
+    if (llmConfig.provider === 'lmstudio' || llmConfig.provider === 'custom') {
+      if (llmConfig.num_ctx) {
+        requestBody.num_ctx = llmConfig.num_ctx;
+        requestBody.context_length = llmConfig.num_ctx; // 兼容不同后端
+      }
+    }
 
     const headers: Record<string, string> = {
       'Accept': 'application/json',

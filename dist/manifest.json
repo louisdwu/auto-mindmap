@@ -23,7 +23,7 @@
   "content_scripts": [
     {
       "js": [
-        "assets/index.ts-loader-3094ff81.js"
+        "assets/index.ts-loader-46ae8485.js"
       ],
       "matches": [
         "https://*.bilibili.com/*",
@@ -51,9 +51,9 @@
         "https://www.youtube.com/*"
       ],
       "resources": [
-        "assets/storageService-b364cf36.js",
+        "assets/storageService-3ae9561a.js",
         "assets/client-a68773c9.js",
-        "assets/index.ts-f29eb6a5.js"
+        "assets/index.ts-ec569177.js"
       ],
       "use_dynamic_url": false
     }

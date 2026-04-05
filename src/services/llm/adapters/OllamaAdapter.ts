@@ -36,7 +36,8 @@ export class OllamaAdapter extends BaseAdapter implements ILLMAdapter {
       stream: false,
       options: {
         temperature: llmConfig.temperature ?? 0.7,
-        num_predict: llmConfig.maxTokens ?? 4096
+        num_predict: llmConfig.maxTokens ?? 4096,
+        num_ctx: llmConfig.num_ctx || 4096
       }
     };
 
