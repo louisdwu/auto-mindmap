@@ -9,6 +9,36 @@
   pointer-events: none;
 }
 
-#mindmap-floating-ball-container > * {
+#mindmap-floating-ball-container>* {
   pointer-events: auto;
+}
+
+.mindmap-toast {
+  position: fixed;
+  bottom: 60px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.78);
+  color: #fff;
+  padding: 10px 24px;
+  border-radius: 8px;
+  font-size: 14px;
+  line-height: 1.5;
+  z-index: 999999;
+  pointer-events: auto;
+  animation: mindmap-toast-in 0.25s ease-out;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  white-space: nowrap;
+}
+
+@keyframes mindmap-toast-in {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(12px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
 }

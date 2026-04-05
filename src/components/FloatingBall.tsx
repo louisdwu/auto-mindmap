@@ -7,6 +7,7 @@ interface FloatingBallProps {
     status: string;
     videoTitle?: string;
     errorMessage?: string;
+    statusMessage?: string;
   };
   onClick: () => void;
   isFullscreen: boolean;
@@ -30,7 +31,7 @@ export const FloatingBall: React.FC<FloatingBallProps> = ({
     if (!currentTask) return '暂无任务';
     
     const typeMap: Record<string, string> = {
-      'download_subtitle': '下载字幕',
+      'download_subtitle': '获取字幕',
       'generate_mindmap': '生成思维导图'
     };
     
@@ -47,7 +48,11 @@ export const FloatingBall: React.FC<FloatingBallProps> = ({
     return (
       <div style={{ fontSize: '13px', lineHeight: '1.5' }}>
         <div style={{ fontWeight: 500, marginBottom: '4px' }}>{typeText}</div>
-        <div style={{ color: statusInfo.color, fontSize: '12px' }}>{statusInfo.text}</div>
+        <div style={{ color: statusInfo.color, fontSize: '12px' }}>
+          {currentTask.status === 'running' && currentTask.statusMessage 
+            ? currentTask.statusMessage 
+            : statusInfo.text}
+        </div>
         {isFailed && currentTask.errorMessage && (
           <div style={{
             color: '#f39c12',

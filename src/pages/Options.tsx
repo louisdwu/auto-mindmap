@@ -373,6 +373,16 @@ function Options() {
                   } else if (provider === 'gemini') {
                     updates.apiUrl = 'https://generativelanguage.googleapis.com/v1beta';
                     updates.model = 'gemini-1.5-flash';
+                  } else if (provider === 'lmstudio') {
+                    updates.apiUrl = 'http://localhost:1234/v1';
+                    updates.model = 'qwen_qwen3.5-9b';
+                    updates.maxTokens = 4096;
+                    updates.temperature = 0.7;
+                  } else if (provider === 'ollama') {
+                    updates.apiUrl = 'http://localhost:11434/api';
+                    updates.model = 'llama3';
+                    updates.maxTokens = 4096;
+                    updates.temperature = 0.7;
                   } else if (provider === 'custom') {
                     updates.apiUrl = '';
                     updates.model = '';
@@ -391,6 +401,8 @@ function Options() {
               >
                 <option value="openai">OpenAI (GPT-3.5/GPT-4)</option>
                 <option value="gemini">Google Gemini</option>
+                <option value="ollama">Ollama (本地/云端)</option>
+                <option value="lmstudio">LM Studio (本地模型)</option>
                 <option value="custom">自定义 (OpenAI 兼容)</option>
               </select>
               <p style={{ fontSize: '12px', color: '#6b7280', marginTop: '5px' }}>
@@ -420,8 +432,48 @@ function Options() {
                   ? 'Gemini API 地址，例如：https://generativelanguage.googleapis.com/v1beta'
                   : editingConfig.provider === 'openai'
                   ? 'OpenAI API 地址，例如：https://api.openai.com/v1'
+                  : editingConfig.provider === 'ollama'
+                  ? 'Ollama API 地址，本地通常为 http://localhost:11434/api，云端为 https://ollama.com/api'
                   : '自定义 API 地址，需兼容 OpenAI API 格式'}
               </p>
+
+              {/* Gemini 地区限制提示 */}
+              {editingConfig.provider === 'gemini' && (
+                <div style={{
+                  marginTop: '10px',
+                  padding: '10px',
+                  backgroundColor: '#fffbeb',
+                  border: '1px solid #fef3c7',
+                  borderRadius: '6px',
+                  color: '#92400e',
+                  fontSize: '12px',
+                  display: 'flex',
+                  gap: '8px',
+                  alignItems: 'flex-start'
+                }}>
+                  <span style={{ fontSize: '16px' }}>⚠️</span>
+                  <div>
+                    <strong>地区限制提醒：</strong>
+                    如果您在中国大陆使用，直接访问上述地址会报错。请确保开启<strong>全局代理</strong>，或使用可靠的<strong>反向代理地址</strong>。
+                  </div>
+                </div>
+              )}
+
+              {/* Ollama 提示 */}
+              {editingConfig.provider === 'ollama' && (
+                <div style={{
+                  marginTop: '10px',
+                  padding: '10px',
+                  backgroundColor: '#f0f9ff',
+                  border: '1px solid #e0f2fe',
+                  borderRadius: '6px',
+                  color: '#075985',
+                  fontSize: '12px'
+                }}>
+                  <strong>Ollama 提示：</strong>
+                  本地使用建议填写 <code>http://localhost:11434/api</code>。使用 Ollama Cloud 请填写 <code>https://ollama.com/api</code> 并提供 API Key。
+                </div>
+              )}
               {/* 实际请求地址预览 */}
               {editingConfig.apiUrl && (
                 <div style={{
@@ -467,6 +519,16 @@ function Options() {
                 }}
                 placeholder="sk-..."
               />
+              {editingConfig.provider === 'lmstudio' && (
+                <p style={{ fontSize: '12px', color: '#6b7280', marginTop: '5px' }}>
+                  本地 LM Studio 通常不需要 API 密钥，可以留空。
+                </p>
+              )}
+              {editingConfig.provider === 'ollama' && (
+                <p style={{ fontSize: '12px', color: '#6b7280', marginTop: '5px' }}>
+                  本地 Ollama 不需要 API 密钥；Ollama Cloud 请填入官方生成的 API Key。
+                </p>
+              )}
             </div>
 
             <div style={{ marginBottom: '15px' }}>
@@ -511,6 +573,55 @@ function Options() {
               </p>
             </div>
 
+            <div style={{ display: 'flex', gap: '20px', marginBottom: '15px' }}>
+              <div style={{ flex: 1 }}>
+                <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
+                  Max Tokens
+                </label>
+                <input
+                  type="number"
+                  value={editingConfig.maxTokens || 4096}
+                  onChange={(e) => updateEditingConfig({ maxTokens: parseInt(e.target.value) || 4096 })}
+                  style={{
+                    width: '100%',
+                    padding: '10px',
+                    border: '1px solid #d1d5db',
+                    borderRadius: '6px',
+                    fontSize: '14px'
+                  }}
+                  min="1"
+                  max="32768"
+                />
+                <p style={{ fontSize: '12px', color: '#6b7280', marginTop: '5px' }}>
+                  单次请求最大生成的 Token 数。推理模型建议设为 4096 以上。
+                </p>
+              </div>
+              
+              <div style={{ flex: 1 }}>
+                <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
+                  温度 (Temperature)
+                </label>
+                <input
+                  type="number"
+                  value={editingConfig.temperature ?? 0.7}
+                  onChange={(e) => updateEditingConfig({ temperature: parseFloat(e.target.value) || 0.7 })}
+                  style={{
+                    width: '100%',
+                    padding: '10px',
+                    border: '1px solid #d1d5db',
+                    borderRadius: '6px',
+                    fontSize: '14px'
+                  }}
+                  step="0.1"
+                  min="0"
+                  max="2"
+                />
+                <p style={{ fontSize: '12px', color: '#6b7280', marginTop: '5px' }}>
+                  控制输出的随机性。思维导图建议 0.5 - 0.7 之间。
+                </p>
+              </div>
+            </div>
+
             {/* 保存当前配置按钮 */}
             <div style={{ display: 'flex', gap: '10px', marginBottom: '20px' }}>
               <button
@@ -552,11 +663,37 @@ function Options() {
 
       {/* Prompt配置 */}
       <section style={{ marginBottom: '30px' }}>
-        <h2 style={{ marginBottom: '15px' }}>Prompt模板</h2>
+        <h2 style={{ marginBottom: '15px' }}>Prompt设置</h2>
         
         <div style={{ marginBottom: '15px' }}>
           <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
-            Prompt模板
+            系统提示词 (System Prompt)
+          </label>
+          <textarea
+            value={config.prompt.systemPrompt}
+            onChange={(e) => setConfig({
+              ...config,
+              prompt: { ...config.prompt, systemPrompt: e.target.value }
+            })}
+            style={{
+              width: '100%',
+              padding: '10px',
+              border: '1px solid #d1d5db',
+              borderRadius: '6px',
+              fontSize: '14px',
+              minHeight: '200px',
+              fontFamily: 'monospace'
+            }}
+            placeholder="请输入系统级指令，用于定义模型的身份、任务和约束（推荐放入逻辑指令）"
+          />
+          <p style={{ fontSize: '12px', color: '#6b7280', marginTop: '5px' }}>
+            用于定义模型角色和任务约束。对于 Claude/Qwen 等模型效果显著。
+          </p>
+        </div>
+
+        <div style={{ marginBottom: '15px' }}>
+          <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
+            用户消息模板 (User Prompt Template)
           </label>
           <textarea
             value={config.prompt.template}
@@ -570,10 +707,10 @@ function Options() {
               border: '1px solid #d1d5db',
               borderRadius: '6px',
               fontSize: '14px',
-              minHeight: '200px',
+              minHeight: '100px',
               fontFamily: 'monospace'
             }}
-            placeholder="请输入Prompt模板，使用 {subtitle_content} 作为字幕内容的占位符"
+            placeholder="请输入用户消息模板，使用 {subtitle_content} 作为占位符"
           />
           <p style={{ fontSize: '12px', color: '#6b7280', marginTop: '5px' }}>
             使用 {'{subtitle_content}'} 作为字幕内容的占位符
@@ -691,6 +828,118 @@ function Options() {
           <p style={{ fontSize: '12px', color: '#6b7280', marginTop: '5px' }}>
             开启后，相同视频会优先使用已生成的思维导图，节省API调用次数
           </p>
+        </div>
+
+        {/* 语音识别 (ASR) 设置 */}
+        <div style={{ marginBottom: '20px', padding: '15px', background: '#f9fafb', borderRadius: '8px', border: '1px solid #e5e7eb' }}>
+          <label style={{ display: 'block', marginBottom: '10px', fontWeight: 'bold' }}>
+            语音识别 (ASR) 配置
+          </label>
+          
+          <div style={{ marginBottom: '15px' }}>
+            <div style={{ display: 'flex', gap: '20px', marginBottom: '10px' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '14px' }}>
+                <input
+                  type="radio"
+                  name="asrProvider"
+                  checked={config.settings.asrProvider === 'official'}
+                  onChange={() => setConfig({
+                    ...config,
+                    settings: { ...config.settings, asrProvider: 'official' }
+                  })}
+                />
+                优先使用官方字幕
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '14px' }}>
+                <input
+                  type="radio"
+                  name="asrProvider"
+                  checked={config.settings.asrProvider === 'local'}
+                  onChange={() => setConfig({
+                    ...config,
+                    settings: { ...config.settings, asrProvider: 'local' }
+                  })}
+                />
+                本地 Whisper 识别 (2080ti 加速)
+              </label>
+            </div>
+          </div>
+
+          {config.settings.asrProvider === 'local' && (
+            <div style={{ marginTop: '10px' }}>
+              <label style={{ display: 'block', marginBottom: '5px', fontSize: '13px', fontWeight: 'bold' }}>
+                本地 ASR 服务地址
+              </label>
+              <input
+                type="text"
+                value={config.settings.localAsrUrl}
+                onChange={(e) => setConfig({
+                  ...config,
+                  settings: { ...config.settings, localAsrUrl: e.target.value }
+                })}
+                style={{
+                  width: '100%',
+                  padding: '8px 12px',
+                  border: '1px solid #d1d5db',
+                  borderRadius: '6px',
+                  fontSize: '13px',
+                  fontFamily: 'monospace'
+                }}
+                placeholder="http://localhost:5000/transcribe"
+              />
+              <p style={{ fontSize: '12px', color: '#6b7280', marginTop: '5px' }}>
+                请运行 <code>scripts/whisper_server.py</code> 后填入地址
+              </p>
+
+              {/* ASR 性能参数 */}
+              <div style={{ display: 'flex', gap: '20px', marginTop: '15px' }}>
+                <div style={{ flex: 1 }}>
+                  <label style={{ display: 'block', marginBottom: '5px', fontSize: '13px', fontWeight: 'bold' }}>
+                    Beam Size (搜索宽度)
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="10"
+                    value={config.settings.asrBeamSize || 2}
+                    onChange={(e) => setConfig({
+                      ...config,
+                      settings: { ...config.settings, asrBeamSize: parseInt(e.target.value) || 1 }
+                    })}
+                    style={{
+                      width: '100%',
+                      padding: '8px 12px',
+                      border: '1px solid #d1d5db',
+                      borderRadius: '6px',
+                      fontSize: '13px'
+                    }}
+                  />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <label style={{ display: 'block', marginBottom: '5px', fontSize: '13px', fontWeight: 'bold' }}>
+                    VAD 过滤 (静音检测)
+                  </label>
+                  <div style={{ display: 'flex', alignItems: 'center', height: '35px' }}>
+                    <input
+                      type="checkbox"
+                      checked={config.settings.asrVadFilter}
+                      onChange={(e) => setConfig({
+                        ...config,
+                        settings: { ...config.settings, asrVadFilter: e.target.checked }
+                      })}
+                      style={{ width: '18px', height: '18px' }}
+                    />
+                    <span style={{ marginLeft: '8px', fontSize: '13px', color: '#4b5563' }}>
+                      {config.settings.asrVadFilter ? '已开启' : '已关闭'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+              <p style={{ fontSize: '12px', color: '#6b7280', marginTop: '5px' }}>
+                优化建议：值越小速度越快。开启 VAD 可过滤静音，显著提升转录效率。
+              </p>
+            </div>
+          )}
         </div>
 
         {/* 本地文件缓存 */}

@@ -9,6 +9,7 @@
 - 🔔 **悬浮球提醒**：实时显示生成进度，点击查看导图
 - ⚙️ **灵活配置**：支持自定义 Prompt、多个 LLM 配置、排除关键词等
 - 💾 **本地缓存**：可选将导图保存到本地目录
+- 🎤 **ASR 语音识别**：支持 B 站在无字幕时，通过本地 Whisper (GPU 加速) 自动识别语音
 
 ## 快速开始（普通用户）
 
@@ -56,6 +57,7 @@ npm run build
 - Vite + CRXJS
 - 自定义 SVG 思维导图渲染器
 - Chrome Extension Manifest V3
+关于本地 ASR 语音识别功能的详细环境配置与开发说明，请参考 [DEVELOPMENT.md](./DEVELOPMENT.md)。
 
 ## 许可证
 

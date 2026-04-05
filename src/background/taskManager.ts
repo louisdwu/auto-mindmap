@@ -55,12 +55,12 @@ export class TaskManager {
   /**
    * 创建下载字幕任务
    */
-  async createDownloadTask(videoUrl: string, tabId?: number): Promise<Task> {
+  async createDownloadTask(videoUrl: string, tabId?: number, force: boolean = false): Promise<Task> {
     const task: Task = {
       id: uuidv4(),
       type: 'download_subtitle',
       status: 'pending',
-      data: { videoUrl },
+      data: { videoUrl, force },
       createdAt: Date.now(),
       updatedAt: Date.now(),
       tabId
@@ -154,18 +154,30 @@ export class TaskManager {
   private async executeDownloadTask(task: Task) {
     const { videoUrl } = task.data;
 
-    // 如果是 YouTube 视频，跳过下载步骤（因为已经通过 GENERATE_MINDMAP_DIRECT 处理）
+    // 如果是 YouTube 视频，跳过下载步骤
     if (videoUrl.includes('youtube.com') || videoUrl.includes('youtu.be')) {
       console.log('[TaskManager] YouTube video detected, skipping manual download task.');
-      // 标记为完成，但不创建后续任务，因为 YouTube 流程是独立的
       return;
     }
 
-    const result = await SubtitleService.downloadChineseSubtitle(videoUrl);
+    const config = await StorageService.getConfig();
+    if (!config) throw new Error('配置未初始化');
+
+    const result = await SubtitleService.downloadChineseSubtitle(
+      videoUrl, 
+      config,
+      async (msg) => {
+        task.statusMessage = msg;
+        task.updatedAt = Date.now();
+        await this.saveTasks();
+      },
+      task.data.force === true
+    );
 
     task.result = result;
+    task.statusMessage = '字幕获取成功，即将开始生成思维导图';
 
-    // 下载完成后，自动创建生成思维导图任务，传递原始任务的 tabId
+    // 下载完成后，自动创建生成思维导图任务
     await this.createMindmapTask(videoUrl, result.subtitleText, result.videoTitle, task.tabId);
   }
 

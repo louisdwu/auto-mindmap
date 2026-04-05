@@ -1,0 +1,5 @@
+fastapi
+uvicorn
+faster-whisper
+python-multipart
+# 不需要手动指定 torch，faster-whisper 会根据环境自动处理依赖

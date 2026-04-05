@@ -6,7 +6,8 @@ const STORAGE_KEYS = {
   LLM_CONFIGS: 'llm_configs',  // 存储多个 LLM 配置
   MINDMAPS: 'mindmaps',
   LATEST_MINDMAP_ID: 'latest_mindmap_id',
-  EXTENSION_STATE: 'extension_state'  // 扩展运行时状态
+  EXTENSION_STATE: 'extension_state',  // 扩展运行时状态
+  ASR_CACHE_PREFIX: 'asr_cache_'       // ASR 缓存前缀
 };
 
 export class StorageService {
@@ -24,7 +25,14 @@ export class StorageService {
       selectedLLMConfigId: config.selectedLLMConfigId || 'default',
       llm: {
         ...config.llm,
-        timeout: config.llm.timeout || 60
+        timeout: config.llm.timeout || 60,
+        maxTokens: config.llm.maxTokens || 4096,
+        temperature: config.llm.temperature ?? 0.7
+      },
+      prompt: {
+        ...config.prompt,
+        systemPrompt: config.prompt.systemPrompt || DEFAULT_CONFIG.prompt.systemPrompt,
+        template: config.prompt.template || DEFAULT_CONFIG.prompt.template
       },
       settings: {
         ...config.settings,
@@ -214,6 +222,8 @@ export class StorageService {
           apiKey: selectedConfig.apiKey,
           model: selectedConfig.model,
           timeout: selectedConfig.timeout,
+          maxTokens: selectedConfig.maxTokens,
+          temperature: selectedConfig.temperature,
         },
       });
     }
@@ -576,5 +586,30 @@ export class StorageService {
       
       reader.readAsText(file);
     });
+  }
+  
+  /**
+   * 获取 ASR 缓存
+   */
+  static async getAsrCache(videoId: string): Promise<string | null> {
+    const key = STORAGE_KEYS.ASR_CACHE_PREFIX + videoId;
+    const result = await chrome.storage.local.get(key);
+    return result[key] || null;
+  }
+
+  /**
+   * 保存 ASR 缓存
+   */
+  static async saveAsrCache(videoId: string, text: string): Promise<void> {
+    const key = STORAGE_KEYS.ASR_CACHE_PREFIX + videoId;
+    await chrome.storage.local.set({ [key]: text });
+  }
+
+  /**
+   * 删除 ASR 缓存
+   */
+  static async deleteAsrCache(videoId: string): Promise<void> {
+    const key = STORAGE_KEYS.ASR_CACHE_PREFIX + videoId;
+    await chrome.storage.local.remove(key);
   }
 }

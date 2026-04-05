@@ -7,8 +7,15 @@ export class LLMService {
   /**
    * 构建完整的prompt
    */
-  static buildPrompt(template: string, subtitleText: string): string {
-    return template.replace('{subtitle_content}', subtitleText);
+  static buildPrompt(template: string, subtitleText: string, provider?: LLMProvider): string {
+    let prompt = template.replace('{subtitle_content}', subtitleText);
+    
+    // 如果是 LM Studio 且可能存在推理模型，追加禁止推理的指令
+    if (provider === 'lmstudio') {
+      prompt += "\n\nIMPORTANT: Please output the mindmap in Markdown format directly. Do NOT include any reasoning, thinking process, or <thought> tags in your response. Jump straight to the Markdown content.";
+    }
+    
+    return prompt;
   }
 
   /**
@@ -115,16 +122,25 @@ export class LLMService {
     config: PluginConfig,
     subtitleText: string
   ): Promise<string> {
-    const prompt = this.buildPrompt(config.prompt.template, subtitleText);
-    const timeout = (Number(config.llm.timeout) || 60) * 1000;
+    const prompt = this.buildPrompt(config.prompt.template, subtitleText, config.llm.provider);
+    
+    // 针对本地 LM Studio 默认给予更长的超时时间 (180s)
+    let defaultTimeoutSeconds = 60;
+    if (config.llm.provider === 'lmstudio') {
+      defaultTimeoutSeconds = 180;
+    }
+    
+    const timeout = (Number(config.llm.timeout) || defaultTimeoutSeconds) * 1000;
 
     try {
       let content: string;
 
       if (config.llm.provider === 'gemini') {
         content = await this.callGeminiAPI(config, prompt, timeout);
+      } else if (config.llm.provider === 'ollama') {
+        content = await this.callOllamaAPI(config, prompt, timeout);
       } else {
-        // OpenAI 兼容格式（包括自定义 API）
+        // OpenAI 兼容格式（包括自定义 API 和 LM Studio）
         content = await this.callOpenAICompatibleAPI(config, prompt, timeout);
       }
 
@@ -144,6 +160,78 @@ export class LLMService {
   }
 
   /**
+   * 调用语音识别 API (本地 or Whisper)
+   */
+  static async transcribeAudio(
+    config: PluginConfig,
+    audioData: Blob | string,
+    onProgress?: (msg: string) => void
+  ): Promise<string> {
+    const isLocal = config.settings.asrProvider === 'local';
+    const apiUrl = isLocal 
+      ? config.settings.localAsrUrl 
+      : this.buildOpenAIUrl(config.llm.apiUrl, config.llm.provider).replace('/chat/completions', '/audio/transcriptions');
+
+    const timeout = 300000; // 语音识别较慢，给 5 分钟超时
+
+    onProgress?.('正在上传音频并识别中 (可能需要 15-60s)...');
+
+    const formData = new FormData();
+    if (typeof audioData === 'string') {
+      // 如果是 URL，直接传给后端
+      formData.append('audio_url', audioData);
+    } else {
+      // 如果是 Blob，上传文件
+      formData.append('file', audioData, 'audio.mp3');
+    }
+    
+    formData.append('model', isLocal ? 'large-v2' : 'whisper-1');
+    formData.append('response_format', 'json');
+    
+    // 如果是本地 ASR，透传性能参数
+    if (isLocal) {
+      if (config.settings.asrBeamSize) {
+        formData.append('beam_size', config.settings.asrBeamSize.toString());
+      }
+      if (config.settings.asrVadFilter !== undefined) {
+        formData.append('vad_filter', config.settings.asrVadFilter.toString());
+      }
+    }
+
+    const headers: Record<string, string> = {
+      'Accept': 'application/json'
+    };
+
+    if (!isLocal && config.llm.apiKey) {
+      headers['Authorization'] = `Bearer ${config.llm.apiKey.trim()}`;
+    }
+
+    const response = await this.fetchWithTimeout(apiUrl, {
+      method: 'POST',
+      headers,
+      body: formData
+    }, timeout);
+
+    if (!response.ok) {
+      const responseText = await response.text();
+      let serverError = responseText;
+      try {
+        const errorJson = JSON.parse(responseText);
+        serverError = errorJson.error || errorJson.message || responseText;
+      } catch (e) {
+        // 如果不是 JSON，使用原始文本
+      }
+      throw new Error(`识别失败 (HTTP ${response.status}): ${serverError}`);
+    }
+
+    const data = await response.json();
+    if (data.error) {
+      throw new Error(`ASR 服务报错: ${data.error}`);
+    }
+    return data.text || '';
+  }
+
+  /**
    * 构建 OpenAI 兼容的 API URL
    *
    * 只对 OpenAI 提供商自动补全 /chat/completions 路径
@@ -159,7 +247,7 @@ export class LLMService {
     }
 
     // 只对 OpenAI 提供商自动补全路径
-    if (provider === 'openai' && !apiUrl.endsWith('/chat/completions')) {
+    if ((provider === 'openai' || provider === 'lmstudio') && !apiUrl.endsWith('/chat/completions')) {
       apiUrl = apiUrl + '/chat/completions';
     }
     // 自定义提供商保持原样，不自动补全
@@ -184,27 +272,43 @@ export class LLMService {
     console.log(`[LLMService] - API Key: ${config.llm.apiKey ? config.llm.apiKey.substring(0, 8) + '...' : '(空)'}`);
     console.log(`[LLMService] - API Key 长度: ${config.llm.apiKey?.length || 0}`);
     
+    const messages: any[] = [];
+    
+    // 如果有 System Prompt，作为第一个消息发送
+    if (config.prompt.systemPrompt && config.prompt.systemPrompt.trim()) {
+      messages.push({
+        role: 'system',
+        content: config.prompt.systemPrompt.trim()
+      });
+    }
+
+    messages.push({
+      role: 'user',
+      content: prompt
+    });
+
     const requestBody = {
       model: config.llm.model.trim(),
-      messages: [
-        {
-          role: 'user',
-          content: prompt
-        }
-      ],
-      temperature: 0.7,
-      max_tokens: 2000
+      messages: messages,
+      temperature: config.llm.temperature ?? 0.7,
+      max_tokens: config.llm.maxTokens ?? 2000
     };
     
     console.log(`[LLMService] - Request body size: ${JSON.stringify(requestBody).length} bytes`);
     
+    const headers: Record<string, string> = {
+      'Accept': 'application/json',
+      'Content-Type': 'application/json'
+    };
+
+    // 只有在 API Key 非空时才发送 Authorization 头
+    if (config.llm.apiKey && config.llm.apiKey.trim()) {
+      headers['Authorization'] = `Bearer ${config.llm.apiKey.trim()}`;
+    }
+    
     const response = await this.fetchWithTimeout(apiUrl, {
       method: 'POST',
-      headers: {
-        'Accept': 'application/json',
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${config.llm.apiKey.trim()}`
-      },
+      headers,
       body: JSON.stringify(requestBody)
     }, timeout);
 
@@ -246,9 +350,35 @@ export class LLMService {
     }
 
     // 提取思维导图内容
-    const content = data.choices?.[0]?.message?.content;
-    if (!content) {
-      throw new Error('API返回的数据格式不正确');
+    // 1. 标准 OpenAI 格式: choices[0].message.content
+    let content = data.choices?.[0]?.message?.content;
+    
+    // 2. 兼容传统的 completions 格式: choices[0].text
+    if (!content && data.choices?.[0]?.text) {
+      content = data.choices[0].text;
+    }
+
+    // 3. 针对推理型模型（如 R1/Qwen-Reasoning）的特殊处理
+    const reasoningContent = data.choices?.[0]?.message?.reasoning_content;
+    const finishReason = data.choices?.[0]?.finish_reason;
+
+    if (!content || content.trim().length === 0) {
+      if (finishReason === 'length') {
+        // 特殊处理：如果推理内容占满了 4096 但已经开始输出 Markdown，尝试强行截取
+        if (reasoningContent && (reasoningContent.includes('#') || reasoningContent.includes('- '))) {
+          console.warn('[LLMService] Token 耗尽，但推理内容中包含部分结果，进行强行提取');
+          return reasoningContent; 
+        }
+        throw new Error('模型思维输出（Reasoning）过长，导致思维导图内容被挤出。请在插件设置中将 Max Tokens 调大到 8192 或以上，或更换非推理模型。');
+      }
+      
+      // 如果正常内容为空但推理内容不为空，且推理内容看起来包含了结果，进行兜底
+      if (reasoningContent && (reasoningContent.includes('#') || reasoningContent.includes('- '))) {
+        console.warn('[LLMService] 正文内容为空，尝试从推理内容中提取结果');
+        content = reasoningContent;
+      } else {
+        throw new Error('API返回的数据格式不正确：模型未返回有效的思维导图内容。');
+      }
     }
 
     return content;
@@ -292,26 +422,40 @@ export class LLMService {
       apiUrl = `${apiUrl}${separator}key=${config.llm.apiKey}`;
     }
 
+    const requestBody: any = {
+      contents: [
+        {
+          parts: [
+            {
+              text: prompt
+            }
+          ]
+        }
+      ],
+      generationConfig: {
+        temperature: config.llm.temperature ?? 0.7,
+        maxOutputTokens: config.llm.maxTokens ?? 2000
+      }
+    };
+
+    // Gemini 原生支持 system_instruction
+    if (config.prompt.systemPrompt && config.prompt.systemPrompt.trim()) {
+      requestBody.system_instruction = {
+        parts: [
+          {
+            text: config.prompt.systemPrompt.trim()
+          }
+        ]
+      };
+    }
+
     const response = await this.fetchWithTimeout(apiUrl, {
       method: 'POST',
       headers: {
+        'Accept': 'application/json',
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({
-        contents: [
-          {
-            parts: [
-              {
-                text: prompt
-              }
-            ]
-          }
-        ],
-        generationConfig: {
-          temperature: 0.7,
-          maxOutputTokens: 2000
-        }
-      })
+      body: JSON.stringify(requestBody)
     }, timeout);
 
     let data: any;
@@ -332,7 +476,11 @@ export class LLMService {
       if (errorCode === 401) {
         errorMsg = 'API密钥无效或已过期，请检查配置';
       } else if (errorCode === 403) {
-        errorMsg = 'API访问被拒绝，请检查API权限或配额';
+        if (errorMsg.toLowerCase().includes('location is not supported')) {
+          errorMsg = '您的 IP 所在地区不在 Google Gemini 的服务范围内（如中国大陆）。请开启“全局代理”或在 API 地址处填写可用的“反向代理地址”。';
+        } else {
+          errorMsg = 'API访问被拒绝，请检查API权限或配额';
+        }
       } else if (errorCode === 429) {
         errorMsg = 'API请求过于频繁，请稍后重试';
       } else if (errorCode >= 500) {
@@ -346,6 +494,89 @@ export class LLMService {
     const content = data.candidates?.[0]?.content?.parts?.[0]?.text;
     if (!content) {
       throw new Error('Gemini API 返回的数据格式不正确');
+    }
+
+    return content;
+  }
+
+  /**
+   * 调用 Ollama API (支持本地及云端)
+   */
+  private static async callOllamaAPI(
+    config: PluginConfig,
+    prompt: string,
+    timeout: number
+  ): Promise<string> {
+    console.log(`[LLMService] 正在发起 Ollama 请求:`);
+    
+    // 构建 API URL
+    let apiUrl = config.llm.apiUrl.trim();
+    if (apiUrl.endsWith('/')) {
+      apiUrl = apiUrl.slice(0, -1);
+    }
+    
+    // 检查是否包含端点，如果不包含则补全为 /chat (这是 Ollama 原生的 JSON API)
+    if (!apiUrl.endsWith('/chat') && !apiUrl.endsWith('/generate')) {
+      apiUrl = `${apiUrl}/chat`;
+    }
+
+    const messages: any[] = [];
+    if (config.prompt.systemPrompt && config.prompt.systemPrompt.trim()) {
+      messages.push({
+        role: 'system',
+        content: config.prompt.systemPrompt.trim()
+      });
+    }
+    messages.push({
+      role: 'user',
+      content: prompt
+    });
+
+    const requestBody = {
+      model: config.llm.model.trim(),
+      messages: messages,
+      stream: false, // 禁用流式输出
+      options: {
+        temperature: config.llm.temperature ?? 0.7,
+        num_predict: config.llm.maxTokens ?? 4096
+      }
+    };
+
+    const headers: Record<string, string> = {
+      'Accept': 'application/json',
+      'Content-Type': 'application/json'
+    };
+
+    // 如果提供了 API Key (Ollama Cloud 需要)，则添加
+    if (config.llm.apiKey && config.llm.apiKey.trim()) {
+      headers['Authorization'] = `Bearer ${config.llm.apiKey.trim()}`;
+    }
+
+    const response = await this.fetchWithTimeout(apiUrl, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(requestBody)
+    }, timeout);
+
+    const responseText = await response.text();
+    let data: any;
+    try {
+      data = responseText ? JSON.parse(responseText) : {};
+    } catch (e) {
+      throw new Error(`Ollama API 响应格式错误 (HTTP ${response.status}): ${responseText.substring(0, 100)}`);
+    }
+
+    if (!response.ok) {
+      if (response.status === 405) {
+        throw new Error(`Method Not Allowed (405): 请检查 API 地址是否正确。如果使用 Ollama Cloud，请确保地址为 https://ollama.com/api/chat 并带上 API Key。`);
+      }
+      throw new Error(data.error || `Ollama API 错误 (HTTP ${response.status})`);
+    }
+
+    // 提取内容 (Ollama 原生响应格式为 message.content)
+    const content = data.message?.content || data.response;
+    if (!content) {
+      throw new Error('Ollama API 未返回有效内容');
     }
 
     return content;
@@ -398,6 +629,13 @@ export class LLMService {
 
     if (provider === 'gemini') {
       return this.buildGeminiUrl(apiUrl, model, false);
+    } else if (provider === 'ollama') {
+      let url = apiUrl.trim();
+      if (url.endsWith('/')) url = url.slice(0, -1);
+      if (!url.endsWith('/chat') && !url.endsWith('/generate')) {
+        url = `${url}/chat`;
+      }
+      return url;
     } else {
       return this.buildOpenAIUrl(apiUrl, provider);
     }
@@ -411,7 +649,7 @@ export class LLMService {
       return { valid: false, error: 'API地址不能为空' };
     }
 
-    if (!config.llm.apiKey) {
+    if (!config.llm.apiKey && config.llm.provider !== 'lmstudio') {
       return { valid: false, error: 'API密钥不能为空' };
     }
 

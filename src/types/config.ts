@@ -1,4 +1,4 @@
-export type LLMProvider = 'openai' | 'gemini' | 'custom';
+export type LLMProvider = 'openai' | 'gemini' | 'custom' | 'lmstudio' | 'ollama';
 
 // 单个 LLM 配置
 export interface LLMConfig {
@@ -9,6 +9,8 @@ export interface LLMConfig {
   apiKey: string;
   model: string;
   timeout?: number;     // 超时时间（秒）
+  maxTokens?: number;   // 最大生成 Token 数
+  temperature?: number; // 温度
   createdAt: number;    // 创建时间戳
   updatedAt: number;    // 更新时间戳
 }
@@ -23,14 +25,21 @@ export interface PluginConfig {
     apiKey: string;
     model: string;
     timeout?: number;  // 超时时间（秒）
+    maxTokens?: number;
+    temperature?: number;
   };
   prompt: {
+    systemPrompt: string;
     template: string;
   };
   settings: {
     language: string;
     cacheDirectory: string;
     enableCache: boolean;  // 是否启用思维导图缓存
+    asrProvider: 'official' | 'local'; // 语音识别提供商
+    localAsrUrl: string;               // 本地 ASR 服务地址
+    asrBeamSize: number;               // ASR 束搜索宽度
+    asrVadFilter: boolean;             // ASR 是否开启 VAD 过滤
   };
   // 排除关键词列表
   exclusionKeywords: string[];
@@ -63,6 +72,18 @@ export function createDefaultLLMConfig(provider: LLMProvider = 'openai'): LLMCon
       apiUrl: '',
       model: '',
     },
+    lmstudio: {
+      name: 'LM Studio (本地)',
+      provider: 'lmstudio',
+      apiUrl: 'http://localhost:1234/v1',
+      model: 'qwen_qwen3.5-9b',
+    },
+    ollama: {
+      name: 'Ollama (本地/云端)',
+      provider: 'ollama',
+      apiUrl: 'http://localhost:11434/api',
+      model: 'llama3',
+    },
   };
 
   return {
@@ -70,6 +91,8 @@ export function createDefaultLLMConfig(provider: LLMProvider = 'openai'): LLMCon
     ...configs[provider],
     apiKey: '',
     timeout: 60,
+    maxTokens: 4096,
+    temperature: 0.7,
     createdAt: now,
     updatedAt: now,
   } as LLMConfig;
@@ -83,6 +106,8 @@ export const DEFAULT_LLM_CONFIG: LLMConfig = {
   apiKey: '',
   model: 'gpt-3.5-turbo',
   timeout: 60,
+  maxTokens: 4096,
+  temperature: 0.7,
   createdAt: 0,
   updatedAt: 0,
 };
@@ -94,29 +119,44 @@ export const DEFAULT_CONFIG: PluginConfig = {
     apiUrl: 'https://api.openai.com/v1',
     apiKey: '',
     model: 'gpt-3.5-turbo',
-    timeout: 60  // 默认 60 秒
+    timeout: 60,  // 默认 60 秒
+    maxTokens: 4096,
+    temperature: 0.7
   },
   prompt: {
-    template: `请将以下视频字幕内容总结为一个思维导图，使用纯Markdown格式。
+    systemPrompt: `# Role: 资深知识分析师 & 思维导图可视化专家
 
-要求：
-1. 使用标准的Markdown标题层级（# 一级标题、## 二级标题等）表示思维导图结构
-2. 使用无序列表（-）表示分支节点
-3. 提取主要观点和关键信息
-4. 保持逻辑层次清晰
-5. 使用简洁的语言
-6. 不要使用任何特殊语法或Mermaid
-7. 重要：在节点文本内容中，不要使用Markdown格式符号（如 *、**、\` 等），只保留纯文本
+## Task: 
+将视频字幕稿（Transcript）转化为逻辑严密、层次清晰的 Markdown 思维导图。
 
-字幕内容：
-{subtitle_content}
+## Constraints:
+1. **结构化层级**：
+   - 最高层级唯一：使用单个 # 标题。
+   - 子层级：使用 ##, ### 直至最多 6 层。
+   - 严禁对各级标题进行数字编号（如 1.1, 1.2）。
+   - 采用标准 Markdown 层次缩进，确保树状关系清晰。
+2. **内容提炼规则**：
+   - **定性概括**：将口语化的表达转化为书面逻辑观点。
+   - **颗粒度平衡**：涵盖核心结论、支撑论据、关键案例。
+   - **数据敏感**：涉及市场波动、价格、百分比等数字点位时，必须精准保留。
+   - **聚合归并**：对散落在全文的同类信息进行归口整合。
+3. **忠实原意**：严禁虚构、增删原文未提及的观点。
+4. **输出限制**：仅输出标准 Markdown 内容，严禁任何开场白、解释或结束语。
 
-请直接输出Markdown格式的思维导图，不要包含其他说明文字。`
+## Workflow:
+1. 过滤字幕中的口语干扰项。
+2. 识别主旨逻辑及从属关系。
+3. 按照定性标题结合定量数据的原则，构建思维导图。`,
+    template: '字幕内容：\n{subtitle_content}'
   },
   settings: {
     language: 'zh-CN',
     cacheDirectory: '',
-    enableCache: true  // 默认开启缓存
+    enableCache: true,  // 默认开启缓存
+    asrProvider: 'official',
+    localAsrUrl: 'http://localhost:5000/transcribe',
+    asrBeamSize: 2,
+    asrVadFilter: true
   },
   exclusionKeywords: []
 };

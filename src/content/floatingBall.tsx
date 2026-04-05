@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
 import { FloatingBall } from '../components/FloatingBall';
 import { MindmapViewer } from '../components/MindmapViewer';
@@ -20,6 +20,7 @@ interface CurrentTask {
   videoTitle?: string;
   result?: any;
   errorMessage?: string;  // 任务失败时的错误信息
+  statusMessage?: string; // 任务运行时的进度信息
 }
 
 function FloatingBallApp() {
@@ -28,6 +29,14 @@ function FloatingBallApp() {
   const [mindmapData, setMindmapData] = useState<any>(null);
   const [currentTask, setCurrentTask] = useState<CurrentTask | undefined>();
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const showToast = useCallback((message: string, duration = 3000) => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    setToastMessage(message);
+    toastTimerRef.current = setTimeout(() => setToastMessage(null), duration);
+  }, []);
 
   // 标准化 URL 用于比较
   const normalizeUrl = useCallback((url: string) => {
@@ -67,7 +76,8 @@ function FloatingBallApp() {
             status: task.status,
             videoTitle,
             result: task.result,
-            errorMessage: task.error  // 传递错误信息给组件
+            errorMessage: task.error,  // 传递错误信息给组件
+            statusMessage: task.statusMessage // 传递进度信息给组件
           };
 
           setCurrentTask(newTaskState);
@@ -175,7 +185,7 @@ function FloatingBallApp() {
     // 如果任务正在运行中
     if (currentTask?.status === 'running' || currentTask?.status === 'processing') {
       console.log('[FloatingBall] 任务正在运行中');
-      alert('任务正在进行中，请稍候...');
+      showToast('任务正在进行中，请稍候...');
       return;
     }
 
@@ -193,24 +203,19 @@ function FloatingBallApp() {
         setMindmapData(response.mindmap);
         setShowViewer(true);
       } else {
-        // 如果没有找到当前视频的思维导图，且没有任务在运行，提示手动生成
-        console.log('[FloatingBall] 本页暂无思维导图');
-        const confirmGenerate = window.confirm('本页暂无思维导图，是否立即生成？');
-
-        if (confirmGenerate) {
-          console.log('[FloatingBall] 用户确认强制生成');
-          try {
-            const downloadResponse = await chrome.runtime.sendMessage({
-              type: 'DOWNLOAD_SUBTITLE',
-              payload: { videoUrl: window.location.href }
-            });
-            console.log('[FloatingBall] 强制生成请求已发送:', downloadResponse);
-            alert('生成任务已开始，请稍候...');
-            fetchCurrentTask(); // 立即刷新状态
-          } catch (err) {
-            console.error('[FloatingBall] 发送生成请求失败:', err);
-            alert('启动生成任务失败，请稍后重试');
-          }
+        // 如果没有找到当前视频的思维导图，且没有任务在运行，直接开始生成
+        console.log('[FloatingBall] 本页暂无思维导图，自动开始生成');
+        try {
+          const downloadResponse = await chrome.runtime.sendMessage({
+            type: 'DOWNLOAD_SUBTITLE',
+            payload: { videoUrl: window.location.href }
+          });
+          console.log('[FloatingBall] 生成请求已发送:', downloadResponse);
+          showToast('正在开始生成思维导图...');
+          fetchCurrentTask(); // 立即刷新状态
+        } catch (err) {
+          console.error('[FloatingBall] 发送生成请求失败:', err);
+          showToast('启动生成任务失败，请稍后重试');
         }
       }
     } catch (error) {
@@ -220,6 +225,35 @@ function FloatingBallApp() {
 
   const handleCloseViewer = () => {
     setShowViewer(false);
+  };
+
+  const handleRetry = async () => {
+    setShowViewer(false);
+    try {
+      await chrome.runtime.sendMessage({
+        type: 'DOWNLOAD_SUBTITLE',
+        payload: { videoUrl: window.location.href, force: false }
+      });
+      showToast('正在重新生成思维导图...');
+    } catch (err) {
+      showToast('操作失败，请稍后重试');
+    }
+  };
+
+  const handleReTranscribe = async () => {
+    if (!confirm('确定要清除缓存并重新录制语音识别吗？这将花费较多时间。')) {
+      return;
+    }
+    setShowViewer(false);
+    try {
+      await chrome.runtime.sendMessage({
+        type: 'DOWNLOAD_SUBTITLE',
+        payload: { videoUrl: window.location.href, force: true }
+      });
+      showToast('正在强制重新识别并生成...');
+    } catch (err) {
+      showToast('操作失败，请稍后重试');
+    }
   };
 
   return (
@@ -234,7 +268,12 @@ function FloatingBallApp() {
         <MindmapViewer
           mindmapData={mindmapData}
           onClose={handleCloseViewer}
+          onRetry={handleRetry}
+          onReTranscribe={handleReTranscribe}
         />
+      )}
+      {toastMessage && (
+        <div className="mindmap-toast">{toastMessage}</div>
       )}
     </>
   );

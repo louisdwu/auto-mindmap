@@ -1,5 +1,6 @@
 import { TaskManager } from './taskManager';
 import { StorageService } from '../services/storageService';
+import { SubtitleService } from '../services/subtitleService';
 import { ExtensionMessage } from '../types/messages';
 
 export class MessageHandler {
@@ -51,10 +52,12 @@ export class MessageHandler {
     }
   }
 
-  private async handleDownloadSubtitle(payload: { videoUrl: string }, tabId?: number) {
-    // 双重保险：在后台也检查缓存
+  private async handleDownloadSubtitle(payload: { videoUrl: string, force?: boolean }, tabId?: number) {
+    const isForce = payload.force === true;
+
+    // 如果不是强制模式且启用了缓存，检查已有的思维导图
     const config = await StorageService.getConfig();
-    if (config?.settings.enableCache) {
+    if (!isForce && config?.settings.enableCache) {
       const cachedMindmap = await StorageService.getLatestMindmapByUrl(payload.videoUrl);
       if (cachedMindmap) {
         console.log('[MessageHandler] 找到缓存的思维导图，跳过下载字幕:', cachedMindmap.id);
@@ -62,7 +65,16 @@ export class MessageHandler {
       }
     }
     
-    const task = await this.taskManager.createDownloadTask(payload.videoUrl, tabId);
+    // 如果是强制模式，显式删除 ASR 缓存 (如果是本地 ASR)
+    if (isForce) {
+      const videoId = SubtitleService.extractVideoId(payload.videoUrl);
+      if (videoId) {
+        console.log('[MessageHandler] 强制模式：正在清除 ASR 缓存, ID:', videoId);
+        await StorageService.deleteAsrCache(videoId);
+      }
+    }
+
+    const task = await this.taskManager.createDownloadTask(payload.videoUrl, tabId, isForce);
     return { taskId: task.id };
   }
 
@@ -110,10 +122,10 @@ export class MessageHandler {
     return { task };
   }
 
-  private async handleGenerateMindmapDirect(payload: { videoUrl: string, subtitleText: string, videoTitle: string }, tabId?: number) {
+  private async handleGenerateMindmapDirect(payload: { videoUrl: string, subtitleText: string, videoTitle: string, force?: boolean }, tabId?: number) {
     // 双重保险：在后台也检查缓存
     const config = await StorageService.getConfig();
-    if (config?.settings.enableCache) {
+    if (payload.force !== true && config?.settings.enableCache) {
       const cachedMindmap = await StorageService.getLatestMindmapByUrl(payload.videoUrl);
       if (cachedMindmap) {
         console.log('[MessageHandler] 找到缓存的思维导图，跳过生成:', cachedMindmap.id);

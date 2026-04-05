@@ -1,3 +1,8 @@
+import { PluginConfig } from '../types/config';
+import { AudioService } from './audioService';
+import { LLMService } from './llmService';
+import { StorageService } from './storageService';
+
 export interface SubtitleInfo {
   id: string;
   lan: string;
@@ -139,13 +144,19 @@ export class SubtitleService {
   }
 
   /**
-   * 完整的字幕下载流程（仅支持 Bilibili）
-   * YouTube 使用拦截器方式获取字幕，不通过此方法
+   * 完整的字幕获取流程（支持 Bilibili）
+   * 增加 ASR 回退机制：如果没有字幕，则尝试语音识别
    */
-  static async downloadChineseSubtitle(videoUrl: string): Promise<{
+  static async downloadChineseSubtitle(
+    videoUrl: string, 
+    config: PluginConfig,
+    onProgress?: (task: string) => void,
+    forceMode: boolean = false
+  ): Promise<{
     videoUrl: string;
     videoTitle: string;
     subtitleText: string;
+    isAsr?: boolean;
   }> {
     if (videoUrl.includes('youtube.com')) {
       throw new Error('YouTube 字幕请等待视频播放自动获取');
@@ -158,32 +169,85 @@ export class SubtitleService {
     }
 
     // 2. 获取视频信息
+    onProgress?.('正在获取视频信息...');
     const videoInfo = await this.getVideoInfo(videoId);
 
-    // 3. 获取字幕列表
+    // 3. 尝试获取官方字幕列表
+    onProgress?.('正在检查官方字幕...');
     const subtitles = await this.getSubtitleList(videoInfo.aid, videoInfo.cid);
     
-    if (subtitles.length === 0) {
-      throw new Error('该视频没有字幕');
-    }
-
-    // 4. 筛选中文字幕
+    // 4. 如果有官方字幕，优先使用
     const chineseSubtitles = this.filterChineseSubtitles(subtitles);
-    
-    if (chineseSubtitles.length === 0) {
-      throw new Error('该视频没有中文字幕');
+    if (chineseSubtitles.length > 0) {
+      onProgress?.('正在下载官方中文字幕...');
+      const subtitleData = await this.downloadSubtitle(chineseSubtitles[0].subtitle_url);
+      const subtitleText = this.extractPlainText(subtitleData);
+      
+      if (subtitleText && subtitleText.trim()) {
+        return {
+          videoUrl,
+          videoTitle: videoInfo.title,
+          subtitleText,
+          isAsr: false
+        };
+      }
     }
 
-    // 5. 下载第一个中文字幕
-    const subtitleData = await this.downloadSubtitle(chineseSubtitles[0].subtitle_url);
+    // 5. 如果没有官方字幕，进入 ASR 流程
+    onProgress?.('未检测到官方字幕，尝试进行语音识别...');
+    
+    try {
+      onProgress?.('正在抓取音频流地址 (DASH)...');
+      const audioUrl = await AudioService.getAudioUrl(videoInfo.bvid, videoInfo.cid);
+      
+      const isLocal = config.settings.asrProvider === 'local';
+      let transcribedText = '';
 
-    // 6. 提取纯文本
-    const subtitleText = this.extractPlainText(subtitleData);
+      // 5.1 检查 ASR 缓存 (仅在非强制模式下)
+      if (!forceMode) {
+        onProgress?.('正在检索本地 ASR 缓存...');
+        const cachedText = await StorageService.getAsrCache(videoInfo.bvid);
+        if (cachedText) {
+          onProgress?.('找到匹配的 ASR 缓存，直接使用');
+          return {
+            videoUrl,
+            videoTitle: videoInfo.title,
+            subtitleText: cachedText,
+            isAsr: true
+          };
+        }
+      }
 
-    return {
-      videoUrl,
-      videoTitle: videoInfo.title,
-      subtitleText
-    };
+      if (isLocal) {
+        // 本地 ASR 模式：直接把 URL 丢给后端 Python 下载，避开浏览器 Referer 限制
+        onProgress?.('正在通过本地服务器下载并识别 (2080ti)...');
+        transcribedText = await LLMService.transcribeAudio(config, audioUrl, onProgress);
+      } else {
+        // 远程 ASR 模式：尝试在浏览器端下载音频并上传
+        onProgress?.('正在下载视频音频...');
+        const audioBlob = await AudioService.downloadAudioBlob(audioUrl);
+        onProgress?.('正在通过云端 Whisper 识别语音...');
+        transcribedText = await LLMService.transcribeAudio(config, audioBlob, onProgress);
+      }
+
+      if (transcribedText && transcribedText.trim().length > 0) {
+        // 识别成功，存入缓存
+        await StorageService.saveAsrCache(videoInfo.bvid, transcribedText);
+      }
+
+      if (!transcribedText || transcribedText.trim().length === 0) {
+        throw new Error('语音识别返回内容为空');
+      }
+
+      return {
+        videoUrl,
+        videoTitle: videoInfo.title,
+        subtitleText: transcribedText,
+        isAsr: true
+      };
+    } catch (asrError: any) {
+      console.error('[SubtitleService] ASR failed:', asrError);
+      throw new Error(`该视频没有字幕，且语音识别失败: ${asrError.message || asrError}`);
+    }
   }
 }
