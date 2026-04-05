@@ -1,5 +1,6 @@
 @echo off
 setlocal
+chcp 65001 >nul
 title ASR_Server
 cd /d %~dp0
 
@@ -14,15 +15,15 @@ echo Starting Faster-Whisper ASR (Optimized for 2080 Ti)...
 set WHISPER_DEVICE=cuda
 set WHISPER_COMPUTE=float16
 
-:: --- 高性能配置 (针对 2080 Ti 11G 显存) ---
-:: 并行 Worker 数量，建议 11G 显存设为 2，可显著提升 GPU 利用率和转录速度
+:: --- High Performance Config (2080 Ti 11G) ---
+:: GPU Worker count
 set WHISPER_NUM_WORKERS=2
-:: CPU 辅助线程数
+:: CPU threads
 set WHISPER_CPU_THREADS=4
-:: 默认模型名称 (large-v2, large-v3, medium 等)
+:: Default model
 set WHISPER_MODEL=large-v2
 
-:: 任务参数 (若插件发送了参数则会被覆盖)
+:: Task parameters (will be overridden by request)
 set WHISPER_BEAM_SIZE=5
 set WHISPER_VAD_FILTER=True
 

@@ -23,6 +23,7 @@ export interface NodePosition {
   y: number;
   width: number;
   height: number;
+  baseHeight: number; // 视觉基础高度（不含间距扩展）
   level: number;
   hasChildren: boolean;
   expanded: boolean;
@@ -116,8 +117,8 @@ function calculateNodeDimensions(
   nodes: INodeData[],
   _defaultWidth: number,
   _defaultHeight: number
-): Map<string, { width: number; height: number }> {
-  const dimensions = new Map<string, { width: number; height: number }>();
+): Map<string, { width: number; height: number; baseHeight: number }> {
+  const dimensions = new Map<string, { width: number; height: number; baseHeight: number }>();
 
   for (const node of nodes) {
     const text = node.text;
@@ -165,7 +166,8 @@ function calculateNodeDimensions(
 
     dimensions.set(node.id, {
       width: estimatedWidth,
-      height: estimatedHeight
+      height: estimatedHeight,
+      baseHeight: fontConfig.baseHeight
     });
   }
 
@@ -178,7 +180,7 @@ function calculateNodeDimensions(
 function calculateBothDirectionLayout(
   root: INodeData,
   positions: Map<string, NodePosition>,
-  dimensions: Map<string, { width: number; height: number }>,
+  dimensions: Map<string, { width: number; height: number; baseHeight: number }>,
   options: { horizontalSpacing: number; verticalSpacing: number; centerOffset: number; levelSpacingMultiplier: number }
 ): void {
   const { horizontalSpacing, verticalSpacing, centerOffset } = options;
@@ -192,6 +194,7 @@ function calculateBothDirectionLayout(
     y: 0,
     width: rootDim.width,
     height: rootDim.height,
+    baseHeight: rootDim.baseHeight,
     level: root.level,
     hasChildren: root.children.length > 0,
     expanded: root.expanded || false
@@ -229,6 +232,7 @@ if (leftChildren.length > 0) {
       y,
       width: childDim.width,
       height: childDim.height,
+      baseHeight: childDim.baseHeight,
       level: child.level,
       hasChildren: child.children.length > 0,
       expanded: child.expanded || false,
@@ -276,6 +280,7 @@ if (rightChildren.length > 0) {
       y,
       width: childDim.width,
       height: childDim.height,
+      baseHeight: childDim.baseHeight,
       level: child.level,
       hasChildren: child.children.length > 0,
       expanded: child.expanded || false,
@@ -307,7 +312,7 @@ if (rightChildren.length > 0) {
 function calculateSingleDirectionLayout(
   root: INodeData,
   positions: Map<string, NodePosition>,
-  dimensions: Map<string, { width: number; height: number }>,
+  dimensions: Map<string, { width: number; height: number; baseHeight: number }>,
   options: { horizontalSpacing: number; verticalSpacing: number; direction: 'left' | 'right'; levelSpacingMultiplier: number }
 ): void {
   const { horizontalSpacing, verticalSpacing, direction } = options;
@@ -323,6 +328,7 @@ function calculateSingleDirectionLayout(
     y: 0,
     width: rootDim.width,
     height: rootDim.height,
+    baseHeight: rootDim.baseHeight,
     level: root.level,
     hasChildren: root.children.length > 0,
     expanded: root.expanded || false
@@ -348,7 +354,7 @@ function calculateSingleDirectionLayout(
 function layoutChildBranch(
   parent: INodeData,
   positions: Map<string, NodePosition>,
-  dimensions: Map<string, { width: number; height: number }>,
+  dimensions: Map<string, { width: number; height: number; baseHeight: number }>,
   currentX: number,
   currentY: number,
   direction: 'left' | 'right',
@@ -396,6 +402,7 @@ function layoutChildBranch(
       y,
       width: childDim.width,
       height: childDim.height,
+      baseHeight: childDim.baseHeight,
       level: child.level,
       hasChildren: child.children.length > 0,
       expanded: child.expanded || false,
@@ -426,7 +433,7 @@ function layoutChildBranch(
  */
 function calculateSubtreeHeight(
   nodes: INodeData[],
-  dimensions: Map<string, { width: number; height: number }>,
+  dimensions: Map<string, { width: number; height: number; baseHeight: number }>,
   verticalSpacing: number
 ): number {
   if (nodes.length === 0) return 0;
@@ -449,7 +456,7 @@ function calculateSubtreeHeight(
  */
 function calculateNodeBranchHeight(
   node: INodeData,
-  dimensions: Map<string, { width: number; height: number }>,
+  dimensions: Map<string, { width: number; height: number; baseHeight: number }>,
   verticalSpacing: number
 ): number {
   const nodeDim = dimensions.get(node.id)!;
@@ -484,11 +491,12 @@ export function generateLinkPath(
 
   // 父节点连接点（从节点边缘出发）
   const fromX = isLeftBranch ? from.x - from.width / 2 : from.x + from.width / 2;
-  const fromY = isFromRoot ? from.y : from.y + from.height / 2;
+  // 根节点从中心出发，其他节点从下划线（底部）出发
+  const fromY = isFromRoot ? from.y : from.y + from.baseHeight / 2;
 
-  // 子节点连接点（连接到节点边缘）
+  // 子节点连接点（连接到节点边缘底部/下划线处）
   const toX = isLeftBranch ? to.x + to.width / 2 : to.x - to.width / 2;
-  const toY = to.y + to.height / 2;
+  const toY = to.y + to.baseHeight / 2;
 
   // 计算水平距离
   const dx = Math.abs(toX - fromX);

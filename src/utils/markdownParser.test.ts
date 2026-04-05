@@ -48,14 +48,15 @@ describe('Markdown Parser', () => {
   });
 
   it('should handle indented text', () => {
-    const markdown = `主题
-  子主题1
-    子子主题1
-  子主题2`;
+    const markdown = `  主题
+    子主题1
+      子子主题1
+    子主题2`;
     const result = parseMarkdown(markdown);
     expect(result.text).toBe('中心主题');
-    expect(result.children.length).toBe(1);
-    expect(result.children[0].children.length).toBe(2);
+    expect(result.children.length).toBe(1); // '主题' 是唯一的 Level 1 节点
+    expect(result.children[0].text).toBe('主题');
+    expect(result.children[0].children.length).toBe(2); // '子主题1' 和 '子主题2'
   });
 
   it('should handle complex structure', () => {

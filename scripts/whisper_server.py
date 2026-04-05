@@ -51,6 +51,7 @@ if sys.platform == "win32":
 
 
 from faster_whisper import WhisperModel
+from tqdm import tqdm
 import uvicorn
 
 app = FastAPI(title="Faster Whisper Local ASR Server")
@@ -182,10 +183,17 @@ async def transcribe(
         )
         
         full_text = []
-        for segment in segments:
-            # 实时打印进度到控制台
-            # print(f"[{segment.start:.2f}s -> {segment.end:.2f}s] {segment.text}")
-            full_text.append(segment.text)
+        # 使用 tqdm 显示识别进度
+        with tqdm(total=info.duration, unit="s", desc="Transcribing", bar_format="{l_bar}{bar}| {n:.1f}/{total:.1f}s [{elapsed}<{remaining}]") as pbar:
+            last_end = 0
+            for segment in segments:
+                full_text.append(segment.text)
+                # 更新进度条
+                pbar.update(segment.end - last_end)
+                last_end = segment.end
+            # 确保进度条在结束时达到 100%
+            if last_end < info.duration:
+                pbar.update(info.duration - last_end)
         
         result_text = " ".join(full_text).strip()
         duration = time.time() - start_time
