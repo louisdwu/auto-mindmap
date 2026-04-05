@@ -194,7 +194,13 @@ export class TaskManager {
     }
 
     // 验证配置
-    const validation = LLMService.validateConfig(config);
+    const llmConfigs = await StorageService.getLLMConfigs();
+    const selectedId = config.selectedLLMConfigId || 'default';
+    const llmConfig = llmConfigs.find(c => c.id === selectedId) || llmConfigs[0];
+    
+    if (!llmConfig) throw new Error('未找到有效的 LLM 配置');
+
+    const validation = LLMService.validateConfig(llmConfig, config);
     if (!validation.valid) {
       throw new Error(validation.error);
     }

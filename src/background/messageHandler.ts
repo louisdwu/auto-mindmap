@@ -1,6 +1,6 @@
 import { TaskManager } from './taskManager';
 import { StorageService } from '../services/storageService';
-import { SubtitleService } from '../services/subtitleService';
+import { VideoUtils } from '../utils/videoUtils';
 import { ExtensionMessage } from '../types/messages';
 
 export class MessageHandler {
@@ -67,7 +67,7 @@ export class MessageHandler {
     
     // 如果是强制模式，显式删除 ASR 缓存 (如果是本地 ASR)
     if (isForce) {
-      const videoId = SubtitleService.extractVideoId(payload.videoUrl);
+      const videoId = VideoUtils.extractVideoId(payload.videoUrl);
       if (videoId) {
         console.log('[MessageHandler] 强制模式：正在清除 ASR 缓存, ID:', videoId);
         await StorageService.deleteAsrCache(videoId);

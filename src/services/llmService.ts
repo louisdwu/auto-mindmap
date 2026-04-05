@@ -1,4 +1,4 @@
-import { LLMProvider, PluginConfig } from '../types/config';
+import { LLMProvider, PluginConfig, LLMConfig } from '../types/config';
 import { StorageService } from './storageService';
 import { ILLMAdapter } from './llm/base';
 import { OpenAIAdapter } from './llm/adapters/OpenAIAdapter';
@@ -23,20 +23,14 @@ export class LLMService {
   }
 
   /**
-   * 构建完整的prompt
+   * 构建基础 Prompt
    */
-  static buildPrompt(template: string, subtitleText: string, provider?: LLMProvider): string {
-    let prompt = template.replace('{subtitle_content}', subtitleText);
-    
-    if (provider === 'lmstudio') {
-      prompt += "\n\nIMPORTANT: Please output the mindmap in Markdown format directly. Do NOT include any reasoning, thinking process, or <thought> tags in your response. Jump straight to the Markdown content.";
-    }
-    
-    return prompt;
+  static buildPrompt(template: string, subtitleText: string): string {
+    return template.replace('{subtitle_content}', subtitleText);
   }
 
   /**
-   * 调用大模型API生成思维导图
+   * 调用大模型 API 生成思维导图
    */
   static async generateMindmap(
     config: PluginConfig,
@@ -47,16 +41,18 @@ export class LLMService {
       throw new Error('未找到有效的 LLM 配置，请前往设置页面配置');
     }
 
-    const provider = llmConfig.provider;
-    const adapter = this.getAdapter(provider);
-    const prompt = this.buildPrompt(config.prompt.template, subtitleText, provider);
+    const adapter = this.getAdapter(llmConfig.provider);
     
-    // 默认超时时间处理
-    let defaultTimeoutSeconds = 60;
-    if (provider === 'lmstudio') {
-      defaultTimeoutSeconds = 180;
+    // 1. 基础 Prompt 构建
+    let prompt = this.buildPrompt(config.prompt.template, subtitleText);
+    
+    // 2. 允许适配器进行预处理（如特定提供商的补丁）
+    if (adapter.preprocessPrompt) {
+      prompt = adapter.preprocessPrompt(prompt);
     }
-    const timeout = (Number(llmConfig.timeout) || defaultTimeoutSeconds) * 1000;
+    
+    // 3. 超时时间处理
+    const timeout = (Number(llmConfig.timeout) || 60) * 1000;
 
     try {
       const content = await adapter.generateMindmap(config, llmConfig, prompt, timeout);
@@ -67,7 +63,7 @@ export class LLMService {
 
       return content;
     } catch (error: any) {
-      console.error(`[LLMService] 调用 ${provider} 失败:`, error);
+      console.error(`[LLMService] 调用 ${llmConfig.provider} 失败:`, error);
       throw new Error(this.parseError(error));
     }
   }
@@ -80,91 +76,54 @@ export class LLMService {
     audioData: Blob | string,
     onProgress?: (msg: string) => void
   ): Promise<string> {
-    // 如果配置为本地 ASR，强制使用 OpenAIAdapter 处理 (它内置了对 config.settings.localAsrUrl 的路由)
+    const llmConfig = await StorageService.getSelectedLLMConfig();
+    
+    // 如果配置为本地 ASR，强制使用 OpenAIAdapter 处理渲染 (它内部支持 localAsrUrl)
     if (config.settings.asrProvider === 'local') {
-      const llmConfig = await StorageService.getSelectedLLMConfig();
-      const adapter = this.adapters['openai']; // 使用 OpenAIAdapter 作为 ASR 调度器
-      const timeout = 300000; // 5 分钟超时
-      return adapter.transcribeAudio!(config, llmConfig!, audioData, timeout, onProgress);
+      const adapter = this.adapters['openai'];
+      const timeout = 300000; // 5 分钟
+      return adapter.transcribeAudio!(config, llmConfig || {} as LLMConfig, audioData, timeout, onProgress);
     }
 
-    // 官方/在线模式：使用当前选中的 LLM 提供商的适配器
-    const llmConfig = await StorageService.getSelectedLLMConfig();
     if (!llmConfig) {
       throw new Error('未找到有效的 LLM 配置，请前往设置页面配置');
     }
 
     const adapter = this.getAdapter(llmConfig.provider);
     if (!adapter.transcribeAudio) {
-      throw new Error(`当前提供商 ${llmConfig.provider} 不支持语音识别功能。请在设置中切换为“本地 ASR”或使用支持 Whisper 的提供商（如 OpenAI）。`);
+      throw new Error(`当前提供商 ${llmConfig.provider} 不支持语音识别功能。请切换为“本地 ASR”或使用支持 Whisper 的提供商。`);
     }
 
-    const timeout = 300000; // 5 分钟超时
+    const timeout = 300000; // 5 分钟
     return adapter.transcribeAudio(config, llmConfig, audioData, timeout, onProgress);
   }
 
   /**
-   * 获取完整的请求 URL 预览
+   * 获取完整的请求 URL 预览（供 Options UI 使用）
    */
   static getFullRequestUrl(provider: LLMProvider, apiUrl: string, model: string): string {
     if (!apiUrl) return '';
-
-    if (provider === 'gemini') {
-      // 复用逻辑或抽离到 Util
-      return this.buildGeminiUrl(apiUrl, model, false);
-    } else if (provider === 'ollama') {
-      let url = apiUrl.trim();
-      if (url.endsWith('/')) url = url.slice(0, -1);
-      if (!url.endsWith('/chat') && !url.endsWith('/generate')) {
-        url = `${url}/chat`;
-      }
-      return url;
-    } else {
-      // OpenAI 风格
-      let url = apiUrl.trim();
-      if (url.endsWith('/')) url = url.slice(0, -1);
-      if ((provider === 'openai' || provider === 'lmstudio') && !url.endsWith('/chat/completions')) {
-        url = url + '/chat/completions';
-      }
-      return url;
+    try {
+      const adapter = this.getAdapter(provider);
+      // 临时构造一个 config 对象用于预览
+      const tempConfig = { provider, apiUrl, model, apiKey: '***' } as LLMConfig;
+      return adapter.getFullUrl(tempConfig);
+    } catch {
+      return apiUrl;
     }
-  }
-
-  /**
-   * 辅助方法：构建 Gemini URL (保持向下兼容预览)
-   */
-  private static buildGeminiUrl(apiUrl: string, model: string, showApiKey: boolean): string {
-    let url = apiUrl.trim();
-    if (url.endsWith('/')) url = url.slice(0, -1);
-    const modelName = model || 'gemini-1.5-flash';
-    if (!url.includes('/models/') && !url.includes(':generateContent')) {
-      url = `${url}/models/${modelName}:generateContent`;
-    } else if (url.includes('/models/') && !url.includes(':generateContent')) {
-      url = `${url}:generateContent`;
-    }
-    const separator = url.includes('?') ? '&' : '?';
-    if (!url.includes('key=')) {
-      url = `${url}${separator}key=${showApiKey ? '{API_KEY}' : '***'}`;
-    }
-    return url;
   }
 
   /**
    * 区分错误类型并返回友好的错误信息
    */
   static parseError(error: any): string {
-    let errorMessage = '';
-    if (error instanceof Error) {
-      errorMessage = error.message;
-    } else {
-      errorMessage = String(error);
-    }
+    const errorMessage = error instanceof Error ? error.message : String(error);
 
-    if (errorMessage.includes('fetch') || errorMessage.includes('网络')) {
-      return `网络错误：无法连接到API服务器，请检查网络连接和API地址是否正确`;
+    if (errorMessage.includes('fetch') || errorMessage.includes('网络') || errorMessage.includes('Failed to fetch')) {
+      return `网络错误：无法连接到 API 服务器，请检查网络连接、API 地址或 CORS 设置`;
     }
-    if (errorMessage.includes('超时') || errorMessage.includes('timeout')) {
-      return `请求超时，请检查服务状态或尝试调大超时时间`;
+    if (errorMessage.includes('超时') || errorMessage.includes('timeout') || errorMessage.includes('AbortError')) {
+      return `请求超时，请检查服务状态或在设置中调大超时时间`;
     }
     return errorMessage;
   }
@@ -172,11 +131,13 @@ export class LLMService {
   /**
    * 验证配置是否有效
    */
-  static validateConfig(config: PluginConfig): { valid: boolean; error?: string } {
-    if (!config.llm.apiUrl) return { valid: false, error: 'API地址不能为空' };
-    if (!config.llm.apiKey && config.llm.provider !== 'lmstudio') return { valid: false, error: 'API密钥不能为空' };
-    if (!config.llm.model) return { valid: false, error: '模型名称不能为空' };
-    if (!config.prompt.template) return { valid: false, error: 'Prompt模板不能为空' };
+  static validateConfig(llmConfig: LLMConfig, pluginConfig: PluginConfig | any): { valid: boolean; error?: string } {
+    if (!llmConfig.apiUrl) return { valid: false, error: 'API 地址不能为空' };
+    if (!llmConfig.apiKey && llmConfig.provider !== 'lmstudio' && llmConfig.provider !== 'ollama') {
+      return { valid: false, error: 'API 密钥不能为空' };
+    }
+    if (!llmConfig.model) return { valid: false, error: '模型名称不能为空' };
+    if (!pluginConfig.prompt.template) return { valid: false, error: 'Prompt 模板不能为空' };
     return { valid: true };
   }
 }

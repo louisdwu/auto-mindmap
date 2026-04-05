@@ -1,23 +1,19 @@
 import { ILLMAdapter } from '../base';
+import { BaseAdapter } from '../BaseAdapter';
 import { LLMConfig, PluginConfig } from '../../../types/config';
 
-export class OllamaAdapter implements ILLMAdapter {
-  private async fetchWithTimeout(
-    url: string,
-    options: RequestInit,
-    timeout: number
-  ): Promise<Response> {
-    const timeoutPromise = new Promise<never>((_, reject) => {
-      setTimeout(() => {
-        reject(new Error(`请求超时（${timeout / 1000}秒），请检查网络连接或API服务是否正常`));
-      }, timeout);
-    });
-
-    const response = await Promise.race([
-      fetch(url, options),
-      timeoutPromise
-    ]);
-    return response as Response;
+export class OllamaAdapter extends BaseAdapter implements ILLMAdapter {
+  /**
+   * 获取完整的 API 请求 URL (Ollama)
+   */
+  getFullUrl(llmConfig: LLMConfig): string {
+    let url = this.normalizeUrl(llmConfig.apiUrl);
+    
+    // 如果没有指定具体 endpoint，默认使用 /api/chat
+    if (!url.endsWith('/chat') && !url.endsWith('/generate') && !url.endsWith('/api/chat') && !url.endsWith('/api/generate')) {
+      url = url.includes('/api') ? `${url}/chat` : `${url}/api/chat`;
+    }
+    return url;
   }
 
   async generateMindmap(
@@ -26,12 +22,7 @@ export class OllamaAdapter implements ILLMAdapter {
     prompt: string,
     timeout: number
   ): Promise<string> {
-    let url = llmConfig.apiUrl.trim();
-    if (url.endsWith('/')) url = url.slice(0, -1);
-    
-    if (!url.endsWith('/chat') && !url.endsWith('/generate')) {
-      url = `${url}/chat`;
-    }
+    const url = this.getFullUrl(llmConfig);
 
     const messages: any[] = [];
     if (config.prompt.systemPrompt && config.prompt.systemPrompt.trim()) {

@@ -11,13 +11,6 @@ export class StorageMigration {
       ...DEFAULT_CONFIG,
       ...config,
       selectedLLMConfigId: config.selectedLLMConfigId || DEFAULT_CONFIG.selectedLLMConfigId,
-      llm: {
-        ...DEFAULT_CONFIG.llm,
-        ...config.llm,
-        timeout: config.llm?.timeout || 60,
-        maxTokens: config.llm?.maxTokens || 4096,
-        temperature: config.llm?.temperature ?? 0.7
-      },
       prompt: {
         ...DEFAULT_CONFIG.prompt,
         ...config.prompt,
@@ -36,7 +29,7 @@ export class StorageMigration {
   /**
    * 将旧版单一 LLM 配置迁移到新版 LLMConfig 列表
    */
-  static migrateToLLMConfigs(pluginConfig: PluginConfig): LLMConfig | null {
+  static migrateToLLMConfigs(pluginConfig: any): LLMConfig | null {
     if (pluginConfig && pluginConfig.llm && pluginConfig.llm.apiKey) {
       const providerName = pluginConfig.llm.provider === 'openai' ? 'OpenAI' : 
                          pluginConfig.llm.provider === 'gemini' ? 'Gemini' : '自定义';
@@ -49,6 +42,8 @@ export class StorageMigration {
         apiKey: pluginConfig.llm.apiKey,
         model: pluginConfig.llm.model,
         timeout: pluginConfig.llm.timeout || 60,
+        maxTokens: pluginConfig.llm.maxTokens || 4096,
+        temperature: pluginConfig.llm.temperature ?? 0.7,
         createdAt: Date.now(),
         updatedAt: Date.now(),
       };

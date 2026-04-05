@@ -1,34 +1,14 @@
 import { ILLMAdapter } from '../base';
+import { BaseAdapter } from '../BaseAdapter';
 import { LLMConfig, PluginConfig } from '../../../types/config';
 
-export class GeminiAdapter implements ILLMAdapter {
-  private async fetchWithTimeout(
-    url: string,
-    options: RequestInit,
-    timeout: number
-  ): Promise<Response> {
-    const timeoutPromise = new Promise<never>((_, reject) => {
-      setTimeout(() => {
-        reject(new Error(`请求超时（${timeout / 1000}秒），请检查网络连接或API服务是否正常`));
-      }, timeout);
-    });
-
-    const response = await Promise.race([
-      fetch(url, options),
-      timeoutPromise
-    ]);
-    return response as Response;
-  }
-
-  async generateMindmap(
-    config: PluginConfig,
-    llmConfig: LLMConfig,
-    prompt: string,
-    timeout: number
-  ): Promise<string> {
-    let url = llmConfig.apiUrl.trim();
-    if (url.endsWith('/')) url = url.slice(0, -1);
-    const modelName = llmConfig.model || 'gemini-pro';
+export class GeminiAdapter extends BaseAdapter implements ILLMAdapter {
+  /**
+   * 获取完整的 API 请求 URL (Gemini)
+   */
+  getFullUrl(llmConfig: LLMConfig): string {
+    let url = this.normalizeUrl(llmConfig.apiUrl);
+    const modelName = llmConfig.model || 'gemini-1.5-flash';
 
     const hasModelsPath = url.includes('/models/');
     const hasGenerateContent = url.includes(':generateContent');
@@ -40,9 +20,19 @@ export class GeminiAdapter implements ILLMAdapter {
     }
 
     const separator = url.includes('?') ? '&' : '?';
-    if (!url.includes('key=')) {
+    if (!url.includes('key=') && llmConfig.apiKey) {
       url = `${url}${separator}key=${llmConfig.apiKey}`;
     }
+    return url;
+  }
+
+  async generateMindmap(
+    config: PluginConfig,
+    llmConfig: LLMConfig,
+    prompt: string,
+    timeout: number
+  ): Promise<string> {
+    const url = this.getFullUrl(llmConfig);
 
     const requestBody: any = {
       contents: [{ parts: [{ text: prompt }] }],

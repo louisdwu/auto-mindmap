@@ -1,34 +1,31 @@
 import { ILLMAdapter } from '../base';
+import { BaseAdapter } from '../BaseAdapter';
 import { LLMConfig, PluginConfig } from '../../../types/config';
 
-export class OpenAIAdapter implements ILLMAdapter {
-  private async fetchWithTimeout(
-    url: string,
-    options: RequestInit,
-    timeout: number
-  ): Promise<Response> {
-    const timeoutPromise = new Promise<never>((_, reject) => {
-      setTimeout(() => {
-        reject(new Error(`请求超时（${timeout / 1000}秒），请检查网络连接或API服务是否正常`));
-      }, timeout);
-    });
-
-    const response = await Promise.race([
-      fetch(url, options),
-      timeoutPromise
-    ]);
-    return response as Response;
-  }
-
-  private buildOpenAIUrl(url: string, provider: string): string {
-    if (!url) return '';
-    let apiUrl = url.trim();
-    if (apiUrl.endsWith('/')) apiUrl = apiUrl.slice(0, -1);
+export class OpenAIAdapter extends BaseAdapter implements ILLMAdapter {
+  /**
+   * 获取完整的 API 请求 URL
+   */
+  getFullUrl(llmConfig: LLMConfig): string {
+    let apiUrl = this.normalizeUrl(llmConfig.apiUrl);
+    const provider = llmConfig.provider;
     
-    if ((provider === 'openai' || provider === 'lmstudio') && !apiUrl.endsWith('/chat/completions')) {
+    if ((provider === 'openai' || provider === 'lmstudio' || provider === 'custom') && !apiUrl.endsWith('/chat/completions')) {
       apiUrl = apiUrl + '/chat/completions';
     }
     return apiUrl;
+  }
+
+  /**
+   * 针对不同提供商预处理 Prompt
+   */
+  override preprocessPrompt(prompt: string): string {
+    // 逻辑原先在 LLMService 中，现在下沉到 Adapter
+    // 针对 LM Studio 的特殊补丁，防止其输出推理过程
+    if (prompt.includes('lmstudio')) { // 注意：这里的判断逻辑可能需要由外部传入 provider 信息，或者 Adapter 实例化时已知
+       // 在 generateMindmap 中处理更准确
+    }
+    return prompt;
   }
 
   async generateMindmap(
@@ -37,13 +34,19 @@ export class OpenAIAdapter implements ILLMAdapter {
     prompt: string,
     timeout: number
   ): Promise<string> {
-    const apiUrl = this.buildOpenAIUrl(llmConfig.apiUrl, llmConfig.provider);
+    const apiUrl = this.getFullUrl(llmConfig);
     
+    // 如果是 LM Studio，添加防推理补丁
+    let finalPrompt = prompt;
+    if (llmConfig.provider === 'lmstudio') {
+      finalPrompt += "\n\nIMPORTANT: Please output the mindmap in Markdown format directly. Do NOT include any reasoning, thinking process, or <thought> tags in your response. Jump straight to the Markdown content.";
+    }
+
     const messages: any[] = [];
     if (config.prompt.systemPrompt && config.prompt.systemPrompt.trim()) {
       messages.push({ role: 'system', content: config.prompt.systemPrompt.trim() });
     }
-    messages.push({ role: 'user', content: prompt });
+    messages.push({ role: 'user', content: finalPrompt });
 
     const requestBody = {
       model: llmConfig.model.trim(),
@@ -105,7 +108,7 @@ export class OpenAIAdapter implements ILLMAdapter {
     const isLocal = config.settings.asrProvider === 'local';
     const apiUrl = isLocal 
       ? config.settings.localAsrUrl 
-      : this.buildOpenAIUrl(llmConfig.apiUrl, llmConfig.provider).replace('/chat/completions', '/audio/transcriptions');
+      : this.getFullUrl(llmConfig).replace('/chat/completions', '/audio/transcriptions');
 
     onProgress?.('正在上传音频并识别中 (可能需要 15-60s)...');
 

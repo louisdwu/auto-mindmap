@@ -1,4 +1,5 @@
 import { PluginConfig } from '../types/config';
+import { VideoUtils } from '../utils/videoUtils';
 import { AudioService } from './audioService';
 import { LLMService } from './llmService';
 import { StorageService } from './storageService';
@@ -11,30 +12,6 @@ export interface SubtitleInfo {
 }
 
 export class SubtitleService {
-  /**
-   * 从视频URL中提取bvid或aid
-   */
-  static extractVideoId(url: string): string | null {
-    try {
-      const urlObj = new URL(url);
-      const pathParts = urlObj.pathname.split('/').filter(Boolean);
-      
-      // 处理 /video/BVxxx 格式
-      if (pathParts[0] === 'video' && pathParts[1]) {
-        return pathParts[1];
-      }
-      
-      // 处理 /video/avxxx 格式
-      if (pathParts[0] === 'video' && pathParts[1]?.startsWith('av')) {
-        return pathParts[1];
-      }
-      
-      return null;
-    } catch {
-      return null;
-    }
-  }
-
   /**
    * 获取视频信息
    */
@@ -163,7 +140,7 @@ export class SubtitleService {
     }
 
     // 1. 提取视频ID
-    const videoId = this.extractVideoId(videoUrl);
+    const videoId = VideoUtils.extractVideoId(videoUrl);
     if (!videoId) {
       throw new Error('无法从URL中提取视频ID');
     }

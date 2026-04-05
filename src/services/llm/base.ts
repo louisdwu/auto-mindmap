@@ -30,4 +30,15 @@ export interface ILLMAdapter {
     timeout: number,
     onProgress?: (msg: string) => void
   ): Promise<string>;
+
+  /**
+   * 获取完整的 API 请求 URL
+   */
+  getFullUrl(llmConfig: LLMConfig): string;
+
+  /**
+   * 在发送前对 Prompt 进行预处理（可选）
+   */
+  preprocessPrompt?(prompt: string): string;
 }
+

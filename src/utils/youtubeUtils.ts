@@ -1,14 +1,11 @@
+import { VideoUtils } from './videoUtils';
+
 export const YouTubeUtils = {
   /**
    * 从 URL 中提取视频 ID
    */
   extractVideoId(url: string): string | null {
-    try {
-      const urlObj = new URL(url);
-      return urlObj.searchParams.get('v');
-    } catch {
-      return null;
-    }
+    return VideoUtils.extractVideoId(url);
   },
 
   /**

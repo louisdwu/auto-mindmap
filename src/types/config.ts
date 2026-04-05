@@ -18,16 +18,6 @@ export interface LLMConfig {
 export interface PluginConfig {
   // 当前选中的 LLM 配置 ID
   selectedLLMConfigId: string;
-  // 兼容旧版本的单一配置（将被迁移）
-  llm: {
-    provider: LLMProvider;
-    apiUrl: string;
-    apiKey: string;
-    model: string;
-    timeout?: number;  // 超时时间（秒）
-    maxTokens?: number;
-    temperature?: number;
-  };
   prompt: {
     systemPrompt: string;
     template: string;
@@ -114,15 +104,6 @@ export const DEFAULT_LLM_CONFIG: LLMConfig = {
 
 export const DEFAULT_CONFIG: PluginConfig = {
   selectedLLMConfigId: 'default',
-  llm: {
-    provider: 'openai',
-    apiUrl: 'https://api.openai.com/v1',
-    apiKey: '',
-    model: 'gpt-3.5-turbo',
-    timeout: 60,  // 默认 60 秒
-    maxTokens: 4096,
-    temperature: 0.7
-  },
   prompt: {
     systemPrompt: `# Role: 资深知识分析师 & 思维导图可视化专家
 

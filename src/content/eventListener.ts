@@ -1,5 +1,6 @@
 import { StorageService } from '../services/storageService';
 import { YouTubeUtils } from '../utils/youtubeUtils';
+import { VideoUtils } from '../utils/videoUtils';
 
 // 防止重复请求的状态
 let pendingUrls = new Set<string>();
@@ -7,17 +8,7 @@ let processedUrls = new Set<string>();
 let pendingTimeout: ReturnType<typeof setTimeout> | null = null;
 let processedYouTubeUrls = new Set<string>();
 
-// 提取视频ID用于去重
-function extractVideoId(url: string): string | null {
-  try {
-    const urlObj = new URL(url);
-    const match = urlObj.pathname.match(/\/video\/(BV[\w]+|av\d+)/i);
-    return match ? match[1] : null;
-  } catch {
-    return null;
-  }
-}
-
+// 监听事件初始化
 export function initEventListener() {
   // 监听 YouTube 字幕消息
   window.addEventListener('message', async (event) => {
@@ -81,7 +72,7 @@ export function initEventListener() {
 
 // 调度下载任务，使用防抖和去重
 function scheduleDownload(videoUrl: string) {
-  const videoId = extractVideoId(videoUrl);
+  const videoId = VideoUtils.extractVideoId(videoUrl);
   
   // 如果没有有效的视频ID，跳过
   if (!videoId) {

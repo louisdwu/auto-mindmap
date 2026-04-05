@@ -1,6 +1,7 @@
 import { PluginConfig, LLMConfig, DEFAULT_LLM_CONFIG, ExtensionState, DEFAULT_EXTENSION_STATE } from '../types/config';
 import { MindmapData } from '../types/mindmap';
 import { StorageMigration } from './storage/migration';
+import { VideoUtils } from '../utils/videoUtils';
 
 const STORAGE_KEYS = {
   CONFIG: 'plugin_config',
@@ -19,14 +20,16 @@ export class StorageService {
     const result = await chrome.storage.sync.get(STORAGE_KEYS.CONFIG);
     const config = result[STORAGE_KEYS.CONFIG];
     if (!config) return null;
-    return StorageMigration.normalizeConfig(config);
+    const normalized = StorageMigration.normalizeConfig(config);
+    return normalized;
   }
 
   /**
    * 保存配置
    */
   static async saveConfig(config: PluginConfig): Promise<void> {
-    await chrome.storage.sync.set({ [STORAGE_KEYS.CONFIG]: config });
+    const { llm, ...cleanConfig } = config as any;
+    await chrome.storage.sync.set({ [STORAGE_KEYS.CONFIG]: cleanConfig });
   }
 
   /**
@@ -114,8 +117,7 @@ export class StorageService {
     if (pluginConfig && selectedConfig) {
       await this.saveConfig({
         ...pluginConfig,
-        selectedLLMConfigId: id,
-        llm: { ...selectedConfig } // 保持向后兼容
+        selectedLLMConfigId: id
       });
     }
   }
@@ -152,29 +154,10 @@ export class StorageService {
   static async getLatestMindmapByUrl(videoUrl: string): Promise<MindmapData | null> {
     const mindmaps = await this.getMindmaps();
     
-    const extractVideoId = (url: string): string | null => {
-      try {
-        if (!url) return null;
-        const urlObj = new URL(url);
-        const biliMatch = urlObj.pathname.match(/\/video\/(BV[\w]+|av\d+)/i);
-        if (biliMatch) return biliMatch[1];
-        if (urlObj.hostname.includes('youtube.com') || urlObj.hostname.includes('youtu.be')) {
-          const v = urlObj.searchParams.get('v');
-          if (v) return v;
-          const pathParts = urlObj.pathname.split('/').filter(Boolean);
-          if (urlObj.hostname === 'youtu.be') return pathParts[0];
-          if (pathParts[0] === 'embed') return pathParts[1];
-        }
-        return null;
-      } catch {
-        return null;
-      }
-    };
-
-    const currentVideoId = extractVideoId(videoUrl);
+    const currentVideoId = VideoUtils.extractVideoId(videoUrl);
     const matching = mindmaps.filter(m => {
       if (!currentVideoId) return m.videoUrl === videoUrl;
-      const storedVideoId = extractVideoId(m.videoUrl);
+      const storedVideoId = VideoUtils.extractVideoId(m.videoUrl);
       return storedVideoId === currentVideoId;
     });
     
