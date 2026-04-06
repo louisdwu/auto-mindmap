@@ -28,6 +28,7 @@ export interface ILLMAdapter {
     llmConfig: LLMConfig,
     audioData: Blob | string,
     timeout: number,
+    options?: { videoId?: string },
     onProgress?: (msg: string) => void
   ): Promise<string>;
 

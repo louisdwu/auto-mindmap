@@ -198,13 +198,13 @@ export class SubtitleService {
       if (isLocal) {
         // 本地 ASR 模式：直接把 URL 丢给后端 Python 下载，避开浏览器 Referer 限制
         onProgress?.('正在通过本地服务器下载并识别 (2080ti)...');
-        transcribedText = await LLMService.transcribeAudio(config, audioUrl, onProgress);
+        transcribedText = await LLMService.transcribeAudio(config, audioUrl, { videoId: videoInfo.bvid }, onProgress);
       } else {
         // 远程 ASR 模式：尝试在浏览器端下载音频并上传
         onProgress?.('正在下载视频音频...');
         const audioBlob = await AudioService.downloadAudioBlob(audioUrl);
         onProgress?.('正在通过云端 Whisper 识别语音...');
-        transcribedText = await LLMService.transcribeAudio(config, audioBlob, onProgress);
+        transcribedText = await LLMService.transcribeAudio(config, audioBlob, { videoId: videoInfo.bvid }, onProgress);
       }
 
       if (transcribedText && transcribedText.trim().length > 0) {

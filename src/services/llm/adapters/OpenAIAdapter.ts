@@ -111,6 +111,7 @@ export class OpenAIAdapter extends BaseAdapter implements ILLMAdapter {
     llmConfig: LLMConfig,
     audioData: Blob | string,
     timeout: number,
+    options?: { videoId?: string },
     onProgress?: (msg: string) => void
   ): Promise<string> {
     const isLocal = config.settings.asrProvider === 'local';
@@ -131,6 +132,9 @@ export class OpenAIAdapter extends BaseAdapter implements ILLMAdapter {
     formData.append('response_format', 'json');
     
     if (isLocal) {
+      if (options?.videoId) {
+        formData.append('video_id', options.videoId);
+      }
       if (config.settings.asrBeamSize) formData.append('beam_size', config.settings.asrBeamSize.toString());
       if (config.settings.asrVadFilter !== undefined) formData.append('vad_filter', config.settings.asrVadFilter.toString());
     }

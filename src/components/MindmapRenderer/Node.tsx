@@ -27,6 +27,7 @@ export const Node: React.FC<NodeProps> = ({
         top: pos.y - pos.baseHeight / 2,
         width: pos.width,
         height: pos.baseHeight,
+        fontSize: pos.fontSize
       }}
       onClick={onClick}
       title={pos.text}

@@ -129,6 +129,7 @@ load_model()
 async def transcribe(
     file: UploadFile = File(None),
     audio_url: str = Form(None),
+    video_id: str = Form(None),
     model_name: str = Form("large-v2"),
     beam_size: str = Form(None),
     vad_filter: str = Form(None)
@@ -136,6 +137,32 @@ async def transcribe(
     start_time = time.time()
     tmp_path = None
     
+    # 设置缓存目录
+    cache_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cache")
+    txt_cache_path = None
+    mp3_cache_path = None
+    
+    if video_id:
+        os.makedirs(cache_dir, exist_ok=True)
+        safe_video_id = "".join(c for c in video_id if c.isalnum() or c in "-_")
+        txt_cache_path = os.path.join(cache_dir, f"{safe_video_id}.txt")
+        mp3_cache_path = os.path.join(cache_dir, f"{safe_video_id}.mp3")
+        
+        # 1. 如果已有字幕文本缓存，直接瞬发返回
+        if os.path.exists(txt_cache_path) and os.path.getsize(txt_cache_path) > 0:
+            print(f"[{time.strftime('%H:%M:%S')}] 命中字幕文本缓存: {safe_video_id}, 瞬发返回!")
+            try:
+                with open(txt_cache_path, "r", encoding="utf-8") as f:
+                    cached_text = f.read()
+                return {
+                    "text": cached_text,
+                    "language": "auto",
+                    "duration": 0,
+                    "info": {"language_probability": 1.0, "duration": 0}
+                }
+            except Exception as e:
+                print(f"[{time.strftime('%H:%M:%S')}] 读取字幕文本缓存失败: {e}，将重新识别")
+                
     if model is None:
         return JSONResponse(
             status_code=503,
@@ -143,32 +170,47 @@ async def transcribe(
         )
 
     try:
-        # 1. 获取音频数据并存入临时文件
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp:
-            tmp_path = tmp.name
-            
-            if audio_url:
-                print(f"[{time.strftime('%H:%M:%S')}] 正在从 URL 下载音频: {audio_url[:60]}...")
-                headers = {
-                    "Referer": "https://www.bilibili.com",
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-                }
-                with requests.get(audio_url, headers=headers, stream=True, timeout=30) as r:
-                    r.raise_for_status()
-                    for chunk in r.iter_content(chunk_size=8192):
-                        tmp.write(chunk)
-            elif file:
-                print(f"[{time.strftime('%H:%M:%S')}] 收到文件上传: {file.filename}")
-                content = await file.read()
-                tmp.write(content)
-            else:
-                return JSONResponse(status_code=400, content={"error": "未提供音频文件或 URL"})
+        # 2. 如果存在音频缓存，跳过下载；否则正常下载
+        if video_id and mp3_cache_path and os.path.exists(mp3_cache_path) and os.path.getsize(mp3_cache_path) > 0:
+            print(f"[{time.strftime('%H:%M:%S')}] 命中音频缓存: {safe_video_id}, 跳过下载!")
+            tmp_path = mp3_cache_path
+            file_size = os.path.getsize(tmp_path)
+            print(f"缓存音频大小: {file_size / 1024 / 1024:.2f} MB")
+        else:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp:
+                tmp_path = tmp.name
+                
+                if audio_url:
+                    print(f"[{time.strftime('%H:%M:%S')}] 正在从 URL 下载音频: {audio_url[:60]}...")
+                    headers = {
+                        "Referer": "https://www.bilibili.com",
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                    }
+                    with requests.get(audio_url, headers=headers, stream=True, timeout=30) as r:
+                        r.raise_for_status()
+                        for chunk in r.iter_content(chunk_size=8192):
+                            tmp.write(chunk)
+                elif file:
+                    print(f"[{time.strftime('%H:%M:%S')}] 收到文件上传: {file.filename}")
+                    content = await file.read()
+                    tmp.write(content)
+                else:
+                    return JSONResponse(status_code=400, content={"error": "未提供音频文件或 URL"})
 
-        # 2. 检查文件是否有效
-        file_size = os.path.getsize(tmp_path)
-        if file_size == 0:
-            raise ValueError("获取到的音频数据为空")
-        print(f"音频准备完成，大小: {file_size / 1024 / 1024:.2f} MB")
+            # 2. 检查文件是否有效
+            file_size = os.path.getsize(tmp_path)
+            if file_size == 0:
+                raise ValueError("获取到的音频数据为空")
+            print(f"音频准备完成，大小: {file_size / 1024 / 1024:.2f} MB")
+            
+            # 将成功下载的临时文件存入缓存目录
+            if video_id and mp3_cache_path:
+                try:
+                    import shutil
+                    shutil.copy2(tmp_path, mp3_cache_path)
+                    print(f"[{time.strftime('%H:%M:%S')}] 已缓存音频到: {mp3_cache_path}")
+                except Exception as e:
+                    print(f"缓存音频文件发生异常: {e}")
 
         # 3. 获取转录参数
         # 优先使用请求参数，如果未提供则使用环境变量，最后使用默认值
@@ -199,6 +241,15 @@ async def transcribe(
         duration = time.time() - start_time
         print(f"转录完成！语言: {info.language}, 耗时: {duration:.2f}s, 字数: {len(result_text)}")
         
+        # 3.5 写入字幕文本缓存
+        if video_id and result_text and txt_cache_path:
+            try:
+                with open(txt_cache_path, "w", encoding="utf-8") as f:
+                    f.write(result_text)
+                print(f"[{time.strftime('%H:%M:%S')}] 成功保存字幕文本缓存: {txt_cache_path}")
+            except Exception as e:
+                print(f"保存字幕缓存时发生异常: {e}")
+        
         return {
             "text": result_text,
             "language": info.language,
@@ -223,12 +274,14 @@ async def transcribe(
             }
         )
     finally:
-        # 清理临时文件
+        # 清理临时文件，如果是缓存音频则不要删除
         if tmp_path and os.path.exists(tmp_path):
-            try:
-                os.remove(tmp_path)
-            except:
-                pass
+            is_cached_file = mp3_cache_path is not None and tmp_path == mp3_cache_path
+            if not is_cached_file:
+                try:
+                    os.remove(tmp_path)
+                except:
+                    pass
 
 @app.get("/health")
 async def health():

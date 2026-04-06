@@ -1,14 +1,15 @@
 import React, { useRef, useCallback, useEffect, useMemo } from 'react';
 import { INodeData } from '../utils/markdownParser';
-import { calculateLayoutBounds, NodePosition, LayoutOptions, calculateLayout } from '../utils/layout';
+import { NodePosition, LayoutOptions, calculateLayout } from '../utils/layout';
 import { MindmapStyle } from '../types/mindmap';
 import { useMindmapLayout } from '../hooks/useMindmapLayout';
 import { useCanvasInteraction } from '../hooks/useCanvasInteraction';
+import { StorageService } from '../services/storageService';
 
 // Phase 3: 引入拆分后的子组件
 import { Node } from './MindmapRenderer/Node';
 import { Link } from './MindmapRenderer/Link';
-import { Toolbar } from './MindmapRenderer/Toolbar';
+import { Toolbar, ViewerActions } from './MindmapRenderer/Toolbar';
 
 import './MindmapRenderer.css';
 
@@ -17,14 +18,41 @@ interface MindmapRendererProps {
   onNodeClick?: (node: INodeData) => void;
   layoutOptions?: Partial<LayoutOptions>;
   styleName?: MindmapStyle;
+  viewerActions?: ViewerActions;
 }
 
 export const MindmapRenderer: React.FC<MindmapRendererProps> = ({
   markdown,
   onNodeClick,
   layoutOptions: userLayoutOptions,
-  styleName = 'modern'
+  styleName = 'modern',
+  viewerActions
 }) => {
+  const [fontSizeBase, setFontSizeBase] = React.useState(1.0);
+
+  // 加载初始字体大小
+  useEffect(() => {
+    const loadConfig = async () => {
+      const config = await StorageService.getConfig();
+      if (config?.settings?.mindmapFontSize) {
+        setFontSizeBase(config.settings.mindmapFontSize);
+      }
+    };
+    loadConfig();
+  }, []);
+
+  const handleFontSizeChange = useCallback(async (newSize: number) => {
+    const clampedSize = Math.max(0.5, Math.min(2.0, newSize));
+    setFontSizeBase(clampedSize);
+    
+    // 保存到配置
+    const config = await StorageService.getConfig();
+    if (config) {
+      config.settings.mindmapFontSize = clampedSize;
+      await StorageService.saveConfig(config);
+    }
+  }, []);
+
   const layoutOptions = useMemo(() => {
     const defaultOptions = {
       direction: 'right' as const,
@@ -33,10 +61,11 @@ export const MindmapRenderer: React.FC<MindmapRendererProps> = ({
       nodeWidth: 100,
       nodeHeight: 32,
       centerOffset: 0,
-      levelSpacingMultiplier: 0.85
+      levelSpacingMultiplier: 0.85,
+      fontSizeBase: fontSizeBase
     };
     return { ...defaultOptions, ...userLayoutOptions };
-  }, [userLayoutOptions]);
+  }, [userLayoutOptions, fontSizeBase]);
 
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -58,8 +87,7 @@ export const MindmapRenderer: React.FC<MindmapRendererProps> = ({
   const handleReset = useCallback(() => {
     if (!treeData || !containerRef.current) return;
     const layout = calculateLayout(treeData as any, layoutOptions);
-    const bounds = calculateLayoutBounds(layout);
-    const { clientHeight: ch, clientWidth: cw } = containerRef.current;
+    const { clientHeight: ch } = containerRef.current;
 
     let minY = Infinity, maxY = -Infinity;
     layout.forEach((pos: NodePosition) => {
@@ -71,8 +99,21 @@ export const MindmapRenderer: React.FC<MindmapRendererProps> = ({
 
     const fitScale = Math.min(1.5, Math.max(0.5, (ch - 100) / (maxY - minY || 1)));
     setScale(fitScale);
-    const leftSpaceNeeded = Math.abs(Math.min(0, bounds.minX)) * fitScale + 50;
-    setOffset({ x: Math.max(cw * 0.2, leftSpaceNeeded), y: ch * 0.5 });
+    
+    // 计算可见节点（level >= 1）的最左侧边界，以实现与标题栏对齐
+    let minXVisible = Infinity;
+    layout.forEach((pos) => {
+      if (pos.level >= 1) {
+        minXVisible = Math.min(minXVisible, pos.x - pos.width / 2);
+      }
+    });
+
+    if (minXVisible === Infinity) minXVisible = 0;
+
+    // 与标题栏 padding: 0 16px 一致的左偏移
+    const leftPadding = 16;
+    const centerX = leftPadding - (minXVisible * fitScale);
+    setOffset({ x: centerX, y: ch * 0.5 });
   }, [treeData, layoutOptions, setScale, setOffset]);
 
   const {
@@ -136,7 +177,7 @@ export const MindmapRenderer: React.FC<MindmapRendererProps> = ({
   const renderLinks = useMemo(() => {
     const links: React.ReactNode[] = [];
     positions.forEach((pos, id) => {
-      if (pos.parentId) {
+      if (pos.parentId && pos.parentId !== 'root') {
         const parentPos = positions.get(pos.parentId);
         if (parentPos) {
           links.push(<Link key={`link-${id}`} from={parentPos} to={pos} branchIndex={getBranchIndex(id)} />);
@@ -152,7 +193,7 @@ export const MindmapRenderer: React.FC<MindmapRendererProps> = ({
     const nodes: React.ReactNode[] = [];
     positions.forEach((pos) => {
       const nodeData = findNode(treeData, pos.id);
-      if (!nodeData) return;
+      if (!nodeData || pos.id === 'root') return;
       nodes.push(
         <Node 
           key={pos.id} 
@@ -175,12 +216,27 @@ export const MindmapRenderer: React.FC<MindmapRendererProps> = ({
 
   return (
     <div className={`mm-container style-${styleName}`} ref={containerRef} tabIndex={0}>
+      <div className="mm-floating-title">
+        <span className="title-text" title={treeData.text}>{treeData.text}</span>
+        {viewerActions?.onClose && (
+          <button 
+            className="title-close-btn" 
+            onClick={(e) => { e.stopPropagation(); viewerActions?.onClose?.(); }}
+            title="关闭视图"
+          >
+            关闭
+          </button>
+        )}
+      </div>
       <Toolbar 
         interactionMode={interactionMode} 
         setInteractionMode={setInteractionMode} 
         onExpandAll={expandAll} 
         onCollapseAll={collapseAll} 
         onReset={handleReset} 
+        fontSizeBase={fontSizeBase}
+        onFontSizeChange={handleFontSizeChange}
+        viewerActions={viewerActions}
       />
       <div className={`mm-canvas ${isDragging ? 'grabbing' : 'grab'}`} onMouseDown={handleMouseDown} onWheel={handleWheel} onDoubleClick={handleReset}>
         <div style={{ transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})`, transformOrigin: '0 0', position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }}>

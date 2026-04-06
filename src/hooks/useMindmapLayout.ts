@@ -60,7 +60,7 @@ export const useMindmapLayout = ({
     if (!isInitialized && containerRef.current) {
       const bounds = calculateLayoutBounds(layout);
       const container = containerRef.current;
-      const { clientWidth: cw, clientHeight: ch } = container;
+      const { clientHeight: ch } = container;
 
       if (bounds.width > 0 && bounds.height > 0) {
         // 计算一级节点垂直边界以决定缩放
@@ -76,8 +76,20 @@ export const useMindmapLayout = ({
         const fitScale = Math.min(1.5, Math.max(0.5, (ch - 100) / (contentHeight || 1)));
         setScale(fitScale);
 
-        const leftSpaceNeeded = Math.abs(Math.min(0, bounds.minX)) * fitScale + 50;
-        const centerX = Math.max(cw * 0.2, leftSpaceNeeded);
+        // 计算可见节点（level >= 1）的最左侧边界，以实现与标题栏对齐
+        let minXVisible = Infinity;
+        layout.forEach((pos) => {
+          if (pos.level >= 1) {
+            minXVisible = Math.min(minXVisible, pos.x - pos.width / 2);
+          }
+        });
+
+        // 如果没有可见节点，回退到 0
+        if (minXVisible === Infinity) minXVisible = 0;
+
+        // 与标题栏 padding: 0 16px 一致的左偏移
+        const leftPadding = 16;
+        const centerX = leftPadding - (minXVisible * fitScale);
         setOffset({ x: centerX, y: ch * 0.5 });
         setIsInitialized(true);
       }

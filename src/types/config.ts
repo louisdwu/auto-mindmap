@@ -31,6 +31,7 @@ export interface PluginConfig {
     localAsrUrl: string;               // 本地 ASR 服务地址
     asrBeamSize: number;               // ASR 束搜索宽度
     asrVadFilter: boolean;             // ASR 是否开启 VAD 过滤
+    mindmapFontSize: number;           // 思维导图基础字号缩放倍数
   };
   // 排除关键词列表
   exclusionKeywords: string[];
@@ -142,7 +143,8 @@ export const DEFAULT_CONFIG: PluginConfig = {
     asrProvider: 'official',
     localAsrUrl: 'http://localhost:5000/transcribe',
     asrBeamSize: 2,
-    asrVadFilter: true
+    asrVadFilter: true,
+    mindmapFontSize: 1.0
   },
   exclusionKeywords: []
 };

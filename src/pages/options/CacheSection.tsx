@@ -36,6 +36,31 @@ export const CacheSection: React.FC<CacheSectionProps> = ({ config, onConfigChan
         </p>
       </div>
 
+      {/* 思维导图基础字号 */}
+      <div className="form-group">
+        <label className="form-label">思维导图基础字号 ({Math.round(config.settings.mindmapFontSize * 100)}%)</label>
+        <div className="flex-row">
+          <input
+            type="range"
+            min="0.5"
+            max="2.0"
+            step="0.1"
+            value={config.settings.mindmapFontSize || 1.0}
+            onChange={(e) => onConfigChange({
+              ...config,
+              settings: { ...config.settings, mindmapFontSize: parseFloat(e.target.value) }
+            })}
+            style={{ flex: 1 }}
+          />
+          <span style={{ marginLeft: '10px', fontSize: '13px', color: '#64748b', minWidth: '40px' }}>
+            {config.settings.mindmapFontSize.toFixed(1)}x
+          </span>
+        </div>
+        <p className="form-hint">
+          调整思维导图节点的全局字体大小，布局将自动适配。建议范围：0.8 - 1.5。
+        </p>
+      </div>
+
       {/* ASR 设置 */}
       <div className="asr-panel">
         <label className="form-label--large">语音识别 (ASR) 配置</label>

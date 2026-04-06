@@ -24,6 +24,7 @@ export interface NodePosition {
   width: number;
   height: number;
   baseHeight: number; // 视觉基础高度（不含间距扩展）
+  fontSize: number;   // 动态字号
   level: number;
   hasChildren: boolean;
   expanded: boolean;
@@ -38,6 +39,7 @@ export interface LayoutOptions {
   nodeHeight: number;         // 节点默认高度
   centerOffset: number;       // 中心偏移量
   levelSpacingMultiplier: number; // 层级间距倍数（越深层级间距越紧凑）
+  fontSizeBase: number;       // 基础字体大小缩放比例（默认 1.0）
 }
 
 /**
@@ -54,7 +56,8 @@ export function calculateLayout(
     nodeWidth = 100,
     nodeHeight = 32,
     centerOffset = 0,
-    levelSpacingMultiplier = 0.85
+    levelSpacingMultiplier = 0.85,
+    fontSizeBase = 1.0
   } = options;
 
   const positions = new Map<string, NodePosition>();
@@ -62,7 +65,7 @@ export function calculateLayout(
   // 计算每个节点需要的实际宽度（基于文本长度）
   // 注意：需要计算所有节点的尺寸，包括折叠的子节点，因为布局计算时需要用到
   const allNodes = getAllNodes(root);
-  const nodeDimensions = calculateNodeDimensions(allNodes, nodeWidth, nodeHeight);
+  const nodeDimensions = calculateNodeDimensions(allNodes, nodeWidth, nodeHeight, fontSizeBase);
 
   if (direction === 'both') {
     // 左右分布布局
@@ -94,19 +97,37 @@ export function calculateLayout(
  * - 三级节点 (level 3): 14px
  * - 四级及更深节点 (level 4+): 13px
  */
-function getFontConfig(level: number): { chineseWidth: number; englishWidth: number; padding: number; baseHeight: number } {
+function getFontConfig(level: number, fontSizeBase: number = 1.0): { chineseWidth: number; englishWidth: number; padding: number; baseHeight: number; fontSize: number } {
+  // 基础配置（对应 fontSizeBase = 1.0 时的配置）
+  let config: { chineseWidth: number; englishWidth: number; padding: number; baseHeight: number; fontSize: number };
+  
   switch (level) {
     case 0: // 根节点
-      return { chineseWidth: 22, englishWidth: 12, padding: 56, baseHeight: 52 };
+      config = { chineseWidth: 22, englishWidth: 12, padding: 56, baseHeight: 52, fontSize: 22 };
+      break;
     case 1: // 一级节点
-      return { chineseWidth: 18, englishWidth: 10, padding: 28, baseHeight: 36 };
+      config = { chineseWidth: 18, englishWidth: 10, padding: 28, baseHeight: 36, fontSize: 18 };
+      break;
     case 2: // 二级节点
-      return { chineseWidth: 16, englishWidth: 9, padding: 24, baseHeight: 32 };
+      config = { chineseWidth: 16, englishWidth: 9, padding: 24, baseHeight: 32, fontSize: 16 };
+      break;
     case 3: // 三级节点
-      return { chineseWidth: 14, englishWidth: 8, padding: 20, baseHeight: 30 };
+      config = { chineseWidth: 14, englishWidth: 8, padding: 20, baseHeight: 30, fontSize: 14 };
+      break;
     default: // 四级及更深节点
-      return { chineseWidth: 13, englishWidth: 7, padding: 20, baseHeight: 28 };
+      config = { chineseWidth: 13, englishWidth: 7, padding: 20, baseHeight: 28, fontSize: 13 };
+      break;
   }
+
+  // 应用缩放比例
+  // 注意：宽度缩放应该稍微保守一点，以保证布局的紧凑性
+  return {
+    chineseWidth: Math.ceil(config.chineseWidth * fontSizeBase),
+    englishWidth: Math.ceil(config.englishWidth * fontSizeBase),
+    padding: Math.ceil(config.padding * fontSizeBase),
+    baseHeight: Math.ceil(config.baseHeight * fontSizeBase),
+    fontSize: Math.round(config.fontSize * fontSizeBase)
+  };
 }
 
 /**
@@ -116,13 +137,14 @@ function getFontConfig(level: number): { chineseWidth: number; englishWidth: num
 function calculateNodeDimensions(
   nodes: INodeData[],
   _defaultWidth: number,
-  _defaultHeight: number
-): Map<string, { width: number; height: number; baseHeight: number }> {
-  const dimensions = new Map<string, { width: number; height: number; baseHeight: number }>();
+  _defaultHeight: number,
+  fontSizeBase: number = 1.0
+): Map<string, { width: number; height: number; baseHeight: number; fontSize: number }> {
+  const dimensions = new Map<string, { width: number; height: number; baseHeight: number; fontSize: number }>();
 
   for (const node of nodes) {
     const text = node.text;
-    const fontConfig = getFontConfig(node.level);
+    const fontConfig = getFontConfig(node.level, fontSizeBase);
     
     // 根据层级和字体大小计算宽度
     let estimatedWidth = 0;
@@ -167,7 +189,8 @@ function calculateNodeDimensions(
     dimensions.set(node.id, {
       width: estimatedWidth,
       height: estimatedHeight,
-      baseHeight: fontConfig.baseHeight
+      baseHeight: fontConfig.baseHeight,
+      fontSize: fontConfig.fontSize
     });
   }
 
@@ -177,10 +200,10 @@ function calculateNodeDimensions(
 /**
  * 左右分布布局
  */
-function calculateBothDirectionLayout(
+export function calculateBothDirectionLayout(
   root: INodeData,
   positions: Map<string, NodePosition>,
-  dimensions: Map<string, { width: number; height: number; baseHeight: number }>,
+  dimensions: Map<string, { width: number; height: number; baseHeight: number; fontSize: number }>,
   options: { horizontalSpacing: number; verticalSpacing: number; centerOffset: number; levelSpacingMultiplier: number }
 ): void {
   const { horizontalSpacing, verticalSpacing, centerOffset } = options;
@@ -195,6 +218,7 @@ function calculateBothDirectionLayout(
     width: rootDim.width,
     height: rootDim.height,
     baseHeight: rootDim.baseHeight,
+    fontSize: rootDim.fontSize,
     level: root.level,
     hasChildren: root.children.length > 0,
     expanded: root.expanded || false
@@ -213,9 +237,8 @@ if (leftChildren.length > 0) {
   const leftHeight = calculateSubtreeHeight(leftChildren, dimensions, verticalSpacing);
   let yOffset = -leftHeight / 2;
 
-  // 计算左侧锚点：根节点左边缘 - 间距
-  // 使用 0.5 倍间距作为视觉分隔
-  const leftAnchorX = centerOffset - rootDim.width / 2 - horizontalSpacing * 0.5;
+  // 计算左侧锚点：原来包含根节点宽度，现在由于根节点悬浮，只使用间距作为分隔
+  const leftAnchorX = centerOffset - horizontalSpacing * 0.6;
 
   for (const child of leftChildren) {
     const childDim = dimensions.get(child.id)!;
@@ -233,6 +256,7 @@ if (leftChildren.length > 0) {
       width: childDim.width,
       height: childDim.height,
       baseHeight: childDim.baseHeight,
+      fontSize: childDim.fontSize,
       level: child.level,
       hasChildren: child.children.length > 0,
       expanded: child.expanded || false,
@@ -262,8 +286,8 @@ if (rightChildren.length > 0) {
   const rightHeight = calculateSubtreeHeight(rightChildren, dimensions, verticalSpacing);
   let yOffset = -rightHeight / 2;
 
-  // 计算右侧锚点：根节点右边缘 + 间距
-  const rightAnchorX = centerOffset + rootDim.width / 2 + horizontalSpacing * 0.5;
+  // 计算右侧锚点：原来包含根节点宽度，现在由于根节点悬浮，只使用间距作为分隔
+  const rightAnchorX = centerOffset + horizontalSpacing * 0.6;
 
   for (const child of rightChildren) {
     const childDim = dimensions.get(child.id)!;
@@ -281,6 +305,7 @@ if (rightChildren.length > 0) {
       width: childDim.width,
       height: childDim.height,
       baseHeight: childDim.baseHeight,
+      fontSize: childDim.fontSize,
       level: child.level,
       hasChildren: child.children.length > 0,
       expanded: child.expanded || false,
@@ -312,7 +337,7 @@ if (rightChildren.length > 0) {
 function calculateSingleDirectionLayout(
   root: INodeData,
   positions: Map<string, NodePosition>,
-  dimensions: Map<string, { width: number; height: number; baseHeight: number }>,
+  dimensions: Map<string, { width: number; height: number; baseHeight: number; fontSize: number }>,
   options: { horizontalSpacing: number; verticalSpacing: number; direction: 'left' | 'right'; levelSpacingMultiplier: number }
 ): void {
   const { horizontalSpacing, verticalSpacing, direction } = options;
@@ -329,6 +354,7 @@ function calculateSingleDirectionLayout(
     width: rootDim.width,
     height: rootDim.height,
     baseHeight: rootDim.baseHeight,
+    fontSize: rootDim.fontSize,
     level: root.level,
     hasChildren: root.children.length > 0,
     expanded: root.expanded || false
@@ -354,7 +380,7 @@ function calculateSingleDirectionLayout(
 function layoutChildBranch(
   parent: INodeData,
   positions: Map<string, NodePosition>,
-  dimensions: Map<string, { width: number; height: number; baseHeight: number }>,
+  dimensions: Map<string, { width: number; height: number; baseHeight: number; fontSize: number }>,
   currentX: number,
   currentY: number,
   direction: 'left' | 'right',
@@ -372,9 +398,12 @@ function layoutChildBranch(
   
   // 计算锚点 X 坐标（子节点的对齐线）
   // 锚点为：父节点边缘 + 间距
+  // 考虑到方案一，如果父节点是根节点，那么将其有效宽度视为 0
+  const isParentRoot = parent.id === 'root';
+  const effectiveParentWidth = isParentRoot ? 0 : parentDim.width;
   // 间距设为 horizontalSpacing 的 0.6 倍，确保视觉上的分隔
   const hGap = horizontalSpacing * spacingMultiplier * 0.6;
-  const anchorX = currentX + sign * (parentDim.width / 2 + hGap);
+  const anchorX = currentX + sign * (effectiveParentWidth / 2 + hGap);
 
   // 使用 calculateSubtreeHeight 计算子节点堆栈的总高度
   const totalSubtreeHeight = calculateSubtreeHeight(parent.children, dimensions, verticalSpacing);
@@ -403,6 +432,7 @@ function layoutChildBranch(
       width: childDim.width,
       height: childDim.height,
       baseHeight: childDim.baseHeight,
+      fontSize: childDim.fontSize,
       level: child.level,
       hasChildren: child.children.length > 0,
       expanded: child.expanded || false,
@@ -433,7 +463,7 @@ function layoutChildBranch(
  */
 function calculateSubtreeHeight(
   nodes: INodeData[],
-  dimensions: Map<string, { width: number; height: number; baseHeight: number }>,
+  dimensions: Map<string, { width: number; height: number; baseHeight: number; fontSize: number }>,
   verticalSpacing: number
 ): number {
   if (nodes.length === 0) return 0;
@@ -456,7 +486,7 @@ function calculateSubtreeHeight(
  */
 function calculateNodeBranchHeight(
   node: INodeData,
-  dimensions: Map<string, { width: number; height: number; baseHeight: number }>,
+  dimensions: Map<string, { width: number; height: number; baseHeight: number; fontSize: number }>,
   verticalSpacing: number
 ): number {
   const nodeDim = dimensions.get(node.id)!;

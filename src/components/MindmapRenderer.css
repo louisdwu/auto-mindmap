@@ -9,6 +9,77 @@
   font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
 }
 
+/* 独立悬浮的核心主题 */
+.mm-floating-title {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(8px);
+  padding: 0 16px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 13px;
+  font-weight: 500;
+  color: #374151;
+  z-index: 1000;
+  border-bottom: 1px solid rgba(226, 232, 240, 0.6);
+  pointer-events: auto;
+}
+
+.mm-floating-title .title-text {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 36px;
+  margin-right: 12px;
+}
+
+.mm-floating-title .title-close-btn {
+  background: #fee2e2;
+  color: #dc2626;
+  border: none;
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 11px;
+  cursor: pointer;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  line-height: 1;
+}
+
+.mm-floating-title .title-close-btn:hover {
+  background: #fecaca;
+}
+
+/* 动态适应各个样式主题 */
+.style-dark .mm-floating-title {
+  background: rgba(37, 38, 43, 0.85);
+  color: #c1c2c5;
+  border-bottom-color: rgba(55, 58, 64, 0.5);
+}
+
+.style-classic .mm-floating-title {
+  background: rgba(52, 58, 64, 0.9);
+  color: #dee2e6;
+}
+
+.style-colorful .mm-floating-title {
+  border-bottom: 2px solid #ff922b;
+}
+
+.style-handdrawn .mm-floating-title {
+  background: #ffec99;
+  border-bottom: 2px solid #333;
+}
+
 /* ============================================================
    样式 1: Modern (现代) - 默认样式，已存在于基础样式中
    ============================================================ */
@@ -165,34 +236,52 @@
   padding: 20px;
 }
 
-/* 工具栏 - 现代毛玻璃效果 */
+/* 工具栏 - 现代毛玻璃效果，底部居中，单行 */
 .mm-toolbar {
   position: absolute;
-  bottom: 20px;
-  left: 20px;
+  bottom: 4px;
+  left: 50%;
+  transform: translateX(-50%);
   display: flex;
-  gap: 10px;
-  padding: 10px 18px;
-  background: rgba(255, 255, 255, 0.95);
-  backdrop-filter: blur(10px);
-  border-radius: 12px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.5);
+  gap: 3px;
+  padding: 4px 8px;
+  background: rgba(255, 255, 255, 0.9);
+  backdrop-filter: blur(8px);
+  border-radius: 8px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.06);
+  border: 1px solid rgba(226, 232, 240, 0.5);
   z-index: 100;
   align-items: center;
+  flex-wrap: nowrap;
+  white-space: nowrap;
+}
+
+/* 图标按钮激活态 */
+.mm-toolbar button.active {
+  background: #3b82f6 !important;
+  color: white !important;
+  border-color: #3b82f6 !important;
+}
+
+/* 复制成功态 */
+.mm-toolbar button.copied {
+  background: #10b981 !important;
+  color: white !important;
+  border-color: #10b981 !important;
 }
 
 .mm-toolbar button {
-  padding: 8px 14px;
+  padding: 4px 8px;
   border: 1px solid #e2e8f0;
-  border-radius: 8px;
+  border-radius: 6px;
   background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
   color: #334155;
-  font-size: 13px;
+  font-size: 11px;
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  transition: all 0.15s ease;
+  box-shadow: none;
+  line-height: 1;
 }
 
 .mm-toolbar button:hover {
@@ -210,22 +299,22 @@
 .mm-mode-toggle {
   display: flex;
   align-items: center;
-  padding: 2px;
+  padding: 1px;
   background: #f1f5f9;
-  border-radius: 8px;
+  border-radius: 6px;
   border: 1px solid #e2e8f0;
 }
 
 /* 覆盖工具栏默认按钮样式 */
 .mm-toolbar .mm-mode-toggle button {
-  padding: 6px 10px;
-  font-size: 12px;
+  padding: 3px 7px;
+  font-size: 10px;
   border: none;
   background: transparent;
   color: #64748b;
   box-shadow: none;
   margin: 0;
-  border-radius: 6px;
+  border-radius: 5px;
 }
 
 .mm-toolbar .mm-mode-toggle button:hover {

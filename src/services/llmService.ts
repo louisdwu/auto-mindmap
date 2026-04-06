@@ -74,6 +74,7 @@ export class LLMService {
   static async transcribeAudio(
     config: PluginConfig,
     audioData: Blob | string,
+    options?: { videoId?: string },
     onProgress?: (msg: string) => void
   ): Promise<string> {
     const llmConfig = await StorageService.getSelectedLLMConfig();
@@ -81,8 +82,8 @@ export class LLMService {
     // 如果配置为本地 ASR，强制使用 OpenAIAdapter 处理渲染 (它内部支持 localAsrUrl)
     if (config.settings.asrProvider === 'local') {
       const adapter = this.adapters['openai'];
-      const timeout = 300000; // 5 分钟
-      return adapter.transcribeAudio!(config, llmConfig || {} as LLMConfig, audioData, timeout, onProgress);
+      const timeout = 1800000; // 30 分钟 (1800000ms)，防止长视频识别过程中被前端切断
+      return adapter.transcribeAudio!(config, llmConfig || {} as LLMConfig, audioData, timeout, options, onProgress);
     }
 
     if (!llmConfig) {
@@ -94,8 +95,8 @@ export class LLMService {
       throw new Error(`当前提供商 ${llmConfig.provider} 不支持语音识别功能。请切换为“本地 ASR”或使用支持 Whisper 的提供商。`);
     }
 
-    const timeout = 300000; // 5 分钟
-    return adapter.transcribeAudio(config, llmConfig, audioData, timeout, onProgress);
+    const timeout = 1800000; // 30 分钟
+    return adapter.transcribeAudio(config, llmConfig, audioData, timeout, options, onProgress);
   }
 
   /**
