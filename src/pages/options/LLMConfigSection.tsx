@@ -247,7 +247,10 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
                 className="form-input"
                 type="number"
                 value={editingConfig.temperature ?? 0.7}
-                onChange={(e) => onUpdateEditingConfig({ temperature: parseFloat(e.target.value) || 0.7 })}
+                onChange={(e) => {
+                  const val = parseFloat(e.target.value);
+                  onUpdateEditingConfig({ temperature: isNaN(val) ? 0.7 : val });
+                }}
                 step="0.1"
                 min="0"
                 max="2"

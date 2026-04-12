@@ -69,14 +69,14 @@ export const Toolbar: React.FC<ToolbarProps> = ({
             <button
               onClick={() => viewerActions.setViewMode('mindmap')}
               className={viewerActions.viewMode === 'mindmap' ? 'active' : ''}
-              title="思维导图视图"
+              data-title="思维导图视图"
             >
               <IconMindmap />
             </button>
             <button
               onClick={() => viewerActions.setViewMode('markdown')}
               className={viewerActions.viewMode === 'markdown' ? 'active' : ''}
-              title="Markdown视图"
+              data-title="Markdown视图"
             >
               <IconMarkdown />
             </button>
@@ -87,7 +87,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
             <div style={{ position: 'relative' }}>
               <button
                 onClick={() => setShowStyleMenu(!showStyleMenu)}
-                title="切换样式"
+                data-title="切换样式"
               >
                 <IconPalette />
               </button>
@@ -143,19 +143,19 @@ export const Toolbar: React.FC<ToolbarProps> = ({
             <button
               onClick={viewerActions.onCopy}
               className={viewerActions.isCopied ? 'copied' : ''}
-              title={viewerActions.isCopied ? '已复制' : '复制Markdown'}
+              data-title={viewerActions.isCopied ? '已复制' : '复制Markdown'}
             >
               {viewerActions.isCopied ? <IconCheck /> : <IconCopy />}
             </button>
 
             {/* 下载 */}
-            <button onClick={viewerActions.onDownload} title="下载Markdown">
+            <button onClick={viewerActions.onDownload} data-title="下载Markdown">
               <IconDownload />
             </button>
 
             {/* 重新识别 */}
             {viewerActions.onReTranscribe && (
-              <button onClick={viewerActions.onReTranscribe} title="重新语音识别">
+              <button onClick={viewerActions.onReTranscribe} data-title="重新生成">
                 <IconRefresh />
               </button>
             )}
@@ -165,16 +165,16 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         )}
 
         {/* 原有的导图控制按钮 */}
-        <button onClick={onExpandAll} title="展开所有节点">展开</button>
-        <button onClick={onCollapseAll} title="折叠所有子节点">折叠</button>
-        <button onClick={onReset} title="重置视图">重置</button>
+        <button onClick={onExpandAll} data-title="展开所有节点">展开</button>
+        <button onClick={onCollapseAll} data-title="折叠所有子节点">折叠</button>
+        <button onClick={onReset} data-title="重置视图">重置</button>
         
         <div className="mm-toolbar-divider" style={{ width: '1px', height: '14px', background: '#e2e8f0', margin: '0 2px' }} />
         
         <div className="mm-font-size-controls" style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
           <button 
             onClick={() => onFontSizeChange(fontSizeBase - 0.1)} 
-            title="减小字体大小"
+            data-title="减小字体大小"
             style={{ padding: '3px 6px', fontSize: '10px' }}
           >
             A-
@@ -184,7 +184,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           </span>
           <button 
             onClick={() => onFontSizeChange(fontSizeBase + 0.1)} 
-            title="增大字体大小"
+            data-title="增大字体大小"
             style={{ padding: '3px 6px', fontSize: '10px' }}
           >
             A+
@@ -197,14 +197,14 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           <button 
             className={interactionMode === 'move' ? 'active' : ''} 
             onClick={() => setInteractionMode('move')}
-            title="移动模式：滚轮平移画面"
+            data-title="移动模式：滚轮平移画面"
           >
             移动
           </button>
           <button 
             className={interactionMode === 'zoom' ? 'active' : ''} 
             onClick={() => setInteractionMode('zoom')}
-            title="缩放模式：滚轮放大缩小"
+            data-title="缩放模式：滚轮放大缩小"
           >
             缩放
           </button>

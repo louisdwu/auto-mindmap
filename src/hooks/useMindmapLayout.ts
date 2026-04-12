@@ -128,10 +128,10 @@ export const useMindmapLayout = ({
   }, []);
 
   const collapseAll = useCallback(() => {
-    const collapse = (node: TreeNode): TreeNode => ({
-      ...node, expanded: false, children: node.children.map(collapse)
+    const collapse = (node: TreeNode, isRoot: boolean): TreeNode => ({
+      ...node, expanded: isRoot ? true : false, children: node.children.map(child => collapse(child, false))
     });
-    setTreeData(prev => prev ? collapse(prev) : null);
+    setTreeData(prev => prev ? collapse(prev, true) : null);
   }, []);
 
   return {

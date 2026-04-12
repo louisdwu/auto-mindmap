@@ -241,7 +241,7 @@ function FloatingBallApp() {
   };
 
   const handleReTranscribe = async () => {
-    if (!confirm('确定要清除缓存并重新录制语音识别吗？这将花费较多时间。')) {
+    if (!confirm('清除缓存重新生成？可能需要重新识别语音。')) {
       return;
     }
     setShowViewer(false);
@@ -250,7 +250,7 @@ function FloatingBallApp() {
         type: 'DOWNLOAD_SUBTITLE',
         payload: { videoUrl: window.location.href, force: true }
       });
-      showToast('正在强制重新识别并生成...');
+      showToast('正在强制重新生成...');
     } catch (err) {
       showToast('操作失败，请稍后重试');
     }

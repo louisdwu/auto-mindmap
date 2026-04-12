@@ -141,7 +141,7 @@ export const DEFAULT_CONFIG: PluginConfig = {
     cacheDirectory: '',
     enableCache: true,  // 默认开启缓存
     asrProvider: 'official',
-    localAsrUrl: 'http://localhost:5000/transcribe',
+    localAsrUrl: 'http://localhost:2233/transcribe',
     asrBeamSize: 2,
     asrVadFilter: true,
     mindmapFontSize: 1.0

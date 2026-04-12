@@ -54,7 +54,7 @@ python scripts/whisper_server.py
 1. 右键点击插件图标 -> **选项**。
 2. 找到 **“语音识别 (ASR) 配置”** 模块。
 3. 识别方式选择：**“本地 Whisper 识别 (2080ti 加速)”**。
-4. 服务地址填入：`http://localhost:5000/transcribe`。
+4. 服务地址填入：`http://localhost:2233/transcribe`。
 5. 点击 **保存配置**。
 
 ---
@@ -62,5 +62,5 @@ python scripts/whisper_server.py
 ## 4. 常见问题 (Troubleshooting)
 
 - **Service Worker 报错**：Manifest V3 不支持动态 `import()`。所有 Service Worker 使用到的服务类库（如 `AudioService`, `LLMService`）必须在文件顶部通过静态 `import` 引入。
-- **404/无法连接**：请确保 `whisper_server.py` 正在运行，且端口（默认 5000）未被防火墙拦截。
+- **404/无法连接**：请确保 `whisper_server.py` 正在运行，且端口（默认 2233）未被防火墙拦截。
 - **识别速度慢**：确认 `DEVICE` 变量是否设置为 `"cuda"`，且显存是否充足。

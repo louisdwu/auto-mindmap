@@ -37,17 +37,25 @@ if sys.platform == "win32":
         for lib_rel in nvidia_libs:
             search_paths.append(os.path.join(base, lib_rel))
     
-    added_count = 0
+    added_info = []
     for full_path in search_paths:
         if os.path.isdir(full_path):
             # 显式加入 DLL 搜索路径 (Python 3.8+)
             os.add_dll_directory(full_path)
             # 同时注入 PATH 以防万一
             os.environ["PATH"] = full_path + os.pathsep + os.environ["PATH"]
-            added_count += 1
+            
+            # 扫描该目录下存在的 DLL 文件
+            dlls = [f for f in os.listdir(full_path) if f.lower().endswith(".dll")]
+            if dlls:
+                added_info.append((full_path, dlls))
     
-    if added_count > 0:
-        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] 已自动加载 {added_count} 个本地/环境 CUDA 运行库目录。")
+    if added_info:
+        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] 已成功激活以下本地 CUDA 运行库文件：")
+        for path, files in added_info:
+            print(f"  ● 目录: {path}")
+            for f in files:
+                print(f"    - {f}")
 
 
 from faster_whisper import WhisperModel
@@ -293,5 +301,5 @@ async def health():
     }
 
 if __name__ == "__main__":
-    print(f"ASR 服务器启动在 http://0.0.0.0:5000")
-    uvicorn.run(app, host="0.0.0.0", port=5000)
+    print(f"ASR 服务器启动在 http://0.0.0.0:2233")
+    uvicorn.run(app, host="0.0.0.0", port=2233)

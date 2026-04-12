@@ -581,3 +581,39 @@
     padding: 10px 16px;
   }
 }
+
+/* Custom Tooltip for Toolbar */
+.mm-toolbar button[data-title] {
+  position: relative;
+}
+
+.mm-toolbar button[data-title]:hover::before {
+  content: attr(data-title);
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 4px 8px;
+  background: rgba(15, 23, 42, 0.9);
+  color: white;
+  font-size: 11px;
+  font-weight: 500;
+  border-radius: 4px;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 9999;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+}
+
+.mm-toolbar button[data-title]:hover::after {
+  content: '';
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: 50%;
+  transform: translateX(-50%);
+  border-width: 4px 4px 0;
+  border-style: solid;
+  border-color: rgba(15, 23, 42, 0.9) transparent transparent transparent;
+  pointer-events: none;
+  z-index: 9999;
+}

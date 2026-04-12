@@ -105,7 +105,7 @@ export const CacheSection: React.FC<CacheSectionProps> = ({ config, onConfigChan
                 ...config,
                 settings: { ...config.settings, localAsrUrl: e.target.value }
               })}
-              placeholder="http://localhost:5000/transcribe"
+              placeholder="http://localhost:2233/transcribe"
             />
             <p className="form-hint">
               请运行 <code>scripts/whisper_server.py</code> 后填入地址
