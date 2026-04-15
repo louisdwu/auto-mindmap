@@ -31,8 +31,6 @@ export const ExclusionSection: React.FC<ExclusionSectionProps> = ({ config, onCo
 
   return (
     <section className="options-section">
-      <h2>自动运行例外设置</h2>
-
       <div className="form-group">
         <label className="form-label">排除关键词</label>
         <div className="keyword-input-row">

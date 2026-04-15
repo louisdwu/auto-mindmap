@@ -9,8 +9,6 @@ interface PromptSectionProps {
 export const PromptSection: React.FC<PromptSectionProps> = ({ config, onConfigChange }) => {
   return (
     <section className="options-section">
-      <h2>Prompt设置</h2>
-
       <div className="form-group">
         <label className="form-label">系统提示词 (System Prompt)</label>
         <textarea

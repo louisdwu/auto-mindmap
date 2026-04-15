@@ -31,11 +31,8 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
 }) => {
   return (
     <section className="options-section">
-      <h2>大模型配置</h2>
-
       {/* 配置列表 */}
       <div className="form-group">
-        <label className="form-label--large">已保存的配置</label>
         <div className="llm-config-list">
           {llmConfigs.map(cfg => (
             <div
@@ -44,9 +41,12 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
               onClick={() => !isAddingNew && onSelectConfig(cfg.id)}
             >
               <div style={{ flex: 1 }}>
-                <div className="llm-config-card__name">{cfg.name}</div>
+                <div className="llm-config-card__name">
+                  {selectedConfigId === cfg.id && <span className="status-dot"></span>}
+                  {cfg.name}
+                </div>
                 <div className="llm-config-card__detail">
-                  {cfg.provider === 'openai' ? 'OpenAI' : cfg.provider === 'gemini' ? 'Gemini' : '自定义'} · {cfg.model}
+                  {cfg.provider === 'openai' ? 'OpenAI' : cfg.provider === 'gemini' ? 'Gemini' : cfg.provider === 'ollama' ? 'Ollama' : '自定义'} · {cfg.model}
                 </div>
               </div>
               {llmConfigs.length > 1 && (
@@ -57,7 +57,9 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
                     onDeleteConfig(cfg.id);
                   }}
                   title="删除配置"
-                >×</button>
+                >
+                  <span className="icon-delete">🗑️</span>
+                </button>
               )}
             </div>
           ))}
@@ -65,7 +67,9 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
             className="btn--add"
             onClick={onAddNewConfig}
             disabled={isAddingNew}
-          >+ 新增配置</button>
+          >
+            <span>+</span> 新增配置
+          </button>
         </div>
 
         {isAddingNew && (

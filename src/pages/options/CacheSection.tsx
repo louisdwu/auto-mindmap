@@ -9,8 +9,6 @@ interface CacheSectionProps {
 export const CacheSection: React.FC<CacheSectionProps> = ({ config, onConfigChange }) => {
   return (
     <section className="options-section">
-      <h2>缓存设置</h2>
-
       {/* 思维导图缓存开关 */}
       <div className="form-group">
         <label className="form-label">启用思维导图缓存</label>
@@ -61,94 +59,6 @@ export const CacheSection: React.FC<CacheSectionProps> = ({ config, onConfigChan
         </p>
       </div>
 
-      {/* ASR 设置 */}
-      <div className="asr-panel">
-        <label className="form-label--large">语音识别 (ASR) 配置</label>
-
-        <div className="form-group">
-          <div className="asr-radio-group">
-            <label className="asr-radio-label">
-              <input
-                type="radio"
-                name="asrProvider"
-                checked={config.settings.asrProvider === 'official'}
-                onChange={() => onConfigChange({
-                  ...config,
-                  settings: { ...config.settings, asrProvider: 'official' }
-                })}
-              />
-              优先使用官方字幕
-            </label>
-            <label className="asr-radio-label">
-              <input
-                type="radio"
-                name="asrProvider"
-                checked={config.settings.asrProvider === 'local'}
-                onChange={() => onConfigChange({
-                  ...config,
-                  settings: { ...config.settings, asrProvider: 'local' }
-                })}
-              />
-              本地 Whisper 识别 (2080ti 加速)
-            </label>
-          </div>
-        </div>
-
-        {config.settings.asrProvider === 'local' && (
-          <div style={{ marginTop: '10px' }}>
-            <label className="form-label" style={{ fontSize: '13px' }}>本地 ASR 服务地址</label>
-            <input
-              className="form-input--small-mono"
-              type="text"
-              value={config.settings.localAsrUrl}
-              onChange={(e) => onConfigChange({
-                ...config,
-                settings: { ...config.settings, localAsrUrl: e.target.value }
-              })}
-              placeholder="http://localhost:2233/transcribe"
-            />
-            <p className="form-hint">
-              请运行 <code>scripts/whisper_server.py</code> 后填入地址
-            </p>
-
-            {/* ASR 性能参数 */}
-            <div className="asr-params">
-              <div>
-                <label className="form-label">Beam Size (搜索宽度)</label>
-                <input
-                  className="form-input--small"
-                  type="number"
-                  min="1"
-                  max="10"
-                  value={config.settings.asrBeamSize || 2}
-                  onChange={(e) => onConfigChange({
-                    ...config,
-                    settings: { ...config.settings, asrBeamSize: parseInt(e.target.value) || 1 }
-                  })}
-                />
-              </div>
-              <div>
-                <label className="form-label">VAD 过滤 (静音检测)</label>
-                <div className="asr-vad-row">
-                  <input
-                    className="form-checkbox"
-                    type="checkbox"
-                    checked={config.settings.asrVadFilter}
-                    onChange={(e) => onConfigChange({
-                      ...config,
-                      settings: { ...config.settings, asrVadFilter: e.target.checked }
-                    })}
-                  />
-                  <span>{config.settings.asrVadFilter ? '已开启' : '已关闭'}</span>
-                </div>
-              </div>
-            </div>
-            <p className="form-hint">
-              优化建议：值越小速度越快。开启 VAD 可过滤静音，显著提升转录效率。
-            </p>
-          </div>
-        )}
-      </div>
 
       {/* 本地文件缓存 */}
       <div className="form-group">
