@@ -151,7 +151,8 @@ export const MindmapViewer: React.FC<MindmapViewerProps> = ({
                   viewerActions={{
                     viewMode, setViewMode, style, setStyle,
                     onCopy: handleCopy, isCopied,
-                    onDownload: handleDownload, onReTranscribe, onClose
+                    onDownload: handleDownload, onReTranscribe, onClose,
+                    markdown, title: mindmapData.videoTitle
                   }}
                 />
               </div>

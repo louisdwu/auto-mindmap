@@ -2,8 +2,9 @@ import React from 'react';
 import { MindmapStyle } from '../../types/mindmap';
 import {
   IconMindmap, IconMarkdown, IconCopy, IconCheck,
-  IconDownload, IconPalette, IconRefresh
+  IconDownload, IconPalette, IconRefresh, IconShare
 } from '../Icons';
+import { exportMindmap } from '../../utils/exportMindmap';
 
 export interface ViewerActions {
   viewMode: 'mindmap' | 'markdown';
@@ -15,6 +16,9 @@ export interface ViewerActions {
   onDownload: () => void;
   onReTranscribe?: () => void;
   onClose?: () => void;
+  markdown?: string;
+  title?: string;
+  fontSizeBase?: number;
 }
 
 interface ToolbarProps {
@@ -47,18 +51,20 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   viewerActions
 }) => {
   const [showStyleMenu, setShowStyleMenu] = React.useState(false);
+  const [showExportMenu, setShowExportMenu] = React.useState(false);
+  const [isExporting, setIsExporting] = React.useState(false);
 
   return (
     <>
-      {/* 样式菜单遮罩 */}
-      {showStyleMenu && (
+      {/* 菜单遮罩层 */}
+      {(showStyleMenu || showExportMenu) && (
         <div
           style={{
             position: 'fixed',
             top: 0, left: 0, right: 0, bottom: 0,
             zIndex: 99
           }}
-          onClick={() => setShowStyleMenu(false)}
+          onClick={() => { setShowStyleMenu(false); setShowExportMenu(false); }}
         />
       )}
 
@@ -152,6 +158,76 @@ export const Toolbar: React.FC<ToolbarProps> = ({
             <button onClick={viewerActions.onDownload} data-title="下载Markdown">
               <IconDownload />
             </button>
+
+            {/* 分享/导出 */}
+            <div style={{ position: 'relative' }}>
+              <button
+                onClick={() => setShowExportMenu(!showExportMenu)}
+                data-title="导出为图片/PDF"
+                disabled={isExporting}
+                style={isExporting ? { opacity: 0.5, cursor: 'wait' } : undefined}
+              >
+                <IconShare />
+              </button>
+              {showExportMenu && (
+                <div
+                  style={{
+                    position: 'absolute',
+                    bottom: '32px',
+                    left: '50%',
+                    transform: 'translateX(-50%)',
+                    background: 'white',
+                    borderRadius: '8px',
+                    boxShadow: '0 4px 20px rgba(0, 0, 0, 0.15)',
+                    border: '1px solid #e5e7eb',
+                    overflow: 'hidden',
+                    minWidth: '130px',
+                    zIndex: 100
+                  }}
+                >
+                  {[
+                    { format: 'png' as const, label: '保存为 PNG', icon: '🖼️' },
+                    { format: 'pdf' as const, label: '保存为 PDF', icon: '📄' }
+                  ].map((opt) => (
+                    <div
+                      key={opt.format}
+                      onClick={async () => {
+                        if (!viewerActions.markdown || !viewerActions.title) return;
+                        setShowExportMenu(false);
+                        setIsExporting(true);
+                        try {
+                          await exportMindmap({
+                            markdown: viewerActions.markdown,
+                            title: viewerActions.title,
+                            format: opt.format,
+                            fontSizeBase: fontSizeBase
+                          });
+                        } catch (err) {
+                          console.error('导出失败:', err);
+                        } finally {
+                          setIsExporting(false);
+                        }
+                      }}
+                      style={{
+                        padding: '10px 16px',
+                        cursor: 'pointer',
+                        fontSize: '13px',
+                        color: '#374151',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        transition: 'background 0.2s'
+                      }}
+                      onMouseEnter={(e) => { e.currentTarget.style.background = '#f3f4f6'; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                    >
+                      <span>{opt.icon}</span>
+                      <span>{opt.label}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
 
             {/* 重新识别 */}
             {viewerActions.onReTranscribe && (
