@@ -12,8 +12,10 @@ export class TaskManager {
   private isProcessing: boolean = false;
 
   constructor() {
-    // 从 storage 恢复任务状态
-    this.restoreTasks();
+    // 从 storage 恢复任务状态，并在恢复完成后继续处理队列
+    this.restoreTasks().then(() => {
+      this.processQueue();
+    });
   }
 
   /**

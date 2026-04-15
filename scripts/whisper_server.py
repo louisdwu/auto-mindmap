@@ -238,9 +238,12 @@ async def transcribe(
             last_end = 0
             for segment in segments:
                 full_text.append(segment.text)
-                # 更新进度条
-                pbar.update(segment.end - last_end)
-                last_end = segment.end
+                # 更新进度条: 防止 segment.end 超过或少于合法范围，从而导致 tqdm 崩溃崩溃(NoneType.__format__)
+                segment_end = min(segment.end, info.duration)
+                increment = segment_end - last_end
+                if increment > 0:
+                    pbar.update(increment)
+                    last_end = segment_end
             # 确保进度条在结束时达到 100%
             if last_end < info.duration:
                 pbar.update(info.duration - last_end)
