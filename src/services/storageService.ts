@@ -266,16 +266,34 @@ export class StorageService {
    */
   static async importConfig(data: any, options: any = {}): Promise<any> {
     const { overwriteExisting = true } = options;
+    
+    // 方案校验 (LD 风格：轻量化手动校验)
+    if (!data || typeof data !== 'object') {
+      return { success: false, message: '无效的数据格式' };
+    }
+
     try {
-      if (data.pluginConfig && overwriteExisting) {
-        await this.saveConfig(data.pluginConfig);
-      }
-      if (data.llmConfigs && data.llmConfigs.length > 0) {
+      // 1. 校验 LLM 配置
+      if (data.llmConfigs && Array.isArray(data.llmConfigs)) {
+        for (const config of data.llmConfigs) {
+          if (!config.id || !config.provider || !config.apiUrl) {
+            return { success: false, message: 'LLM 配置结构非法' };
+          }
+        }
         await chrome.storage.sync.set({ [STORAGE_KEYS.LLM_CONFIGS]: data.llmConfigs });
       }
-      return { success: true, message: '配置导入成功' };
+
+      // 2. 校验插件基础配置
+      if (data.pluginConfig && typeof data.pluginConfig === 'object') {
+        if (overwriteExisting) {
+          await this.saveConfig(data.pluginConfig);
+        }
+      }
+
+      return { success: true, message: '数据验证通过并导入完成' };
     } catch (error) {
-      return { success: false, message: '导入失败' };
+      console.error('[StorageService] Import failed:', error);
+      return { success: false, message: '导入过程中发生未知错误' };
     }
   }
 
