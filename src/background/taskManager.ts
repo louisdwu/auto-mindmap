@@ -9,7 +9,7 @@ const TASKS_STORAGE_KEY = 'active_tasks';
 
 export class TaskManager {
   private tasks: Map<string, Task> = new Map();
-  private isProcessing: boolean = false;
+  private isScheduling: boolean = false;
 
   constructor() {
     // 从 storage 恢复任务状态，并在恢复完成后继续处理队列
@@ -97,31 +97,56 @@ export class TaskManager {
   }
 
   /**
-   * 处理任务队列
+   * 处理任务队列 (核心调度逻辑)
    */
   private async processQueue() {
-    if (this.isProcessing) {
-      return;
-    }
-
-    const pendingTask = Array.from(this.tasks.values())
-      .find(t => t.status === 'pending');
-
-    if (!pendingTask) {
-      return;
-    }
-
-    this.isProcessing = true;
+    if (this.isScheduling) return;
+    this.isScheduling = true;
 
     try {
-      await this.executeTask(pendingTask);
+      const config = await StorageService.getConfig();
+      const concurrencyLimit = config?.settings?.concurrencyLimit || 3;
+
+      const allTasks = Array.from(this.tasks.values());
+      const runningTasks = allTasks.filter(t => t.status === 'running');
+      const pendingTasks = allTasks
+        .filter(t => t.status === 'pending')
+        .sort((a, b) => a.createdAt - b.createdAt);
+
+      if (runningTasks.length >= concurrencyLimit || pendingTasks.length === 0) {
+        return;
+      }
+
+      const availableSlots = concurrencyLimit - runningTasks.length;
+      const tasksToStart = pendingTasks.slice(0, availableSlots);
+
+      console.log(`[TaskManager] Starting ${tasksToStart.length} tasks. Total running: ${runningTasks.length}/${concurrencyLimit}`);
+
+      for (const task of tasksToStart) {
+        // 非阻塞启动任务线程
+        this.runTask(task);
+      }
     } catch (error) {
-      console.error('[TaskManager] Task execution failed:', error);
-      pendingTask.status = 'failed';
-      pendingTask.error = error instanceof Error ? error.message : 'Unknown error';
-      pendingTask.updatedAt = Date.now();
+      console.error('[TaskManager] Scheduling loop failed:', error);
     } finally {
-      this.isProcessing = false;
+      this.isScheduling = false;
+    }
+  }
+
+  /**
+   * 线程化执行任务，确保单个任务失败不影响调度
+   */
+  private async runTask(task: Task) {
+    try {
+      await this.executeTask(task);
+    } catch (error) {
+      console.error(`[TaskManager] Task ${task.id} failed:`, error);
+      task.status = 'failed';
+      task.error = error instanceof Error ? error.message : 'Unknown error';
+      task.updatedAt = Date.now();
+      await this.saveTasks();
+    } finally {
+      // 任务结束，尝试启动后续排队任务
       this.processQueue();
     }
   }

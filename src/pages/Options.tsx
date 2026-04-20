@@ -10,6 +10,7 @@ import { CacheSection } from './options/CacheSection';
 import { ActionButtons } from './options/ActionButtons';
 import { ImportExportSection } from './options/ImportExportSection';
 import { AsrSection } from './options/AsrSection';
+import { SystemSettingsSection } from './options/SystemSettingsSection';
 
 import './options/Options.css';
 
@@ -225,6 +226,10 @@ export default function Options() {
 
           {activeTab === 'system' && (
             <>
+              <SystemSettingsSection config={config} onConfigChange={setConfig} />
+
+              <div className="section-divider" />
+              
               <CacheSection config={config} onConfigChange={setConfig} />
               
               <div className="section-divider" />

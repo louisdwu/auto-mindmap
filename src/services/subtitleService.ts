@@ -130,6 +130,30 @@ export class SubtitleService {
     return this.handleAsrFlow(videoInfo, config, onProgress, forceMode, videoUrl);
   }
 
+  private static asrLock: Promise<void> = Promise.resolve();
+
+  /**
+   * 获取 ASR 锁
+   */
+  private static async acquireAsrLock(onProgress?: (msg: string) => void): Promise<() => void> {
+    let release: () => void;
+    const waitPromise = new Promise<void>(resolve => { release = resolve; });
+
+    const previousLock = this.asrLock;
+    // 更新锁为下一个等待者
+    this.asrLock = this.asrLock.then(() => waitPromise);
+
+    // 如果 200ms 还没获取到锁，说明正在排队
+    const queueTimeout = setTimeout(() => {
+      onProgress?.('ASR 资源忙，正在进入队列排队...');
+    }, 200);
+
+    await previousLock;
+    clearTimeout(queueTimeout);
+
+    return release!;
+  }
+
   /**
    * 处理 ASR 语音识别流程
    */
@@ -140,6 +164,8 @@ export class SubtitleService {
     forceMode: boolean,
     videoUrl: string
   ): Promise<any> {
+    const unlock = await this.acquireAsrLock(onProgress);
+    
     try {
       const audioUrl = await AudioService.getAudioUrl(videoInfo.bvid, videoInfo.cid);
       
@@ -167,6 +193,8 @@ export class SubtitleService {
       throw new Error('语音识别返回内容为空');
     } catch (e: any) {
       throw new Error(`语音识别失败: ${e.message || e}`);
+    } finally {
+      unlock();
     }
   }
 }
