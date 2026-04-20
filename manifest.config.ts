@@ -2,12 +2,17 @@ import { defineManifest } from '@crxjs/vite-plugin'
 import packageJson from './package.json'
 
 const { version } = packageJson
-const [major, minor, patch] = version.replace(/[^\d.-]+/g, '').split(/[.-]/)
+const [major, minor] = version.replace(/[^\d.-]+/g, '').split(/[.-]/)
+
+// 生成基于日期的动态版本号：major.minor.MMDD.HHMM
+const now = new Date()
+const mmdd = (now.getMonth() + 1) * 100 + now.getDate()
+const hhmm = now.getHours() * 100 + now.getMinutes()
 
 export default defineManifest({
   name: '自动思维导图',
   description: '自动使用视频字幕并生成思维导图',
-  version: `${major}.${minor}.${patch}`,
+  version: `${major}.${minor}.${mmdd}.${hhmm}`,
   manifest_version: 3,
   permissions: [
     'storage',
