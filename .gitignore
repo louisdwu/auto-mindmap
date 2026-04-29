@@ -3,7 +3,6 @@ node_modules
 .pnp
 .pnp.js
 
-
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
@@ -30,6 +29,14 @@ lerna-debug.log*
 .env.development.local
 .env.test.local
 .env.production.local
+
+# Build output
+dist
+dist-ssr
+*.local
+
+# Secrets
+src/types/secrets.ts
 
 # Cache
 scripts/cache/

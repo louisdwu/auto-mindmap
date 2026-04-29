@@ -1,4 +1,4 @@
-import { LLMProvider, PluginConfig, LLMConfig } from '../types/config';
+import { LLMProvider, PluginConfig, LLMConfig, DEFAULT_CONFIG, DEFAULT_LLM_CONFIG } from '../types/config';
 import { StorageService } from './storageService';
 import { ILLMAdapter } from './llm/base';
 import { OpenAIAdapter } from './llm/adapters/OpenAIAdapter';
@@ -61,7 +61,8 @@ export class LLMService {
     if (!llmConfig) throw new Error('未找到有效的 LLM 配置');
 
     // 使用 split/join 代替 replace 以避免字幕中包含 $ 符号导致的替换错误
-    const prompt = config.prompt.template.split('{subtitle_content}').join(subtitleText);
+    const template = config.prompt.template || DEFAULT_CONFIG.prompt.template;
+    const prompt = template.split('{subtitle_content}').join(subtitleText);
     return this.callLLM(config, llmConfig, prompt);
   }
 
@@ -80,10 +81,10 @@ export class LLMService {
     // 阶段 1: 初步生成
     let initialMindmap = cachedInitialMindmap;
     if (initialMindmap) {
-      onProgress?.('阶段 1/3: 发现初版缓存，跳过生成...');
+      onProgress?.('阶段 1/2: 发现初版缓存，跳过生成...');
       await LoggerService.info('LLMService', '阶段 1: 发现初版缓存，跳过主模型生成');
     } else {
-      onProgress?.('阶段 1/3: 正在生成初步思维导图...');
+      onProgress?.('阶段 1/2: 正在生成初步思维导图...');
       await LoggerService.info('LLMService', '阶段 1: 正在调用主模型生成初稿');
       initialMindmap = await this.generateSinglePhase(config, subtitleText);
       await LoggerService.debug('LLMService', '阶段 1 完成，收到初稿内容');
@@ -97,8 +98,8 @@ export class LLMService {
       }
     }
 
-    // 阶段 2: 评价反思
-    onProgress?.('阶段 2/3: 正在评估生成质量并识别遗漏信息...');
+    // 阶段 2: 评价与优化
+    onProgress?.('阶段 2/2: 正在评估并优化思维导图...');
     const reflectionConfigId = config.settings.reflectionLLMConfigId;
     const reflectionLLMConfig = reflectionConfigId === 'default' 
       ? await StorageService.getSelectedLLMConfig()
@@ -109,53 +110,37 @@ export class LLMService {
       throw new Error('未找到反思阶段的 LLM 配置');
     }
 
-    await LoggerService.info('LLMService', `阶段 2: 正在调用反思模型 (${reflectionLLMConfig.name}) 进行评估，提供商: ${reflectionLLMConfig.provider}, 地址: ${reflectionLLMConfig.apiUrl}`);
+    await LoggerService.info('LLMService', `阶段 2: 正在调用反思模型 (${reflectionLLMConfig.name}) 进行评估与优化`);
     
-    // 使用 split/join 代替 replace 以避免字幕中包含 $ 符号导致的替换错误
-    const reflectionPrompt = config.prompt.reflectionPrompt
+    let reflectionPromptTemplate = config.prompt.reflectionPrompt || DEFAULT_CONFIG.prompt.reflectionPrompt;
+    // 兼容性处理：如果检测到用户仍在使用旧版三阶段 Prompt，则自动 fallback 到系统内置的新版两阶段 Prompt
+    if (!reflectionPromptTemplate.includes('优化补充后的完整 Markdown')) {
+      await LoggerService.warn('LLMService', '检测到旧版反思 Prompt，已自动切换为两阶段合并逻辑');
+      reflectionPromptTemplate = DEFAULT_CONFIG.prompt.reflectionPrompt;
+    }
+
+    const reflectionPrompt = reflectionPromptTemplate
       .split('{subtitle_content}').join(subtitleText)
       .split('{initial_mindmap}').join(initialMindmap);
     
-    const reflectionSystemPrompt = '你是一个资深知识分析师与思维导图评审专家。你的任务是严格评价初步生成的思维导图的质量，并指出遗漏的重要信息点。严禁输出任何开场白、解释或结束语。';
-    const feedback = await this.callLLM(config, reflectionLLMConfig, reflectionPrompt, {
+    const reflectionSystemPrompt = '你是一个资深知识分析师与思维导图评审专家。你的任务是严格评价思维导图质量，并在必要时直接进行优化。严禁输出任何开场白、解释或结束语。';
+    const reflectionResult = await this.callLLM(config, reflectionLLMConfig, reflectionPrompt, {
       isReflection: true,
       systemPrompt: reflectionSystemPrompt
     });
-    await LoggerService.debug('LLMService', '阶段 2 完成，收到反思反馈', { feedback });
+    
+    await LoggerService.debug('LLMService', '阶段 2 完成，收到反思结果');
 
-    if (feedback.includes('优秀') && feedback.length < 20) {
-      await LoggerService.info('LLMService', '评价结果为“优秀”，跳过优化阶段');
-      onProgress?.('评价结果：质量优秀，跳过优化阶段');
+    // 处理合并后的逻辑
+    if (reflectionResult.trim() === '优秀' || (reflectionResult.includes('优秀') && reflectionResult.length < 10)) {
+      await LoggerService.info('LLMService', '评价结果为“优秀”，使用初稿');
+      onProgress?.('评价结果：质量优秀，采用初稿');
       return { result: initialMindmap, initialResult: initialMindmap };
     }
 
-    // 阶段 3: 最终优化
-    onProgress?.('阶段 3/3: 正在根据反馈优化最终思维导图...');
-    const refinementConfigId = config.settings.refinementLLMConfigId;
-    const refinementLLMConfig = refinementConfigId === 'default'
-      ? await StorageService.getSelectedLLMConfig()
-      : await StorageService.getLLMConfigById(refinementConfigId);
-
-    if (!refinementLLMConfig) {
-      await LoggerService.error('LLMService', '未找到优化阶段的 LLM 配置');
-      throw new Error('未找到优化阶段的 LLM 配置');
-    }
-
-    await LoggerService.info('LLMService', `阶段 3: 正在调用优化模型 (${refinementLLMConfig.name}) 生成最终导图，提供商: ${refinementLLMConfig.provider}, 地址: ${refinementLLMConfig.apiUrl}`);
-    
-    // 使用 split/join 代替 replace 以避免字幕中包含 $ 符号导致的替换错误
-    const refinementPrompt = config.prompt.refinementTemplate
-      .split('{subtitle_content}').join(subtitleText)
-      .split('{initial_mindmap}').join(initialMindmap)
-      .split('{feedback}').join(feedback);
-
-    const refinementSystemPrompt = '你是一个资深知识分析师与思维导图可视化专家。你的任务是根据反馈意见，完善现有的思维导图。请严格遵守 Markdown 格式规范，严禁输出任何开场白、解释或结束语。';
-    const finalResult = await this.callLLM(config, refinementLLMConfig, refinementPrompt, {
-      isReflection: false,
-      systemPrompt: refinementSystemPrompt
-    });
-    await LoggerService.info('LLMService', '反思模式全流程完成');
-    return { result: finalResult, initialResult: initialMindmap };
+    await LoggerService.info('LLMService', '发现优化内容，采用优化后的版本');
+    onProgress?.('发现遗漏点，已完成自动优化');
+    return { result: reflectionResult, initialResult: initialMindmap };
   }
 
   /**
@@ -176,8 +161,20 @@ export class LLMService {
     
     const timeout = (Number(llmConfig.timeout) || 60) * 1000;
 
+    // 获取 API Key（如果 UI 配置为空且是默认配置，将采用 config.ts 中的环境变量默认值）
+    const apiKey = llmConfig.apiKey || (llmConfig.id === 'default' ? DEFAULT_LLM_CONFIG.apiKey : '');
+
+    // 确保 context 包含有效的 systemPrompt，实现 Prompt 内理化
+    const finalContext = {
+      ...context,
+      systemPrompt: context?.systemPrompt || config.prompt.systemPrompt || DEFAULT_CONFIG.prompt.systemPrompt
+    };
+
+    // 构造最终的 LLM 配置（包含补全后的 API Key）
+    const finalLLMConfig = { ...llmConfig, apiKey };
+
     try {
-      const content = await adapter.generateMindmap(config, llmConfig, finalPrompt, timeout, context);
+      const content = await adapter.generateMindmap(config, finalLLMConfig, finalPrompt, timeout, finalContext);
       
       if (!content || typeof content !== 'string' || content.trim().length === 0) {
         throw new Error('大模型返回的内容为空或不合法');

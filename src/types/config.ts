@@ -22,8 +22,7 @@ export interface PluginConfig {
   prompt: {
     systemPrompt: string;
     template: string;
-    reflectionPrompt: string;    // 反思评价 Prompt
-    refinementTemplate: string;  // 最终优化 Template
+    reflectionPrompt: string;    // 反思优化 Prompt
   };
   settings: {
     language: string;
@@ -37,7 +36,6 @@ export interface PluginConfig {
     concurrencyLimit: number;          // 并发任务数限制
     enableReflection: boolean;         // 是否启用反思模式
     reflectionLLMConfigId: string;     // 反思阶段使用的 LLM 配置 ID
-    refinementLLMConfigId: string;     // 最终优化阶段使用的 LLM 配置 ID
   };
   // 排除关键词列表
   exclusionKeywords: string[];
@@ -101,15 +99,16 @@ export function createDefaultLLMConfig(provider: LLMProvider = 'openai'): LLMCon
 
 export const DEFAULT_LLM_CONFIG: LLMConfig = {
   id: 'default',
-  name: 'OpenAI GPT (默认)',
-  provider: 'openai',
-  apiUrl: 'https://api.openai.com/v1',
-  apiKey: '',
-  model: 'gpt-3.5-turbo',
+  name: 'Ollama (默认)',
+  provider: 'ollama',
+  apiUrl: 'https://ollama.com/api',
+  // @ts-ignore
+  apiKey: import.meta.env.VITE_DEFAULT_API_KEY || '', // 敏感信息已移至 .env 文件
+  model: 'gemini-3-flash-preview',
   timeout: 60,
-  maxTokens: 4096,
-  num_ctx: 4096,
-  temperature: 0.7,
+  maxTokens: 40960,
+  num_ctx: 16384,
+  temperature: 0.5,
   createdAt: 0,
   updatedAt: 0,
 };
@@ -141,7 +140,7 @@ export const DEFAULT_CONFIG: PluginConfig = {
 2. 识别主旨逻辑及从属关系。
 3. 按照定性标题结合定量数据的原则，构建思维导图。`,
     template: '字幕内容：\n{subtitle_content}',
-    reflectionPrompt: `# 任务：评价思维导图质量并识别遗漏信息
+    reflectionPrompt: `# 任务：评价思维导图质量，并在必要时直接进行优化
 
 ## 输入：
 1. 原视频字幕稿：
@@ -150,44 +149,28 @@ export const DEFAULT_CONFIG: PluginConfig = {
 2. 初步生成的思维导图：
 {initial_mindmap}
 
-## 评价标准：
-1. **完整性**：是否涵盖了字幕中的所有核心论点、关键结论和重要数据点？
-2. **准确性**：是否存在误导或歪曲原意的地方？
-3. **层次感**：逻辑结构是否合理？
+## 指令：
+请对比字幕稿，评估初步生成的思维导图的完整性、准确性和逻辑性。
+1. 如果该导图已经非常优秀且涵盖了所有核心论点，请仅回复“优秀”二字。
+2. 如果存在遗漏、错误或逻辑不通，请结合原字幕内容，直接输出一份优化补充后的完整 Markdown 思维导图。
 
 ## 输出要求：
-请指出遗漏的重要信息点，并给出具体的改进建议。如果没有遗漏且质量很高，请回复“优秀”。
-特别注意：直接列出改进点，不要有开场白或结束语。`,
-    refinementTemplate: `# 任务：基于反馈完善思维导图
-
-## 输入：
-1. 原视频字幕稿：
-{subtitle_content}
-
-2. 初步生成的思维导图：
-{initial_mindmap}
-
-3. 改进建议/遗漏点：
-{feedback}
-
-## 要求：
-请结合原字幕和改进建议，对初步思维导图进行补充和修正，生成一份最终的、更完整的 Markdown 思维导图。
-输出格式必须是标准的 Markdown 思维导图（# 标题层级）。
-仅输出 Markdown 内容，严禁任何解释或开场白。`
+- 仅输出结果（“优秀”二字或完整 Markdown 内容）。
+- 严禁任何开场白、解释或结束语。
+- 确保输出的 Markdown 格式正确。`
   },
   settings: {
     language: 'zh-CN',
-    cacheDirectory: '',
-    enableCache: true,  // 默认开启缓存
-    asrProvider: 'official',
+    cacheDirectory: 'enabled',
+    enableCache: true,
+    asrProvider: 'local',
     localAsrUrl: 'http://localhost:2233/transcribe',
-    asrBeamSize: 2,
+    asrBeamSize: 5,
     asrVadFilter: true,
-    mindmapFontSize: 1.0,
+    mindmapFontSize: 0.7,
     concurrencyLimit: 3,
-    enableReflection: false,
-    reflectionLLMConfigId: 'default',
-    refinementLLMConfigId: 'default'
+    enableReflection: true,
+    reflectionLLMConfigId: 'default'
   },
   exclusionKeywords: []
 };

@@ -283,20 +283,7 @@ export class TaskManager {
           await StorageService.savePhase1Cache(videoId, initialMindmap);
           await LoggerService.debug('TaskManager', `阶段 1 初稿已存入浏览器内置存储 (用于断点续传)`);
         }
-        if (FileService.hasCacheDirectory(config)) {
-          try {
-            const subtitleFileName = FileService.generateSubtitleFileName(videoTitle || 'Unknown');
-            await FileService.saveSubtitleFile(subtitleText, subtitleFileName, config.settings.cacheDirectory);
-
-            const initialMindmapFileName = FileService.generateInitialMindmapFileName(videoTitle || 'Unknown');
-            await FileService.saveMindmapFile(initialMindmap, initialMindmapFileName, config.settings.cacheDirectory);
-            console.log('[TaskManager] 阶段 1 缓存及字幕文件已自动保存到本地');
-            await LoggerService.info('TaskManager', `阶段 1 完成，初版导图与字幕已自动导出到本地硬盘`);
-          } catch (e) {
-            console.error('[TaskManager] 保存阶段1缓存文件失败:', e);
-            await LoggerService.error('TaskManager', `导出阶段 1 本地文件失败`, e);
-          }
-        }
+        // 移除阶段 1 的本地文件保存，统一由任务结束时的 saveFilesToCacheDirectory 处理，避免重复下载
       },
       cachedInitialMindmap
     );

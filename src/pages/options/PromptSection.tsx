@@ -50,14 +50,14 @@ export const PromptSection: React.FC<PromptSectionProps> = ({ config, llmConfigs
             <label htmlFor="enableReflection" className="switch-label"></label>
           </div>
         </div>
-        <p className="form-hint">开启后，将进行“生成 &rarr; 评价 &rarr; 优化”三步流程。显著提升导图质量，但会消耗更多 Token。</p>
+        <p className="form-hint">开启后，将进行“生成 &rarr; 评估并优化”两阶段流程。显著提升导图质量，比单阶段更精准。</p>
       </div>
 
       {config.settings.enableReflection && (
         <div className="reflection-settings animate-fade-in">
           <div className="form-row">
             <div className="form-group flex-1">
-              <label className="form-label">反思评价模型 (Evaluation)</label>
+              <label className="form-label">反思优化模型 (Reflection/Optimization)</label>
               <select
                 className="form-select"
                 value={config.settings.reflectionLLMConfigId}
@@ -72,26 +72,10 @@ export const PromptSection: React.FC<PromptSectionProps> = ({ config, llmConfigs
                 ))}
               </select>
             </div>
-            <div className="form-group flex-1">
-              <label className="form-label">最终优化模型 (Refinement)</label>
-              <select
-                className="form-select"
-                value={config.settings.refinementLLMConfigId}
-                onChange={(e) => onConfigChange({
-                  ...config,
-                  settings: { ...config.settings, refinementLLMConfigId: e.target.value }
-                })}
-              >
-                <option value="default">跟随主模型</option>
-                {llmConfigs.map(c => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
-                ))}
-              </select>
-            </div>
           </div>
 
           <div className="form-group">
-            <label className="form-label">反思评价 Prompt</label>
+            <label className="form-label">反思优化 Prompt</label>
             <textarea
               className="form-textarea form-textarea--medium"
               value={config.prompt.reflectionPrompt}
@@ -99,23 +83,10 @@ export const PromptSection: React.FC<PromptSectionProps> = ({ config, llmConfigs
                 ...config,
                 prompt: { ...config.prompt, reflectionPrompt: e.target.value }
               })}
-              placeholder="评价模型输出，识别遗漏点"
+              placeholder="评价初稿并执行优化补全"
             />
             <p className="form-hint">变量：{'{subtitle_content}'}, {'{initial_mindmap}'}</p>
-          </div>
-
-          <div className="form-group">
-            <label className="form-label">最终优化 Template</label>
-            <textarea
-              className="form-textarea form-textarea--medium"
-              value={config.prompt.refinementTemplate}
-              onChange={(e) => onConfigChange({
-                ...config,
-                prompt: { ...config.prompt, refinementTemplate: e.target.value }
-              })}
-              placeholder="结合评价结果生成最终导图"
-            />
-            <p className="form-hint">变量：{'{subtitle_content}'}, {'{initial_mindmap}'}, {'{feedback}'}</p>
+            <p className="form-hint">若内容为空，将自动使用系统内置默认值。</p>
           </div>
         </div>
       )}
@@ -133,7 +104,7 @@ export const PromptSection: React.FC<PromptSectionProps> = ({ config, llmConfigs
           })}
           placeholder="请输入系统级指令"
         />
-        <p className="form-hint">定义模型角色和任务约束。主模型和优化模型都会参考此提示词。</p>
+        <p className="form-hint">定义模型角色和任务约束。若为空，将自动使用系统默认值。</p>
       </div>
 
       <div className="form-group">
@@ -147,7 +118,7 @@ export const PromptSection: React.FC<PromptSectionProps> = ({ config, llmConfigs
           })}
           placeholder="使用 {subtitle_content} 作为占位符"
         />
-        <p className="form-hint">用于主总结阶段。使用 {'{subtitle_content}'} 替代字幕内容。</p>
+        <p className="form-hint">用于主总结阶段。使用 {'{subtitle_content}'} 替代字幕内容。若为空，将自动使用系统默认值。</p>
       </div>
     </section>
   );
