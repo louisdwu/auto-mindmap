@@ -9,6 +9,11 @@ export interface LLMResponse {
   };
 }
 
+export interface GenerateContext {
+  isReflection?: boolean;
+  systemPrompt?: string;
+}
+
 export interface ILLMAdapter {
   /**
    * 生成思维导图内容
@@ -17,7 +22,8 @@ export interface ILLMAdapter {
     config: PluginConfig,
     llmConfig: LLMConfig,
     prompt: string,
-    timeout: number
+    timeout: number,
+    context?: GenerateContext
   ): Promise<string>;
 
   /**

@@ -36,15 +36,21 @@ export class LLMService {
   static async generateMindmap(
     config: PluginConfig,
     subtitleText: string,
-    onProgress?: (msg: string) => void
-  ): Promise<string> {
+    onProgress?: (msg: string) => void,
+    onPhase1Complete?: (initialMindmap: string) => Promise<void>,
+    cachedInitialMindmap?: string
+  ): Promise<{ result: string, initialResult?: string }> {
     const isReflectionEnabled = config.settings.enableReflection;
 
     if (!isReflectionEnabled) {
-      return this.generateSinglePhase(config, subtitleText);
+      const result = cachedInitialMindmap || await this.generateSinglePhase(config, subtitleText);
+      if (onPhase1Complete && !cachedInitialMindmap) {
+        await onPhase1Complete(result);
+      }
+      return { result };
     }
 
-    return this.generateWithReflection(config, subtitleText, onProgress);
+    return this.generateWithReflection(config, subtitleText, onProgress, onPhase1Complete, cachedInitialMindmap);
   }
 
   /**
@@ -54,7 +60,8 @@ export class LLMService {
     const llmConfig = await StorageService.getSelectedLLMConfig();
     if (!llmConfig) throw new Error('未找到有效的 LLM 配置');
 
-    const prompt = this.buildPrompt(config.prompt.template, subtitleText);
+    // 使用 split/join 代替 replace 以避免字幕中包含 $ 符号导致的替换错误
+    const prompt = config.prompt.template.split('{subtitle_content}').join(subtitleText);
     return this.callLLM(config, llmConfig, prompt);
   }
 
@@ -64,15 +71,31 @@ export class LLMService {
   private static async generateWithReflection(
     config: PluginConfig,
     subtitleText: string,
-    onProgress?: (msg: string) => void
-  ): Promise<string> {
+    onProgress?: (msg: string) => void,
+    onPhase1Complete?: (initialMindmap: string) => Promise<void>,
+    cachedInitialMindmap?: string
+  ): Promise<{ result: string, initialResult?: string }> {
     await LoggerService.info('LLMService', '开始反思模式生成流程');
     
     // 阶段 1: 初步生成
-    onProgress?.('阶段 1/3: 正在生成初步思维导图...');
-    await LoggerService.info('LLMService', '阶段 1: 正在调用主模型生成初稿');
-    const initialMindmap = await this.generateSinglePhase(config, subtitleText);
-    await LoggerService.debug('LLMService', '阶段 1 完成，收到初稿内容');
+    let initialMindmap = cachedInitialMindmap;
+    if (initialMindmap) {
+      onProgress?.('阶段 1/3: 发现初版缓存，跳过生成...');
+      await LoggerService.info('LLMService', '阶段 1: 发现初版缓存，跳过主模型生成');
+    } else {
+      onProgress?.('阶段 1/3: 正在生成初步思维导图...');
+      await LoggerService.info('LLMService', '阶段 1: 正在调用主模型生成初稿');
+      initialMindmap = await this.generateSinglePhase(config, subtitleText);
+      await LoggerService.debug('LLMService', '阶段 1 完成，收到初稿内容');
+
+      if (onPhase1Complete) {
+        try {
+          await onPhase1Complete(initialMindmap);
+        } catch (err) {
+          await LoggerService.error('LLMService', '阶段 1 完成后的回调执行失败', err);
+        }
+      }
+    }
 
     // 阶段 2: 评价反思
     onProgress?.('阶段 2/3: 正在评估生成质量并识别遗漏信息...');
@@ -86,18 +109,24 @@ export class LLMService {
       throw new Error('未找到反思阶段的 LLM 配置');
     }
 
-    await LoggerService.info('LLMService', `阶段 2: 正在调用反思模型 (${reflectionLLMConfig.name}) 进行评估`);
-    const reflectionPrompt = config.prompt.reflectionPrompt
-      .replace('{subtitle_content}', subtitleText)
-      .replace('{initial_mindmap}', initialMindmap);
+    await LoggerService.info('LLMService', `阶段 2: 正在调用反思模型 (${reflectionLLMConfig.name}) 进行评估，提供商: ${reflectionLLMConfig.provider}, 地址: ${reflectionLLMConfig.apiUrl}`);
     
-    const feedback = await this.callLLM(config, reflectionLLMConfig, reflectionPrompt);
+    // 使用 split/join 代替 replace 以避免字幕中包含 $ 符号导致的替换错误
+    const reflectionPrompt = config.prompt.reflectionPrompt
+      .split('{subtitle_content}').join(subtitleText)
+      .split('{initial_mindmap}').join(initialMindmap);
+    
+    const reflectionSystemPrompt = '你是一个资深知识分析师与思维导图评审专家。你的任务是严格评价初步生成的思维导图的质量，并指出遗漏的重要信息点。严禁输出任何开场白、解释或结束语。';
+    const feedback = await this.callLLM(config, reflectionLLMConfig, reflectionPrompt, {
+      isReflection: true,
+      systemPrompt: reflectionSystemPrompt
+    });
     await LoggerService.debug('LLMService', '阶段 2 完成，收到反思反馈', { feedback });
 
     if (feedback.includes('优秀') && feedback.length < 20) {
       await LoggerService.info('LLMService', '评价结果为“优秀”，跳过优化阶段');
       onProgress?.('评价结果：质量优秀，跳过优化阶段');
-      return initialMindmap;
+      return { result: initialMindmap, initialResult: initialMindmap };
     }
 
     // 阶段 3: 最终优化
@@ -112,21 +141,32 @@ export class LLMService {
       throw new Error('未找到优化阶段的 LLM 配置');
     }
 
-    await LoggerService.info('LLMService', `阶段 3: 正在调用优化模型 (${refinementLLMConfig.name}) 生成最终导图`);
+    await LoggerService.info('LLMService', `阶段 3: 正在调用优化模型 (${refinementLLMConfig.name}) 生成最终导图，提供商: ${refinementLLMConfig.provider}, 地址: ${refinementLLMConfig.apiUrl}`);
+    
+    // 使用 split/join 代替 replace 以避免字幕中包含 $ 符号导致的替换错误
     const refinementPrompt = config.prompt.refinementTemplate
-      .replace('{subtitle_content}', subtitleText)
-      .replace('{initial_mindmap}', initialMindmap)
-      .replace('{feedback}', feedback);
+      .split('{subtitle_content}').join(subtitleText)
+      .split('{initial_mindmap}').join(initialMindmap)
+      .split('{feedback}').join(feedback);
 
-    const finalResult = await this.callLLM(config, refinementLLMConfig, refinementPrompt);
+    const refinementSystemPrompt = '你是一个资深知识分析师与思维导图可视化专家。你的任务是根据反馈意见，完善现有的思维导图。请严格遵守 Markdown 格式规范，严禁输出任何开场白、解释或结束语。';
+    const finalResult = await this.callLLM(config, refinementLLMConfig, refinementPrompt, {
+      isReflection: false,
+      systemPrompt: refinementSystemPrompt
+    });
     await LoggerService.info('LLMService', '反思模式全流程完成');
-    return finalResult;
+    return { result: finalResult, initialResult: initialMindmap };
   }
 
   /**
    * 通用的 LLM 调用方法
    */
-  private static async callLLM(config: PluginConfig, llmConfig: LLMConfig, prompt: string): Promise<string> {
+  private static async callLLM(
+    config: PluginConfig, 
+    llmConfig: LLMConfig, 
+    prompt: string,
+    context?: import('./llm/base').GenerateContext
+  ): Promise<string> {
     const adapter = this.getAdapter(llmConfig.provider);
     
     let finalPrompt = prompt;
@@ -137,7 +177,7 @@ export class LLMService {
     const timeout = (Number(llmConfig.timeout) || 60) * 1000;
 
     try {
-      const content = await adapter.generateMindmap(config, llmConfig, finalPrompt, timeout);
+      const content = await adapter.generateMindmap(config, llmConfig, finalPrompt, timeout, context);
       
       if (!content || typeof content !== 'string' || content.trim().length === 0) {
         throw new Error('大模型返回的内容为空或不合法');
@@ -203,10 +243,17 @@ export class LLMService {
     const errorMessage = error instanceof Error ? error.message : String(error);
 
     if (errorMessage.includes('fetch') || errorMessage.includes('网络') || errorMessage.includes('Failed to fetch')) {
-      return `网络错误：无法连接到 API 服务器，请检查网络连接、API 地址或 CORS 设置`;
+      return `网络错误：无法连接到 API 服务器 (${errorMessage})，请检查网络连接、API 地址或 CORS 设置`;
     }
     if (errorMessage.includes('超时') || errorMessage.includes('timeout') || errorMessage.includes('AbortError')) {
       return `请求超时，请检查服务状态或在设置中调大超时时间`;
+    }
+    if (errorMessage.includes('exceeds the available context size') || errorMessage.includes('try increasing it')) {
+      const match = errorMessage.match(/request \((\d+) tokens\) exceeds the available context size \((\d+) tokens\)/i);
+      if (match) {
+        return `上下文长度超限：当前请求需要 ${match[1]} tokens，但本地模型仅允许 ${match[2]} tokens。请在 LM Studio 的 Server Configuration 中调大 "Context Length" 并重新加载模型。`;
+      }
+      return `上下文长度超限：当前发送的内容过多。请在本地大模型服务（如 LM Studio）中调大上下文窗口长度 (Context Length) 并重新加载模型。`;
     }
     return errorMessage;
   }

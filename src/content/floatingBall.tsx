@@ -86,6 +86,11 @@ function FloatingBallApp() {
           if (task.status === 'completed' && !showNotification && !showViewer) {
             setShowNotification(true);
           }
+
+          // 如果任务失败，主动提示用户
+          if (task.status === 'failed' && currentTask?.status !== 'failed') {
+            showToast('⚠️ 任务失败，请点击红色悬浮球查看报错详情', 5000);
+          }
         } else {
           // 如果任务不属于当前页面，清除当前任务状态
           setCurrentTask(undefined);

@@ -316,4 +316,21 @@ export class StorageService {
     const key = STORAGE_KEYS.ASR_CACHE_PREFIX + videoId;
     await chrome.storage.local.remove(key);
   }
+
+  // Phase 1 缓存相关
+  static async getPhase1Cache(videoId: string): Promise<string | null> {
+    const key = 'phase1_cache_' + videoId;
+    const result = await chrome.storage.local.get(key);
+    return result[key] || null;
+  }
+
+  static async savePhase1Cache(videoId: string, text: string): Promise<void> {
+    const key = 'phase1_cache_' + videoId;
+    await chrome.storage.local.set({ [key]: text });
+  }
+
+  static async deletePhase1Cache(videoId: string): Promise<void> {
+    const key = 'phase1_cache_' + videoId;
+    await chrome.storage.local.remove(key);
+  }
 }

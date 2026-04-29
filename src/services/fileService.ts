@@ -139,6 +139,15 @@ export class FileService {
   }
 
   /**
+   * 生成初步总结文件名（开启反思模式时）
+   */
+  static generateInitialMindmapFileName(videoTitle: string, index?: number): string {
+    const safeTitle = videoTitle.replace(/[^a-zA-Z0-9\u4e00-\u9fff]/g, '_').slice(0, 50);
+    const suffix = index !== undefined ? `_${index}` : '';
+    return `【初次总结】${safeTitle}${suffix}.md`;
+  }
+
+  /**
    * 生成思维导图文件名
    */
   static generateMindmapFileName(videoTitle: string, index?: number): string {

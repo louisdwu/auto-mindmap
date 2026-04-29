@@ -25,10 +25,8 @@ export const LogSection: React.FC = () => {
   };
 
   const handleClear = async () => {
-    if (confirm('确定要清空所有日志吗？')) {
-      await LoggerService.clearLogs();
-      setLogs([]);
-    }
+    await LoggerService.clearLogs();
+    setLogs([]);
   };
 
   const formatTime = (ts: number) => {

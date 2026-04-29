@@ -5,6 +5,7 @@ import { LLMService } from '../services/llmService';
 import { StorageService } from '../services/storageService';
 import { FileService } from '../services/fileService';
 import { LoggerService } from '../services/loggerService';
+import { VideoUtils } from '../utils/videoUtils';
 
 const TASKS_STORAGE_KEY = 'active_tasks';
 
@@ -28,9 +29,15 @@ export class TaskManager {
       const storedTasks = result[TASKS_STORAGE_KEY] || [];
 
       for (const task of storedTasks) {
-        // 只恢复未完成的任务
-        if (task.status !== 'completed' && task.status !== 'failed') {
-          task.status = 'pending';
+        // 恢复未完成的任务
+        if (task.status === 'pending') {
+          this.tasks.set(task.id, task);
+        } else if (task.status === 'running') {
+          // 如果重启时发现任务处于 running 状态，说明上次由于 Service Worker 被强制关闭而中断
+          // 我们将其设为 failed 状态，并提示用户重试，避免由于自动重启进入死循环（特别是 LLM 响应极慢导致 SW 频繁关闭时）
+          task.status = 'failed';
+          task.error = '任务由于浏览器后台服务中断而停止，建议调大超时时间并重试。';
+          task.updatedAt = Date.now();
           this.tasks.set(task.id, task);
         }
       }
@@ -79,12 +86,12 @@ export class TaskManager {
   /**
    * 创建生成思维导图任务
    */
-  async createMindmapTask(videoUrl: string, subtitleText: string, videoTitle: string, tabId?: number): Promise<Task> {
+  async createMindmapTask(videoUrl: string, subtitleText: string, videoTitle: string, tabId?: number, force?: boolean): Promise<Task> {
     const task: Task = {
       id: uuidv4(),
       type: 'generate_mindmap',
       status: 'pending',
-      data: { videoUrl, subtitleText, videoTitle },
+      data: { videoUrl, subtitleText, videoTitle, force },
       createdAt: Date.now(),
       updatedAt: Date.now(),
       tabId
@@ -138,15 +145,25 @@ export class TaskManager {
    * 线程化执行任务，确保单个任务失败不影响调度
    */
   private async runTask(task: Task) {
+    // 开启心跳，防止 Service Worker 在长耗时任务（如长视频 LLM 生成）中被 Chrome 杀死
+    const heartbeatId = setInterval(() => {
+      chrome.storage.local.get(['last_heartbeat']);
+    }, 10000);
+
     try {
       await this.executeTask(task);
     } catch (error) {
       console.error(`[TaskManager] Task ${task.id} failed:`, error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       task.status = 'failed';
-      task.error = error instanceof Error ? error.message : 'Unknown error';
+      task.error = errorMessage;
       task.updatedAt = Date.now();
       await this.saveTasks();
+      
+      // 必须通过 LoggerService 记录，否则用户的日志面板里看不到报错信息
+      await LoggerService.error('TaskManager', `任务执行失败 (${task.type})`, error);
     } finally {
+      clearInterval(heartbeatId);
       // 任务结束，尝试启动后续排队任务
       this.processQueue();
     }
@@ -215,7 +232,12 @@ export class TaskManager {
    * 执行生成思维导图任务
    */
   private async executeMindmapTask(task: Task) {
-    const { videoUrl, subtitleText, videoTitle } = task.data;
+    const { videoUrl, subtitleText, videoTitle, force } = task.data;
+    const videoId = VideoUtils.extractVideoId(videoUrl);
+
+    if (videoId && force) {
+      await StorageService.deletePhase1Cache(videoId);
+    }
 
     // 获取配置
     const config = await StorageService.getConfig();
@@ -235,16 +257,54 @@ export class TaskManager {
       throw new Error(validation.error);
     }
 
+    // 尝试加载 Phase 1 缓存
+    let cachedInitialMindmap: string | undefined = undefined;
+    if (videoId && config.settings.enableReflection) {
+      const cache = await StorageService.getPhase1Cache(videoId);
+      if (cache) {
+        cachedInitialMindmap = cache;
+        await LoggerService.info('TaskManager', `检测到阶段 1 缓存 (从浏览器存储读取)，跳过初版生成。`);
+      } else {
+        await LoggerService.debug('TaskManager', `未检测到阶段 1 缓存，准备开始全新生成。`);
+      }
+    }
+
     // 调用大模型生成思维导图
-    const mindmapMarkdown = await LLMService.generateMindmap(
+    const { result: mindmapMarkdown, initialResult: initialMindmapMarkdown } = await LLMService.generateMindmap(
       config, 
       subtitleText,
       async (msg) => {
         task.statusMessage = msg;
         task.updatedAt = Date.now();
         await this.saveTasks();
-      }
+      },
+      async (initialMindmap) => {
+        if (videoId) {
+          await StorageService.savePhase1Cache(videoId, initialMindmap);
+          await LoggerService.debug('TaskManager', `阶段 1 初稿已存入浏览器内置存储 (用于断点续传)`);
+        }
+        if (FileService.hasCacheDirectory(config)) {
+          try {
+            const subtitleFileName = FileService.generateSubtitleFileName(videoTitle || 'Unknown');
+            await FileService.saveSubtitleFile(subtitleText, subtitleFileName, config.settings.cacheDirectory);
+
+            const initialMindmapFileName = FileService.generateInitialMindmapFileName(videoTitle || 'Unknown');
+            await FileService.saveMindmapFile(initialMindmap, initialMindmapFileName, config.settings.cacheDirectory);
+            console.log('[TaskManager] 阶段 1 缓存及字幕文件已自动保存到本地');
+            await LoggerService.info('TaskManager', `阶段 1 完成，初版导图与字幕已自动导出到本地硬盘`);
+          } catch (e) {
+            console.error('[TaskManager] 保存阶段1缓存文件失败:', e);
+            await LoggerService.error('TaskManager', `导出阶段 1 本地文件失败`, e);
+          }
+        }
+      },
+      cachedInitialMindmap
     );
+
+    // 成功完成全部生成，清除 Phase 1 缓存，以免下次影响全新生成
+    if (videoId) {
+      await StorageService.deletePhase1Cache(videoId);
+    }
 
     // 保存思维导图到内存/存储
     const mindmapData = {
@@ -260,9 +320,9 @@ export class TaskManager {
     await LoggerService.info('TaskManager', '思维导图生成成功，正在保存并通知 UI');
     await StorageService.saveMindmap(mindmapData);
 
-    // 如果用户指定了缓存目录，保存文件到本地
+    // 如果用户指定了缓存目录，保存最终文件到本地（注意阶段1如果已经保存，这里只保存最终版即可，但为了完整性，这里调用原方法覆盖或者跳过，我们这里修改 saveFilesToCacheDirectory 使其不再重复保存字幕）
     if (FileService.hasCacheDirectory(config)) {
-      await this.saveFilesToCacheDirectory(mindmapData, config.settings.cacheDirectory);
+      await this.saveFilesToCacheDirectory(mindmapData, initialMindmapMarkdown, config.settings.cacheDirectory);
     }
 
     task.result = mindmapData;
@@ -272,11 +332,11 @@ export class TaskManager {
   }
 
   /**
-   * 保存文件到用户指定的缓存目录
+   * 保存文件到用户指定的缓存目录 (这里保存最终结果)
    */
-  private async saveFilesToCacheDirectory(mindmapData: any, cacheDirectory: string): Promise<void> {
+  private async saveFilesToCacheDirectory(mindmapData: any, initialMindmapMarkdown: string | undefined, cacheDirectory: string): Promise<void> {
     try {
-      // 保存字幕文件
+      // 字幕和初始总结可能在 Phase 1 已经保存过，但为了非反思模式或补充保存，这里也保存
       const subtitleFileName = FileService.generateSubtitleFileName(mindmapData.videoTitle);
       await FileService.saveSubtitleFile(
         mindmapData.subtitleText,
@@ -291,6 +351,16 @@ export class TaskManager {
         mindmapFileName,
         cacheDirectory
       );
+
+      // 保存初步总结文件（仅在开启反思模式时有值）
+      if (initialMindmapMarkdown) {
+        const initialMindmapFileName = FileService.generateInitialMindmapFileName(mindmapData.videoTitle);
+        await FileService.saveMindmapFile(
+          initialMindmapMarkdown,
+          initialMindmapFileName,
+          cacheDirectory
+        );
+      }
 
       console.log(`[TaskManager] 文件已保存到: ${cacheDirectory}`);
     } catch (error) {

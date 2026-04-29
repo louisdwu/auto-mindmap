@@ -83,6 +83,16 @@ export class LoggerService {
    */
   private static sanitizeData(data: any): any {
     if (!data) return undefined;
+    
+    // 专门处理 Error 对象，因为 JSON.stringify(new Error()) 返回 "{}"
+    if (data instanceof Error) {
+      return {
+        name: data.name,
+        message: data.message,
+        stack: data.stack
+      };
+    }
+    
     try {
       const str = JSON.stringify(data);
       if (str.length > 2000) {

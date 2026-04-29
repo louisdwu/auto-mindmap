@@ -18,7 +18,19 @@ export abstract class BaseAdapter {
         ...options,
         signal: controller.signal
       });
-      clearTimeout(id);
+      
+      // 劫持 text 和 json 方法，确保在读取完响应体后才清除超时定时器
+      // 这样可以防止服务端建立连接后一直不返回数据（流挂起）导致的无尽等待
+      const originalText = response.text.bind(response);
+      response.text = async () => {
+        try { return await originalText(); } finally { clearTimeout(id); }
+      };
+
+      const originalJson = response.json.bind(response);
+      response.json = async () => {
+        try { return await originalJson(); } finally { clearTimeout(id); }
+      };
+
       return response;
     } catch (error: any) {
       clearTimeout(id);

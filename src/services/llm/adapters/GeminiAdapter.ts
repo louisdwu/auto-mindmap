@@ -1,4 +1,4 @@
-import { ILLMAdapter } from '../base';
+import { ILLMAdapter, GenerateContext } from '../base';
 import { BaseAdapter } from '../BaseAdapter';
 import { LLMConfig, PluginConfig } from '../../../types/config';
 
@@ -30,7 +30,8 @@ export class GeminiAdapter extends BaseAdapter implements ILLMAdapter {
     config: PluginConfig,
     llmConfig: LLMConfig,
     prompt: string,
-    timeout: number
+    timeout: number,
+    context?: GenerateContext
   ): Promise<string> {
     const url = this.getFullUrl(llmConfig);
 
@@ -42,9 +43,10 @@ export class GeminiAdapter extends BaseAdapter implements ILLMAdapter {
       }
     };
 
-    if (config.prompt.systemPrompt && config.prompt.systemPrompt.trim()) {
+    const sysPrompt = context?.systemPrompt !== undefined ? context.systemPrompt : config.prompt.systemPrompt;
+    if (sysPrompt && sysPrompt.trim()) {
       requestBody.system_instruction = {
-        parts: [{ text: config.prompt.systemPrompt.trim() }]
+        parts: [{ text: sysPrompt.trim() }]
       };
     }
 

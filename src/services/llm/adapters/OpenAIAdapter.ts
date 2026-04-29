@@ -1,4 +1,4 @@
-import { ILLMAdapter } from '../base';
+import { ILLMAdapter, GenerateContext } from '../base';
 import { BaseAdapter } from '../BaseAdapter';
 import { LLMConfig, PluginConfig } from '../../../types/config';
 
@@ -32,19 +32,21 @@ export class OpenAIAdapter extends BaseAdapter implements ILLMAdapter {
     config: PluginConfig,
     llmConfig: LLMConfig,
     prompt: string,
-    timeout: number
+    timeout: number,
+    context?: GenerateContext
   ): Promise<string> {
     const apiUrl = this.getFullUrl(llmConfig);
     
-    // 如果是 LM Studio，添加防推理补丁
+    // 如果是 LM Studio，且不是反思阶段，添加防推理补丁
     let finalPrompt = prompt;
-    if (llmConfig.provider === 'lmstudio') {
+    if (llmConfig.provider === 'lmstudio' && !context?.isReflection) {
       finalPrompt += "\n\nIMPORTANT: Please output the mindmap in Markdown format directly. Do NOT include any reasoning, thinking process, or <thought> tags in your response. Jump straight to the Markdown content.";
     }
 
     const messages: any[] = [];
-    if (config.prompt.systemPrompt && config.prompt.systemPrompt.trim()) {
-      messages.push({ role: 'system', content: config.prompt.systemPrompt.trim() });
+    const sysPrompt = context?.systemPrompt !== undefined ? context.systemPrompt : config.prompt.systemPrompt;
+    if (sysPrompt && sysPrompt.trim()) {
+      messages.push({ role: 'system', content: sysPrompt.trim() });
     }
     messages.push({ role: 'user', content: finalPrompt });
 

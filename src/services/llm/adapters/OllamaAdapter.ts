@@ -1,4 +1,4 @@
-import { ILLMAdapter } from '../base';
+import { ILLMAdapter, GenerateContext } from '../base';
 import { BaseAdapter } from '../BaseAdapter';
 import { LLMConfig, PluginConfig } from '../../../types/config';
 
@@ -20,13 +20,15 @@ export class OllamaAdapter extends BaseAdapter implements ILLMAdapter {
     config: PluginConfig,
     llmConfig: LLMConfig,
     prompt: string,
-    timeout: number
+    timeout: number,
+    context?: GenerateContext
   ): Promise<string> {
     const url = this.getFullUrl(llmConfig);
 
     const messages: any[] = [];
-    if (config.prompt.systemPrompt && config.prompt.systemPrompt.trim()) {
-      messages.push({ role: 'system', content: config.prompt.systemPrompt.trim() });
+    const sysPrompt = context?.systemPrompt !== undefined ? context.systemPrompt : config.prompt.systemPrompt;
+    if (sysPrompt && sysPrompt.trim()) {
+      messages.push({ role: 'system', content: sysPrompt.trim() });
     }
     messages.push({ role: 'user', content: prompt });
 

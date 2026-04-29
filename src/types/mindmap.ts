@@ -7,6 +7,8 @@ export interface MindmapData {
   subtitleText: string;
   /** Markdown格式的思维导图 */
   mindmapMarkdown: string;
+  /** 初步生成的思维导图（开启反思模式时才有值） */
+  initialMindmapMarkdown?: string;
   createdAt: number;
   status: 'pending' | 'processing' | 'completed' | 'failed';
   error?: string;
