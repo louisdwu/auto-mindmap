@@ -1,7 +1,7 @@
 {
   "name": "自动思维导图",
   "description": "自动使用视频字幕并生成思维导图",
-  "version": "1.0.420.1650",
+  "version": "1.0.429.1831",
   "manifest_version": 3,
   "permissions": [
     "storage",
@@ -23,7 +23,7 @@
   "content_scripts": [
     {
       "js": [
-        "assets/index.ts-loader-faf93bdd.js"
+        "assets/index.ts-loader-9eb3ee5e.js"
       ],
       "matches": [
         "https://*.bilibili.com/*",
@@ -51,9 +51,9 @@
         "https://www.youtube.com/*"
       ],
       "resources": [
-        "assets/storageService-1443d1dd.js",
+        "assets/storageService-98adda39.js",
         "assets/client-a68773c9.js",
-        "assets/index.ts-4c7886ba.js"
+        "assets/index.ts-3b7582a1.js"
       ],
       "use_dynamic_url": false
     }

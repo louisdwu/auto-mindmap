@@ -4,6 +4,7 @@ import { ILLMAdapter } from './llm/base';
 import { OpenAIAdapter } from './llm/adapters/OpenAIAdapter';
 import { GeminiAdapter } from './llm/adapters/GeminiAdapter';
 import { OllamaAdapter } from './llm/adapters/OllamaAdapter';
+import { LoggerService } from './loggerService';
 
 export class LLMService {
   private static adapters: Record<string, ILLMAdapter> = {
@@ -34,28 +35,109 @@ export class LLMService {
    */
   static async generateMindmap(
     config: PluginConfig,
-    subtitleText: string
+    subtitleText: string,
+    onProgress?: (msg: string) => void
   ): Promise<string> {
-    const llmConfig = await StorageService.getSelectedLLMConfig();
-    if (!llmConfig) {
-      throw new Error('未找到有效的 LLM 配置，请前往设置页面配置');
+    const isReflectionEnabled = config.settings.enableReflection;
+
+    if (!isReflectionEnabled) {
+      return this.generateSinglePhase(config, subtitleText);
     }
 
+    return this.generateWithReflection(config, subtitleText, onProgress);
+  }
+
+  /**
+   * 单阶段生成逻辑 (默认)
+   */
+  private static async generateSinglePhase(config: PluginConfig, subtitleText: string): Promise<string> {
+    const llmConfig = await StorageService.getSelectedLLMConfig();
+    if (!llmConfig) throw new Error('未找到有效的 LLM 配置');
+
+    const prompt = this.buildPrompt(config.prompt.template, subtitleText);
+    return this.callLLM(config, llmConfig, prompt);
+  }
+
+  /**
+   * 反思模式多阶段生成逻辑
+   */
+  private static async generateWithReflection(
+    config: PluginConfig,
+    subtitleText: string,
+    onProgress?: (msg: string) => void
+  ): Promise<string> {
+    await LoggerService.info('LLMService', '开始反思模式生成流程');
+    
+    // 阶段 1: 初步生成
+    onProgress?.('阶段 1/3: 正在生成初步思维导图...');
+    await LoggerService.info('LLMService', '阶段 1: 正在调用主模型生成初稿');
+    const initialMindmap = await this.generateSinglePhase(config, subtitleText);
+    await LoggerService.debug('LLMService', '阶段 1 完成，收到初稿内容');
+
+    // 阶段 2: 评价反思
+    onProgress?.('阶段 2/3: 正在评估生成质量并识别遗漏信息...');
+    const reflectionConfigId = config.settings.reflectionLLMConfigId;
+    const reflectionLLMConfig = reflectionConfigId === 'default' 
+      ? await StorageService.getSelectedLLMConfig()
+      : await StorageService.getLLMConfigById(reflectionConfigId);
+    
+    if (!reflectionLLMConfig) {
+      await LoggerService.error('LLMService', '未找到反思阶段的 LLM 配置');
+      throw new Error('未找到反思阶段的 LLM 配置');
+    }
+
+    await LoggerService.info('LLMService', `阶段 2: 正在调用反思模型 (${reflectionLLMConfig.name}) 进行评估`);
+    const reflectionPrompt = config.prompt.reflectionPrompt
+      .replace('{subtitle_content}', subtitleText)
+      .replace('{initial_mindmap}', initialMindmap);
+    
+    const feedback = await this.callLLM(config, reflectionLLMConfig, reflectionPrompt);
+    await LoggerService.debug('LLMService', '阶段 2 完成，收到反思反馈', { feedback });
+
+    if (feedback.includes('优秀') && feedback.length < 20) {
+      await LoggerService.info('LLMService', '评价结果为“优秀”，跳过优化阶段');
+      onProgress?.('评价结果：质量优秀，跳过优化阶段');
+      return initialMindmap;
+    }
+
+    // 阶段 3: 最终优化
+    onProgress?.('阶段 3/3: 正在根据反馈优化最终思维导图...');
+    const refinementConfigId = config.settings.refinementLLMConfigId;
+    const refinementLLMConfig = refinementConfigId === 'default'
+      ? await StorageService.getSelectedLLMConfig()
+      : await StorageService.getLLMConfigById(refinementConfigId);
+
+    if (!refinementLLMConfig) {
+      await LoggerService.error('LLMService', '未找到优化阶段的 LLM 配置');
+      throw new Error('未找到优化阶段的 LLM 配置');
+    }
+
+    await LoggerService.info('LLMService', `阶段 3: 正在调用优化模型 (${refinementLLMConfig.name}) 生成最终导图`);
+    const refinementPrompt = config.prompt.refinementTemplate
+      .replace('{subtitle_content}', subtitleText)
+      .replace('{initial_mindmap}', initialMindmap)
+      .replace('{feedback}', feedback);
+
+    const finalResult = await this.callLLM(config, refinementLLMConfig, refinementPrompt);
+    await LoggerService.info('LLMService', '反思模式全流程完成');
+    return finalResult;
+  }
+
+  /**
+   * 通用的 LLM 调用方法
+   */
+  private static async callLLM(config: PluginConfig, llmConfig: LLMConfig, prompt: string): Promise<string> {
     const adapter = this.getAdapter(llmConfig.provider);
     
-    // 1. 基础 Prompt 构建
-    let prompt = this.buildPrompt(config.prompt.template, subtitleText);
-    
-    // 2. 允许适配器进行预处理（如特定提供商的补丁）
+    let finalPrompt = prompt;
     if (adapter.preprocessPrompt) {
-      prompt = adapter.preprocessPrompt(prompt);
+      finalPrompt = adapter.preprocessPrompt(finalPrompt);
     }
     
-    // 3. 超时时间处理
     const timeout = (Number(llmConfig.timeout) || 60) * 1000;
 
     try {
-      const content = await adapter.generateMindmap(config, llmConfig, prompt, timeout);
+      const content = await adapter.generateMindmap(config, llmConfig, finalPrompt, timeout);
       
       if (!content || typeof content !== 'string' || content.trim().length === 0) {
         throw new Error('大模型返回的内容为空或不合法');

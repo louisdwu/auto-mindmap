@@ -1,0 +1,55 @@
+function g(){return`llm_${Date.now()}_${Math.random().toString(36).substring(2,9)}`}function p(r="openai"){const t=Date.now(),e={openai:{name:"OpenAI GPT",provider:"openai",apiUrl:"https://api.openai.com/v1",model:"gpt-3.5-turbo"},gemini:{name:"Google Gemini",provider:"gemini",apiUrl:"https://generativelanguage.googleapis.com/v1beta",model:"gemini-1.5-flash"},custom:{name:"自定义配置",provider:"custom",apiUrl:"",model:"",num_ctx:4096},lmstudio:{name:"LM Studio (本地)",provider:"lmstudio",apiUrl:"http://localhost:1234/v1",model:"qwen_qwen3.5-9b",num_ctx:8192},ollama:{name:"Ollama (本地/云端)",provider:"ollama",apiUrl:"http://localhost:11434/api",model:"llama3",num_ctx:8192}};return{id:g(),...e[r],apiKey:"",timeout:60,maxTokens:4096,temperature:.7,createdAt:t,updatedAt:t}}const u={id:"default",name:"OpenAI GPT (默认)",provider:"openai",apiUrl:"https://api.openai.com/v1",apiKey:"",model:"gpt-3.5-turbo",timeout:60,maxTokens:4096,num_ctx:4096,temperature:.7,createdAt:0,updatedAt:0},c={selectedLLMConfigId:"default",prompt:{systemPrompt:`# Role: 资深知识分析师 & 思维导图可视化专家
+
+## Task: 
+将视频字幕稿（Transcript）转化为逻辑严密、层次清晰的 Markdown 思维导图。
+
+## Constraints:
+1. **结构化层级**：
+   - 最高层级唯一：使用单个 # 标题。
+   - 子层级：使用 ##, ### 直至最多 6 层。
+   - 严禁对各级标题进行数字编号（如 1.1, 1.2）。
+   - 采用标准 Markdown 层次缩进，确保树状关系清晰。
+2. **内容提炼规则**：
+   - **定性概括**：将口语化的表达转化为书面逻辑观点。
+   - **颗粒度平衡**：涵盖核心结论、支撑论据、关键案例。
+   - **数据敏感**：涉及市场波动、价格、百分比等数字点位时，必须精准保留。
+   - **聚合归并**：对散落在全文的同类信息进行归口整合。
+3. **忠实原意**：严禁虚构、增删原文未提及的观点。
+4. **输出限制**：仅输出标准 Markdown 内容，严禁任何开场白、解释或结束语。
+
+## Workflow:
+1. 过滤字幕中的口语干扰项。
+2. 识别主旨逻辑及从属关系。
+3. 按照定性标题结合定量数据的原则，构建思维导图。`,template:`字幕内容：
+{subtitle_content}`,reflectionPrompt:`# 任务：评价思维导图质量并识别遗漏信息
+
+## 输入：
+1. 原视频字幕稿：
+{subtitle_content}
+
+2. 初步生成的思维导图：
+{initial_mindmap}
+
+## 评价标准：
+1. **完整性**：是否涵盖了字幕中的所有核心论点、关键结论和重要数据点？
+2. **准确性**：是否存在误导或歪曲原意的地方？
+3. **层次感**：逻辑结构是否合理？
+
+## 输出要求：
+请指出遗漏的重要信息点，并给出具体的改进建议。如果没有遗漏且质量很高，请回复“优秀”。
+特别注意：直接列出改进点，不要有开场白或结束语。`,refinementTemplate:`# 任务：基于反馈完善思维导图
+
+## 输入：
+1. 原视频字幕稿：
+{subtitle_content}
+
+2. 初步生成的思维导图：
+{initial_mindmap}
+
+3. 改进建议/遗漏点：
+{feedback}
+
+## 要求：
+请结合原字幕和改进建议，对初步思维导图进行补充和修正，生成一份最终的、更完整的 Markdown 思维导图。
+输出格式必须是标准的 Markdown 思维导图（# 标题层级）。
+仅输出 Markdown 内容，严禁任何解释或开场白。`},settings:{language:"zh-CN",cacheDirectory:"",enableCache:!0,asrProvider:"official",localAsrUrl:"http://localhost:2233/transcribe",asrBeamSize:2,asrVadFilter:!0,mindmapFontSize:1,concurrencyLimit:3,enableReflection:!1,reflectionLLMConfigId:"default",refinementLLMConfigId:"default"},exclusionKeywords:[]},f={isPaused:!1};class d{static normalizeConfig(t){var e,a,s;return t?{...c,...t,selectedLLMConfigId:t.selectedLLMConfigId||c.selectedLLMConfigId,prompt:{...c.prompt,...t.prompt,systemPrompt:((e=t.prompt)==null?void 0:e.systemPrompt)||c.prompt.systemPrompt,template:((a=t.prompt)==null?void 0:a.template)||c.prompt.template},settings:{...c.settings,...t.settings,enableCache:((s=t.settings)==null?void 0:s.enableCache)!==void 0?t.settings.enableCache:!0},exclusionKeywords:t.exclusionKeywords||[]}:c}static migrateToLLMConfigs(t){return t&&t.llm&&t.llm.apiKey?{id:"migrated_default",name:`${t.llm.provider==="openai"?"OpenAI":t.llm.provider==="gemini"?"Gemini":"自定义"} (已迁移)`,provider:t.llm.provider,apiUrl:t.llm.apiUrl,apiKey:t.llm.apiKey,model:t.llm.model,timeout:t.llm.timeout||60,maxTokens:t.llm.maxTokens||4096,temperature:t.llm.temperature??.7,createdAt:Date.now(),updatedAt:Date.now()}:null}}const m={extractVideoId(r){if(!r)return null;try{let t=r.trim();t.startsWith("http")||(t="https://"+t);const e=new URL(t),a=e.hostname.toLowerCase(),s=e.pathname;if(a.includes("bilibili.com")){const o=s.match(/\/video\/(BV[\w]+|av\d+)/i);if(o)return o[1];const n=e.searchParams.get("bvid");if(n)return n;const l=e.searchParams.get("aid");if(l)return l.startsWith("av")?l:"av"+l}if(a.includes("youtube.com")||a.includes("youtu.be")){const o=e.searchParams.get("v");if(o)return o;const n=s.split("/").filter(Boolean);if(a==="youtu.be")return n[0];if(n[0]==="embed"||n[0]==="v"||n[0]==="shorts")return n[1]}return null}catch(t){return console.warn("[VideoUtils] Failed to extract video ID from:",r,t),null}}},i={CONFIG:"plugin_config",LLM_CONFIGS:"llm_configs",MINDMAPS:"mindmaps",LATEST_MINDMAP_ID:"latest_mindmap_id",EXTENSION_STATE:"extension_state",ASR_CACHE_PREFIX:"asr_cache_"};class L{static async getConfig(){const e=(await chrome.storage.sync.get(i.CONFIG))[i.CONFIG];return e?d.normalizeConfig(e):null}static async saveConfig(t){const{llm:e,...a}=t;await chrome.storage.sync.set({[i.CONFIG]:a})}static async getLLMConfigsRaw(){return(await chrome.storage.sync.get(i.LLM_CONFIGS))[i.LLM_CONFIGS]||[]}static async getLLMConfigs(){const t=await this.getLLMConfigsRaw();if(t.length>0)return t;const e=await this.getConfig();if(e){const a=d.migrateToLLMConfigs(e);if(a)return await this.saveLLMConfig(a),await this.saveConfig({...e,selectedLLMConfigId:a.id}),[a]}return[u]}static async getLLMConfigById(t){return(await this.getLLMConfigs()).find(a=>a.id===t)||null}static async getSelectedLLMConfig(){const t=await this.getConfig(),e=(t==null?void 0:t.selectedLLMConfigId)||"default",a=await this.getLLMConfigs();return a.find(s=>s.id===e)||a[0]||null}static async saveLLMConfig(t){let e=await this.getLLMConfigsRaw();const a=e.findIndex(s=>s.id===t.id);a>=0?e[a]={...t,updatedAt:Date.now()}:e.push({...t,updatedAt:Date.now()}),await chrome.storage.sync.set({[i.LLM_CONFIGS]:e})}static async deleteLLMConfig(t){const e=await this.getLLMConfigs();if(e.length<=1)return!1;const a=e.filter(o=>o.id!==t);await chrome.storage.sync.set({[i.LLM_CONFIGS]:a});const s=await this.getConfig();return s&&s.selectedLLMConfigId===t&&await this.setSelectedLLMConfig(a[0].id),!0}static async setSelectedLLMConfig(t){const e=await this.getConfig(),a=await this.getLLMConfigById(t);e&&a&&await this.saveConfig({...e,selectedLLMConfigId:t})}static async getMindmaps(){return(await chrome.storage.local.get(i.MINDMAPS))[i.MINDMAPS]||[]}static async saveMindmap(t){const e=await this.getMindmaps(),a=e.findIndex(s=>s.id===t.id);a>=0?e[a]=t:e.unshift(t),e.length>50&&e.splice(50),await chrome.storage.local.set({[i.MINDMAPS]:e,[i.LATEST_MINDMAP_ID]:t.id})}static async getLatestMindmapByUrl(t){const e=await this.getMindmaps(),a=m.extractVideoId(t),s=e.filter(o=>a?m.extractVideoId(o.videoUrl)===a:o.videoUrl===t);return s.length>0?s[0]:null}static async getLatestMindmap(){const e=(await chrome.storage.local.get(i.LATEST_MINDMAP_ID))[i.LATEST_MINDMAP_ID];return e&&(await this.getMindmaps()).find(s=>s.id===e)||null}static async getExtensionState(){return(await chrome.storage.local.get(i.EXTENSION_STATE))[i.EXTENSION_STATE]||f}static async saveExtensionState(t){await chrome.storage.local.set({[i.EXTENSION_STATE]:t})}static async togglePaused(){const t=await this.getExtensionState(),e=!t.isPaused;return await this.saveExtensionState({...t,isPaused:e}),e}static async isPaused(){return(await this.getExtensionState()).isPaused}static async clearMindmaps(){await chrome.storage.local.remove([i.MINDMAPS,i.LATEST_MINDMAP_ID])}static async exportConfig(){const t=await this.getConfig(),e=await this.getLLMConfigs();return{version:"1.0",exportDate:new Date().toISOString(),pluginConfig:t,llmConfigs:e}}static async downloadConfigFile(){const t=await this.exportConfig(),e=JSON.stringify(t,null,2),a=new Blob([e],{type:"application/json"}),s=URL.createObjectURL(a),o=`auto_mindmap_config_${new Date().toISOString().slice(0,10)}.json`,n=document.createElement("a");n.href=s,n.download=o,document.body.appendChild(n),n.click(),document.body.removeChild(n),URL.revokeObjectURL(s)}static async readConfigFromFile(t){return new Promise((e,a)=>{const s=new FileReader;s.onload=o=>{var n;try{e(JSON.parse((n=o.target)==null?void 0:n.result))}catch{a(new Error("无法解析配置文件"))}},s.readAsText(t)})}static async importConfig(t,e={}){const{overwriteExisting:a=!0}=e;if(!t||typeof t!="object")return{success:!1,message:"无效的数据格式"};try{if(t.llmConfigs&&Array.isArray(t.llmConfigs)){for(const s of t.llmConfigs)if(!s.id||!s.provider||!s.apiUrl)return{success:!1,message:"LLM 配置结构非法"};await chrome.storage.sync.set({[i.LLM_CONFIGS]:t.llmConfigs})}return t.pluginConfig&&typeof t.pluginConfig=="object"&&a&&await this.saveConfig(t.pluginConfig),{success:!0,message:"数据验证通过并导入完成"}}catch(s){return console.error("[StorageService] Import failed:",s),{success:!1,message:"导入过程中发生未知错误"}}}static async getAsrCache(t){const e=i.ASR_CACHE_PREFIX+t;return(await chrome.storage.local.get(e))[e]||null}static async saveAsrCache(t,e){const a=i.ASR_CACHE_PREFIX+t;await chrome.storage.local.set({[a]:e})}static async deleteAsrCache(t){const e=i.ASR_CACHE_PREFIX+t;await chrome.storage.local.remove(e)}}export{c as D,L as S,m as V,p as c};

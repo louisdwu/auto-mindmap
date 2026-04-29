@@ -4,11 +4,11 @@ import { LLMService } from '../../services/llmService';
 
 interface LLMConfigSectionProps {
   llmConfigs: LLMConfig[];
-  selectedConfigId: string;
+  editingConfigId: string;
   editingConfig: LLMConfig | null;
   isAddingNew: boolean;
   saved: boolean;
-  onSelectConfig: (id: string) => void;
+  onEditConfig: (id: string) => void;
   onDeleteConfig: (id: string) => void;
   onAddNewConfig: () => void;
   onCancelAdd: () => void;
@@ -18,11 +18,11 @@ interface LLMConfigSectionProps {
 
 export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
   llmConfigs,
-  selectedConfigId,
+  editingConfigId,
   editingConfig,
   isAddingNew,
   saved,
-  onSelectConfig,
+  onEditConfig,
   onDeleteConfig,
   onAddNewConfig,
   onCancelAdd,
@@ -37,12 +37,11 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
           {llmConfigs.map(cfg => (
             <div
               key={cfg.id}
-              className={`llm-config-card ${selectedConfigId === cfg.id ? 'llm-config-card--selected' : ''}`}
-              onClick={() => !isAddingNew && onSelectConfig(cfg.id)}
+              className={`llm-config-card ${editingConfigId === cfg.id ? 'llm-config-card--selected' : ''}`}
+              onClick={() => !isAddingNew && onEditConfig(cfg.id)}
             >
               <div style={{ flex: 1 }}>
                 <div className="llm-config-card__name">
-                  {selectedConfigId === cfg.id && <span className="status-dot"></span>}
                   {cfg.name}
                 </div>
                 <div className="llm-config-card__detail">

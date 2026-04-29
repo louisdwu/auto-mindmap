@@ -54,8 +54,8 @@ export class FileService {
     const dataUrl = `data:text/plain;charset=utf-8,${encodeURIComponent(content)}`;
 
     try {
-      // 清理文件名，确保安全
-      const safeName = fileName.replace(/[^a-zA-Z0-9\u4e00-\u9fff_.\-]/g, '_');
+      // 清理文件名，确保安全，允许全角括号
+      const safeName = fileName.replace(/[^a-zA-Z0-9\u4e00-\u9fff_.\-【】]/g, '_');
       
       // 先尝试保存到子目录
       const subdirPath = `${this.SUBDIR}/${safeName}`;
@@ -135,7 +135,7 @@ export class FileService {
   static generateSubtitleFileName(videoTitle: string, index?: number): string {
     const safeTitle = videoTitle.replace(/[^a-zA-Z0-9\u4e00-\u9fff]/g, '_').slice(0, 50);
     const suffix = index !== undefined ? `_${index}` : '';
-    return `${safeTitle}_字幕${suffix}.txt`;
+    return `【字幕】${safeTitle}${suffix}.txt`;
   }
 
   /**
@@ -144,7 +144,7 @@ export class FileService {
   static generateMindmapFileName(videoTitle: string, index?: number): string {
     const safeTitle = videoTitle.replace(/[^a-zA-Z0-9\u4e00-\u9fff]/g, '_').slice(0, 50);
     const suffix = index !== undefined ? `_${index}` : '';
-    return `${safeTitle}_思维导图${suffix}.md`;
+    return `【思维导图】${safeTitle}${suffix}.md`;
   }
 
   /**

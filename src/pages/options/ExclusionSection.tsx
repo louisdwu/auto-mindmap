@@ -31,6 +31,9 @@ export const ExclusionSection: React.FC<ExclusionSectionProps> = ({ config, onCo
 
   return (
     <section className="options-section">
+      <div className="section-header">
+        <h3 className="section-title">内容过滤设置</h3>
+      </div>
       <div className="form-group">
         <label className="form-label">排除关键词</label>
         <div className="keyword-input-row">

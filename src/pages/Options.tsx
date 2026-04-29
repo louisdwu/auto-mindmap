@@ -11,14 +11,23 @@ import { ActionButtons } from './options/ActionButtons';
 import { ImportExportSection } from './options/ImportExportSection';
 import { AsrSection } from './options/AsrSection';
 import { SystemSettingsSection } from './options/SystemSettingsSection';
+import { LogSection } from './options/LogSection';
 
 import './options/Options.css';
 
 export default function Options() {
-  const [activeTab, setActiveTab] = useState('llm');
+  const tabs = [
+    { id: 'content', label: '内容生成', icon: '📝' },
+    { id: 'llm', label: '大模型配置', icon: '🤖' },
+    { id: 'asr', label: '语音识别', icon: '🎤' },
+    { id: 'system', label: '高级设置', icon: '⚙️' },
+    { id: 'logs', label: '运行日志', icon: '📋' },
+  ];
+
+  const [activeTab, setActiveTab] = useState('content');
   const [config, setConfig] = useState<PluginConfig>(DEFAULT_CONFIG);
   const [llmConfigs, setLLMConfigs] = useState<LLMConfig[]>([]);
-  const [selectedConfigId, setSelectedConfigId] = useState<string>('');
+  const [editingConfigId, setEditingConfigId] = useState<string>(''); // 当前正在编辑的配置 ID
   const [editingConfig, setEditingConfig] = useState<LLMConfig | null>(null);
   const [isAddingNew, setIsAddingNew] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -34,7 +43,6 @@ export default function Options() {
     const savedConfig = await StorageService.getConfig();
     if (savedConfig) {
       setConfig(savedConfig);
-      setSelectedConfigId(savedConfig.selectedLLMConfigId || 'default');
     }
   };
 
@@ -42,12 +50,15 @@ export default function Options() {
     const configs = await StorageService.getLLMConfigs();
     setLLMConfigs(configs);
 
+    // 初始化编辑状态
     const pluginConfig = await StorageService.getConfig();
     const selectedId = pluginConfig?.selectedLLMConfigId || 'default';
     const selected = configs.find(c => c.id === selectedId) || configs[0];
     if (selected) {
-      setEditingConfig(selected);
-      setSelectedConfigId(selected.id);
+      if (!editingConfigId) {
+        setEditingConfigId(selected.id);
+        setEditingConfig(selected);
+      }
     }
   };
 
@@ -57,13 +68,12 @@ export default function Options() {
   };
 
   // === LLM 配置操作 ===
-  const handleSelectConfig = async (id: string) => {
-    setSelectedConfigId(id);
+  const handleEditConfig = (id: string) => {
+    setEditingConfigId(id);
     const selected = llmConfigs.find(c => c.id === id);
     if (selected) {
       setEditingConfig(selected);
-      await StorageService.setSelectedLLMConfig(id);
-      await loadConfig();
+      setIsAddingNew(false);
     }
   };
 
@@ -71,6 +81,7 @@ export default function Options() {
     const newConfig = createDefaultLLMConfig('custom');
     newConfig.name = `新配置 ${llmConfigs.length + 1}`;
     setEditingConfig(newConfig);
+    setEditingConfigId(newConfig.id);
     setIsAddingNew(true);
   };
 
@@ -81,11 +92,7 @@ export default function Options() {
       await StorageService.saveLLMConfig(editingConfig);
 
       if (isAddingNew) {
-        await StorageService.setSelectedLLMConfig(editingConfig.id);
-        setSelectedConfigId(editingConfig.id);
         setIsAddingNew(false);
-      } else if (editingConfig.id === selectedConfigId) {
-        await StorageService.setSelectedLLMConfig(editingConfig.id);
       }
 
       await reloadAll();
@@ -107,11 +114,11 @@ export default function Options() {
     const success = await StorageService.deleteLLMConfig(id);
     if (success) {
       await reloadAll();
-      if (id === editingConfig?.id) {
+      if (id === editingConfigId) {
         const configs = await StorageService.getLLMConfigs();
         if (configs.length > 0) {
           setEditingConfig(configs[0]);
-          setSelectedConfigId(configs[0].id);
+          setEditingConfigId(configs[0].id);
         }
       }
     }
@@ -119,8 +126,11 @@ export default function Options() {
 
   const handleCancelAdd = () => {
     setIsAddingNew(false);
-    const selected = llmConfigs.find(c => c.id === selectedConfigId);
-    if (selected) setEditingConfig(selected);
+    const selected = llmConfigs.find(c => c.id === editingConfigId) || llmConfigs[0];
+    if (selected) {
+      setEditingConfig(selected);
+      setEditingConfigId(selected.id);
+    }
   };
 
   const updateEditingConfig = (updates: Partial<LLMConfig>) => {
@@ -153,14 +163,6 @@ export default function Options() {
       alert('清除缓存失败');
     }
   };
-
-  const tabs = [
-    { id: 'llm', label: '大模型配置', icon: '🤖' },
-    { id: 'content', label: '内容生成', icon: '📝' },
-    { id: 'asr', label: '语音识别', icon: '🎤' },
-    { id: 'filter', label: '过滤与排除', icon: '🛡️' },
-    { id: 'system', label: '系统与高级', icon: '⚙️' },
-  ];
 
   const version = typeof chrome !== 'undefined' && chrome.runtime?.getManifest 
     ? chrome.runtime.getManifest().version 
@@ -199,11 +201,11 @@ export default function Options() {
           {activeTab === 'llm' && (
             <LLMConfigSection
               llmConfigs={llmConfigs}
-              selectedConfigId={selectedConfigId}
+              editingConfigId={editingConfigId}
               editingConfig={editingConfig}
               isAddingNew={isAddingNew}
               saved={saved}
-              onSelectConfig={handleSelectConfig}
+              onEditConfig={handleEditConfig}
               onDeleteConfig={handleDeleteConfig}
               onAddNewConfig={handleAddNewConfig}
               onCancelAdd={handleCancelAdd}
@@ -213,19 +215,20 @@ export default function Options() {
           )}
 
           {activeTab === 'content' && (
-            <PromptSection config={config} onConfigChange={setConfig} />
+            <PromptSection config={config} llmConfigs={llmConfigs} onConfigChange={setConfig} />
           )}
 
           {activeTab === 'asr' && (
             <AsrSection config={config} onConfigChange={setConfig} />
           )}
 
-          {activeTab === 'filter' && (
-            <ExclusionSection config={config} onConfigChange={setConfig} />
-          )}
 
           {activeTab === 'system' && (
             <>
+              <ExclusionSection config={config} onConfigChange={setConfig} />
+
+              <div className="section-divider" />
+
               <SystemSettingsSection config={config} onConfigChange={setConfig} />
 
               <div className="section-divider" />
@@ -252,6 +255,10 @@ export default function Options() {
                 />
               </div>
             </>
+          )}
+
+          {activeTab === 'logs' && (
+            <LogSection />
           )}
         </div>
 

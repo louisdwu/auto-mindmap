@@ -22,6 +22,8 @@ export interface PluginConfig {
   prompt: {
     systemPrompt: string;
     template: string;
+    reflectionPrompt: string;    // 反思评价 Prompt
+    refinementTemplate: string;  // 最终优化 Template
   };
   settings: {
     language: string;
@@ -33,6 +35,9 @@ export interface PluginConfig {
     asrVadFilter: boolean;             // ASR 是否开启 VAD 过滤
     mindmapFontSize: number;           // 思维导图基础字号缩放倍数
     concurrencyLimit: number;          // 并发任务数限制
+    enableReflection: boolean;         // 是否启用反思模式
+    reflectionLLMConfigId: string;     // 反思阶段使用的 LLM 配置 ID
+    refinementLLMConfigId: string;     // 最终优化阶段使用的 LLM 配置 ID
   };
   // 排除关键词列表
   exclusionKeywords: string[];
@@ -135,7 +140,40 @@ export const DEFAULT_CONFIG: PluginConfig = {
 1. 过滤字幕中的口语干扰项。
 2. 识别主旨逻辑及从属关系。
 3. 按照定性标题结合定量数据的原则，构建思维导图。`,
-    template: '字幕内容：\n{subtitle_content}'
+    template: '字幕内容：\n{subtitle_content}',
+    reflectionPrompt: `# 任务：评价思维导图质量并识别遗漏信息
+
+## 输入：
+1. 原视频字幕稿：
+{subtitle_content}
+
+2. 初步生成的思维导图：
+{initial_mindmap}
+
+## 评价标准：
+1. **完整性**：是否涵盖了字幕中的所有核心论点、关键结论和重要数据点？
+2. **准确性**：是否存在误导或歪曲原意的地方？
+3. **层次感**：逻辑结构是否合理？
+
+## 输出要求：
+请指出遗漏的重要信息点，并给出具体的改进建议。如果没有遗漏且质量很高，请回复“优秀”。
+特别注意：直接列出改进点，不要有开场白或结束语。`,
+    refinementTemplate: `# 任务：基于反馈完善思维导图
+
+## 输入：
+1. 原视频字幕稿：
+{subtitle_content}
+
+2. 初步生成的思维导图：
+{initial_mindmap}
+
+3. 改进建议/遗漏点：
+{feedback}
+
+## 要求：
+请结合原字幕和改进建议，对初步思维导图进行补充和修正，生成一份最终的、更完整的 Markdown 思维导图。
+输出格式必须是标准的 Markdown 思维导图（# 标题层级）。
+仅输出 Markdown 内容，严禁任何解释或开场白。`
   },
   settings: {
     language: 'zh-CN',
@@ -146,7 +184,10 @@ export const DEFAULT_CONFIG: PluginConfig = {
     asrBeamSize: 2,
     asrVadFilter: true,
     mindmapFontSize: 1.0,
-    concurrencyLimit: 3
+    concurrencyLimit: 3,
+    enableReflection: false,
+    reflectionLLMConfigId: 'default',
+    refinementLLMConfigId: 'default'
   },
   exclusionKeywords: []
 };

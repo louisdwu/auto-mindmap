@@ -4,6 +4,7 @@ import { SubtitleService } from '../services/subtitleService';
 import { LLMService } from '../services/llmService';
 import { StorageService } from '../services/storageService';
 import { FileService } from '../services/fileService';
+import { LoggerService } from '../services/loggerService';
 
 const TASKS_STORAGE_KEY = 'active_tasks';
 
@@ -159,6 +160,8 @@ export class TaskManager {
     task.updatedAt = Date.now();
     await this.saveTasks();
 
+    await LoggerService.info('TaskManager', `开始执行任务: ${task.type}`, { taskId: task.id });
+
     switch (task.type) {
       case 'download_subtitle':
         await this.executeDownloadTask(task);
@@ -233,7 +236,15 @@ export class TaskManager {
     }
 
     // 调用大模型生成思维导图
-    const mindmapMarkdown = await LLMService.generateMindmap(config, subtitleText);
+    const mindmapMarkdown = await LLMService.generateMindmap(
+      config, 
+      subtitleText,
+      async (msg) => {
+        task.statusMessage = msg;
+        task.updatedAt = Date.now();
+        await this.saveTasks();
+      }
+    );
 
     // 保存思维导图到内存/存储
     const mindmapData = {
@@ -246,6 +257,7 @@ export class TaskManager {
       status: 'completed' as const
     };
 
+    await LoggerService.info('TaskManager', '思维导图生成成功，正在保存并通知 UI');
     await StorageService.saveMindmap(mindmapData);
 
     // 如果用户指定了缓存目录，保存文件到本地
