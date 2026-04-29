@@ -19,7 +19,29 @@ npm run build
 
 ---
 
-## 2. 本地 ASR 后端配置 (Python)
+## 2. 敏感信息与配置管理
+
+为了方便开发者将配置备份到 GitHub 同时保护私钥，本项目采用了“配置内化”方案。
+
+### API 密钥管理 (.env)
+1. 在项目根目录创建 `.env` 文件。
+2. 填入您的默认密钥：
+   ```env
+   VITE_DEFAULT_API_KEY=您的_API_KEY
+   ```
+3. 该文件已被 `.gitignore` 忽略，不会被提交。
+
+### 默认配置与 Prompt 维护
+- **修改位置**：`src/types/config.ts`
+- **工作流**：
+  1. 在 `config.ts` 的 `DEFAULT_CONFIG` 中修改默认的 Prompt 或模型参数。
+  2. 执行 `npm run build` 并刷新插件。
+  3. 在插件设置页面**清空**对应的输入框并保存。
+  4. 插件将自动回退并使用 `config.ts` 中定义的最新默认值。
+
+---
+
+## 3. 本地 ASR 后端配置 (Python)
 
 我们通过一个 Python 桥接服务器（`scripts/whisper_server.py`）来调用显卡算力。
 
@@ -49,7 +71,7 @@ python scripts/whisper_server.py
 
 ---
 
-## 3. 插件功能开启
+## 4. 插件功能开启
 
 1. 右键点击插件图标 -> **选项**。
 2. 找到 **“语音识别 (ASR) 配置”** 模块。
@@ -59,7 +81,7 @@ python scripts/whisper_server.py
 
 ---
 
-## 4. 常见问题 (Troubleshooting)
+## 5. 常见问题 (Troubleshooting)
 
 - **Service Worker 报错**：Manifest V3 不支持动态 `import()`。所有 Service Worker 使用到的服务类库（如 `AudioService`, `LLMService`）必须在文件顶部通过静态 `import` 引入。
 - **404/无法连接**：请确保 `whisper_server.py` 正在运行，且端口（默认 2233）未被防火墙拦截。
