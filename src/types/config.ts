@@ -113,51 +113,23 @@ export const DEFAULT_LLM_CONFIG: LLMConfig = {
   updatedAt: 0,
 };
 
+import systemPromptRaw from '../prompts/System.txt?raw';
+import userPromptRaw from '../prompts/User.txt?raw';
+import reflectionPromptRaw from '../prompts/Reflection.txt?raw';
+
+// 导出原始默认提示词，用于 UI 对比显示来源
+export const DEFAULT_PROMPTS = {
+  systemPrompt: systemPromptRaw.trim(),
+  template: userPromptRaw.trim(),
+  reflectionPrompt: reflectionPromptRaw.trim()
+};
+
 export const DEFAULT_CONFIG: PluginConfig = {
   selectedLLMConfigId: 'default',
   prompt: {
-    systemPrompt: `# Role: 资深知识分析师 & 思维导图可视化专家
-
-## Task: 
-将视频字幕稿（Transcript）转化为逻辑严密、层次清晰的 Markdown 思维导图。
-
-## Constraints:
-1. **结构化层级**：
-   - 最高层级唯一：使用单个 # 标题。
-   - 子层级：使用 ##, ### 直至最多 6 层。
-   - 严禁对各级标题进行数字编号（如 1.1, 1.2）。
-   - 采用标准 Markdown 层次缩进，确保树状关系清晰。
-2. **内容提炼规则**：
-   - **定性概括**：将口语化的表达转化为书面逻辑观点。
-   - **颗粒度平衡**：涵盖核心结论、支撑论据、关键案例。
-   - **数据敏感**：涉及市场波动、价格、百分比等数字点位时，必须精准保留。
-   - **聚合归并**：对散落在全文的同类信息进行归口整合。
-3. **忠实原意**：严禁虚构、增删原文未提及的观点。
-4. **输出限制**：仅输出标准 Markdown 内容，严禁任何开场白、解释或结束语。
-
-## Workflow:
-1. 过滤字幕中的口语干扰项。
-2. 识别主旨逻辑及从属关系。
-3. 按照定性标题结合定量数据的原则，构建思维导图。`,
-    template: '字幕内容：\n{subtitle_content}',
-    reflectionPrompt: `# 任务：评价思维导图质量，并在必要时直接进行优化
-
-## 输入：
-1. 原视频字幕稿：
-{subtitle_content}
-
-2. 初步生成的思维导图：
-{initial_mindmap}
-
-## 指令：
-请对比字幕稿，评估初步生成的思维导图的完整性、准确性和逻辑性。
-1. 如果该导图已经非常优秀且涵盖了所有核心论点，请仅回复“优秀”二字。
-2. 如果存在遗漏、错误或逻辑不通，请结合原字幕内容，直接输出一份优化补充后的完整 Markdown 思维导图。
-
-## 输出要求：
-- 仅输出结果（“优秀”二字或完整 Markdown 内容）。
-- 严禁任何开场白、解释或结束语。
-- 确保输出的 Markdown 格式正确。`
+    systemPrompt: DEFAULT_PROMPTS.systemPrompt,
+    template: DEFAULT_PROMPTS.template,
+    reflectionPrompt: DEFAULT_PROMPTS.reflectionPrompt
   },
   settings: {
     language: 'zh-CN',

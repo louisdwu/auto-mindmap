@@ -1,5 +1,5 @@
 import React from 'react';
-import { PluginConfig, LLMConfig } from '../../types/config';
+import { PluginConfig, LLMConfig, DEFAULT_PROMPTS } from '../../types/config';
 
 interface PromptSectionProps {
   config: PluginConfig;
@@ -15,7 +15,7 @@ export const PromptSection: React.FC<PromptSectionProps> = ({ config, llmConfigs
       </div>
 
       <div className="form-group">
-        <label className="form-label">主总结阶段模型 (Initial Summary)</label>
+        <label className="form-label">主总结阶段模型（Initial Summary）</label>
         <select
           className="form-select"
           value={config.selectedLLMConfigId || 'default'}
@@ -36,7 +36,7 @@ export const PromptSection: React.FC<PromptSectionProps> = ({ config, llmConfigs
 
       <div className="form-group">
         <div className="flex-row">
-          <label className="form-label">启用反思模式 (Reflection Mode)</label>
+          <label className="form-label">启用反思模式（Reflection Mode）</label>
           <div className="switch-container">
             <input
               type="checkbox"
@@ -57,7 +57,7 @@ export const PromptSection: React.FC<PromptSectionProps> = ({ config, llmConfigs
         <div className="reflection-settings animate-fade-in">
           <div className="form-row">
             <div className="form-group flex-1">
-              <label className="form-label">反思优化模型 (Reflection/Optimization)</label>
+              <label className="form-label">反思优化模型（Reflection/Optimization）</label>
               <select
                 className="form-select"
                 value={config.settings.reflectionLLMConfigId}
@@ -75,7 +75,12 @@ export const PromptSection: React.FC<PromptSectionProps> = ({ config, llmConfigs
           </div>
 
           <div className="form-group">
-            <label className="form-label">反思优化 Prompt</label>
+            <label className="form-label">
+              反思优化提示词（Reflection Prompt）
+              {config.prompt.reflectionPrompt.trim() === DEFAULT_PROMPTS.reflectionPrompt.trim() && (
+                <span className="source-hint">来自 Reflection.txt</span>
+              )}
+            </label>
             <textarea
               className="form-textarea form-textarea--medium"
               value={config.prompt.reflectionPrompt}
@@ -94,7 +99,12 @@ export const PromptSection: React.FC<PromptSectionProps> = ({ config, llmConfigs
       <div className="section-divider" />
 
       <div className="form-group">
-        <label className="form-label">系统提示词 (System Prompt)</label>
+        <label className="form-label">
+          系统提示词（System Prompt）
+          {config.prompt.systemPrompt.trim() === DEFAULT_PROMPTS.systemPrompt.trim() && (
+            <span className="source-hint">来自 System.txt</span>
+          )}
+        </label>
         <textarea
           className="form-textarea form-textarea--tall"
           value={config.prompt.systemPrompt}
@@ -108,7 +118,12 @@ export const PromptSection: React.FC<PromptSectionProps> = ({ config, llmConfigs
       </div>
 
       <div className="form-group">
-        <label className="form-label">用户消息模板 (User Prompt Template)</label>
+        <label className="form-label">
+          用户消息模板（User Prompt Template）
+          {config.prompt.template.trim() === DEFAULT_PROMPTS.template.trim() && (
+            <span className="source-hint">来自 User.txt</span>
+          )}
+        </label>
         <textarea
           className="form-textarea form-textarea--medium"
           value={config.prompt.template}

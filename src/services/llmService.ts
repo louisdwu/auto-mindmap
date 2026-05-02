@@ -112,6 +112,10 @@ export class LLMService {
 
     await LoggerService.info('LLMService', `阶段 2: 正在调用反思模型 (${reflectionLLMConfig.name}) 进行评估与优化`);
     
+    // 在反思阶段前添加少量延迟，避免在线/本地大模型服务由于连续请求过快而报错或触发频率限制
+    await LoggerService.debug('LLMService', '反思阶段冷却中 (等待 2 秒)...');
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    
     let reflectionPromptTemplate = config.prompt.reflectionPrompt || DEFAULT_CONFIG.prompt.reflectionPrompt;
     // 兼容性处理：如果检测到用户仍在使用旧版三阶段 Prompt，则自动 fallback 到系统内置的新版两阶段 Prompt
     if (!reflectionPromptTemplate.includes('优化补充后的完整 Markdown')) {
@@ -159,7 +163,15 @@ export class LLMService {
       finalPrompt = adapter.preprocessPrompt(finalPrompt);
     }
     
-    const timeout = (Number(llmConfig.timeout) || 60) * 1000;
+    const isReflection = context?.isReflection === true;
+    let timeoutSeconds = Number(llmConfig.timeout) || 60;
+    
+    // 如果是反思阶段，且用户设置的超时时间较短，则自动提升至 120 秒，以应对更大规模的上下文处理
+    if (isReflection && timeoutSeconds < 120) {
+      timeoutSeconds = 120;
+    }
+    
+    const timeout = timeoutSeconds * 1000;
 
     // 获取 API Key（如果 UI 配置为空且是默认配置，将采用 config.ts 中的环境变量默认值）
     const apiKey = llmConfig.apiKey || (llmConfig.id === 'default' ? DEFAULT_LLM_CONFIG.apiKey : '');

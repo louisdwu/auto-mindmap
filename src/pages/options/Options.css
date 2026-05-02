@@ -680,3 +680,17 @@ input:checked + .switch-label:before {
   border-radius: 12px;
   border: 1px dashed rgba(99, 102, 241, 0.2);
 }
+
+.source-hint {
+  display: inline-block;
+  margin-left: 10px;
+  padding: 2px 8px;
+  background-color: #f1f5f9;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 500;
+  border-radius: 4px;
+  border: 1px solid var(--border-color);
+  vertical-align: middle;
+  letter-spacing: 0;
+}
