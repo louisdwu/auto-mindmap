@@ -36,6 +36,7 @@ export interface PluginConfig {
     concurrencyLimit: number;          // 并发任务数限制
     enableReflection: boolean;         // 是否启用反思模式
     reflectionLLMConfigId: string;     // 反思阶段使用的 LLM 配置 ID
+    clearLogsOnClose: boolean;         // 退出日志页面时是否清空记录
   };
   // 排除关键词列表
   exclusionKeywords: string[];
@@ -142,7 +143,8 @@ export const DEFAULT_CONFIG: PluginConfig = {
     mindmapFontSize: 0.7,
     concurrencyLimit: 3,
     enableReflection: true,
-    reflectionLLMConfigId: 'default'
+    reflectionLLMConfigId: 'default',
+    clearLogsOnClose: false
   },
   exclusionKeywords: []
 };

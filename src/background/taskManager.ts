@@ -161,7 +161,7 @@ export class TaskManager {
       await this.saveTasks();
       
       // 必须通过 LoggerService 记录，否则用户的日志面板里看不到报错信息
-      await LoggerService.error('TaskManager', `任务执行失败 (${task.type})`, error);
+      await LoggerService.error('TaskManager', `任务执行失败 (${task.type})`, error, task.id);
     } finally {
       clearInterval(heartbeatId);
       // 任务结束，尝试启动后续排队任务
@@ -177,7 +177,7 @@ export class TaskManager {
     task.updatedAt = Date.now();
     await this.saveTasks();
 
-    await LoggerService.info('TaskManager', `开始执行任务: ${task.type}`, { taskId: task.id });
+    await LoggerService.info('TaskManager', `开始执行任务: ${task.type}`, { taskId: task.id }, task.id);
 
     switch (task.type) {
       case 'download_subtitle':
@@ -263,9 +263,9 @@ export class TaskManager {
       const cache = await StorageService.getPhase1Cache(videoId);
       if (cache) {
         cachedInitialMindmap = cache;
-        await LoggerService.info('TaskManager', `检测到阶段 1 缓存 (从浏览器存储读取)，跳过初版生成。`);
+        await LoggerService.info('TaskManager', `检测到阶段 1 缓存 (从浏览器存储读取)，跳过初版生成。`, undefined, task.id);
       } else {
-        await LoggerService.debug('TaskManager', `未检测到阶段 1 缓存，准备开始全新生成。`);
+        await LoggerService.debug('TaskManager', `未检测到阶段 1 缓存，准备开始全新生成。`, undefined, task.id);
       }
     }
 
@@ -281,11 +281,12 @@ export class TaskManager {
       async (initialMindmap) => {
         if (videoId) {
           await StorageService.savePhase1Cache(videoId, initialMindmap);
-          await LoggerService.debug('TaskManager', `阶段 1 初稿已存入浏览器内置存储 (用于断点续传)`);
+          await LoggerService.debug('TaskManager', `阶段 1 初稿已存入浏览器内置存储 (用于断点续传)`, undefined, task.id);
         }
         // 移除阶段 1 的本地文件保存，统一由任务结束时的 saveFilesToCacheDirectory 处理，避免重复下载
       },
-      cachedInitialMindmap
+      cachedInitialMindmap,
+      task.id
     );
 
     // 成功完成全部生成，清除 Phase 1 缓存，以免下次影响全新生成
@@ -304,7 +305,7 @@ export class TaskManager {
       status: 'completed' as const
     };
 
-    await LoggerService.info('TaskManager', '思维导图生成成功，正在保存并通知 UI');
+    await LoggerService.info('TaskManager', '思维导图生成成功，正在保存并通知 UI', undefined, task.id);
     await StorageService.saveMindmap(mindmapData);
 
     // 如果用户指定了缓存目录，保存最终文件到本地（注意阶段1如果已经保存，这里只保存最终版即可，但为了完整性，这里调用原方法覆盖或者跳过，我们这里修改 saveFilesToCacheDirectory 使其不再重复保存字幕）

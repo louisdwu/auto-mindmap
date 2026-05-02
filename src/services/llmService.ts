@@ -38,32 +38,33 @@ export class LLMService {
     subtitleText: string,
     onProgress?: (msg: string) => void,
     onPhase1Complete?: (initialMindmap: string) => Promise<void>,
-    cachedInitialMindmap?: string
+    cachedInitialMindmap?: string,
+    taskId?: string
   ): Promise<{ result: string, initialResult?: string }> {
     const isReflectionEnabled = config.settings.enableReflection;
 
     if (!isReflectionEnabled) {
-      const result = cachedInitialMindmap || await this.generateSinglePhase(config, subtitleText);
+      const result = cachedInitialMindmap || await this.generateSinglePhase(config, subtitleText, taskId);
       if (onPhase1Complete && !cachedInitialMindmap) {
         await onPhase1Complete(result);
       }
       return { result };
     }
-
-    return this.generateWithReflection(config, subtitleText, onProgress, onPhase1Complete, cachedInitialMindmap);
+    
+    return this.generateWithReflection(config, subtitleText, onProgress, onPhase1Complete, cachedInitialMindmap, taskId);
   }
 
   /**
    * 单阶段生成逻辑 (默认)
    */
-  private static async generateSinglePhase(config: PluginConfig, subtitleText: string): Promise<string> {
+  private static async generateSinglePhase(config: PluginConfig, subtitleText: string, taskId?: string): Promise<string> {
     const llmConfig = await StorageService.getSelectedLLMConfig();
     if (!llmConfig) throw new Error('未找到有效的 LLM 配置');
 
     // 使用 split/join 代替 replace 以避免字幕中包含 $ 符号导致的替换错误
     const template = config.prompt.template || DEFAULT_CONFIG.prompt.template;
     const prompt = template.split('{subtitle_content}').join(subtitleText);
-    return this.callLLM(config, llmConfig, prompt);
+    return this.callLLM(config, llmConfig, prompt, { taskId });
   }
 
   /**
@@ -74,26 +75,27 @@ export class LLMService {
     subtitleText: string,
     onProgress?: (msg: string) => void,
     onPhase1Complete?: (initialMindmap: string) => Promise<void>,
-    cachedInitialMindmap?: string
+    cachedInitialMindmap?: string,
+    taskId?: string
   ): Promise<{ result: string, initialResult?: string }> {
-    await LoggerService.info('LLMService', '开始反思模式生成流程');
+    await LoggerService.info('LLMService', '开始反思模式生成流程', undefined, taskId);
     
     // 阶段 1: 初步生成
     let initialMindmap = cachedInitialMindmap;
     if (initialMindmap) {
       onProgress?.('阶段 1/2: 发现初版缓存，跳过生成...');
-      await LoggerService.info('LLMService', '阶段 1: 发现初版缓存，跳过主模型生成');
+      await LoggerService.info('LLMService', '阶段 1: 发现初版缓存，跳过主模型生成', undefined, taskId);
     } else {
       onProgress?.('阶段 1/2: 正在生成初步思维导图...');
-      await LoggerService.info('LLMService', '阶段 1: 正在调用主模型生成初稿');
-      initialMindmap = await this.generateSinglePhase(config, subtitleText);
-      await LoggerService.debug('LLMService', '阶段 1 完成，收到初稿内容');
+      await LoggerService.info('LLMService', '阶段 1: 正在调用主模型生成初稿', undefined, taskId);
+      initialMindmap = await this.generateSinglePhase(config, subtitleText, taskId);
+      await LoggerService.debug('LLMService', '阶段 1 完成，收到初稿内容', undefined, taskId);
 
       if (onPhase1Complete) {
         try {
           await onPhase1Complete(initialMindmap);
         } catch (err) {
-          await LoggerService.error('LLMService', '阶段 1 完成后的回调执行失败', err);
+          await LoggerService.error('LLMService', '阶段 1 完成后的回调执行失败', err, taskId);
         }
       }
     }
@@ -106,18 +108,18 @@ export class LLMService {
       : await StorageService.getLLMConfigById(reflectionConfigId);
     
     if (!reflectionLLMConfig) {
-      await LoggerService.error('LLMService', '未找到反思阶段的 LLM 配置');
+      await LoggerService.error('LLMService', '未找到反思阶段的 LLM 配置', undefined, taskId);
       throw new Error('未找到反思阶段的 LLM 配置');
     }
 
-    await LoggerService.info('LLMService', `阶段 2: 正在调用反思模型 (${reflectionLLMConfig.name}) 进行评估与优化`);
+    await LoggerService.info('LLMService', `阶段 2: 正在调用反思模型 (${reflectionLLMConfig.name}) 进行评估与优化`, undefined, taskId);
     
     // 在反思阶段前不再添加硬编码延迟，改为由适配器层的指数退避重试机制处理限流或负载问题
     
     let reflectionPromptTemplate = config.prompt.reflectionPrompt || DEFAULT_CONFIG.prompt.reflectionPrompt;
     // 兼容性处理：如果检测到用户仍在使用旧版三阶段 Prompt，则自动 fallback 到系统内置的新版两阶段 Prompt
     if (!reflectionPromptTemplate.includes('优化补充后的完整 Markdown')) {
-      await LoggerService.warn('LLMService', '检测到旧版反思 Prompt，已自动切换为两阶段合并逻辑');
+      await LoggerService.warn('LLMService', '检测到旧版反思 Prompt，已自动切换为两阶段合并逻辑', undefined, taskId);
       reflectionPromptTemplate = DEFAULT_CONFIG.prompt.reflectionPrompt;
     }
 
@@ -128,19 +130,20 @@ export class LLMService {
     const reflectionSystemPrompt = '你是一个资深知识分析师与思维导图评审专家。你的任务是严格评价思维导图质量，并在必要时直接进行优化。严禁输出任何开场白、解释或结束语。';
     const reflectionResult = await this.callLLM(config, reflectionLLMConfig, reflectionPrompt, {
       isReflection: true,
-      systemPrompt: reflectionSystemPrompt
+      systemPrompt: reflectionSystemPrompt,
+      taskId
     });
     
-    await LoggerService.debug('LLMService', '阶段 2 完成，收到反思结果');
+    await LoggerService.debug('LLMService', '阶段 2 完成，收到反思结果', undefined, taskId);
 
     // 处理合并后的逻辑
     if (reflectionResult.trim() === '优秀' || (reflectionResult.includes('优秀') && reflectionResult.length < 10)) {
-      await LoggerService.info('LLMService', '评价结果为“优秀”，使用初稿');
+      await LoggerService.info('LLMService', '评价结果为“优秀”，使用初稿', undefined, taskId);
       onProgress?.('评价结果：质量优秀，采用初稿');
       return { result: initialMindmap, initialResult: initialMindmap };
     }
 
-    await LoggerService.info('LLMService', '发现优化内容，采用优化后的版本');
+    await LoggerService.info('LLMService', '发现优化内容，采用优化后的版本', undefined, taskId);
     onProgress?.('发现遗漏点，已完成自动优化');
     return { result: reflectionResult, initialResult: initialMindmap };
   }

@@ -258,7 +258,7 @@ export default function Options() {
           )}
 
           {activeTab === 'logs' && (
-            <LogSection />
+            <LogSection config={config} />
           )}
         </div>
 

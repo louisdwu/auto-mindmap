@@ -6,6 +6,7 @@ export interface LogEntry {
   module: string;
   message: string;
   data?: any;
+  taskId?: string;
 }
 
 const LOGS_STORAGE_KEY = 'run_logs';
@@ -15,16 +16,18 @@ export class LoggerService {
   /**
    * 记录日志
    */
-  static async log(level: LogLevel, module: string, message: string, data?: any) {
+  static async log(level: LogLevel, module: string, message: string, data?: any, taskId?: string) {
     const entry: LogEntry = {
       timestamp: Date.now(),
       level,
       module,
       message,
-      data: this.sanitizeData(data)
+      data: this.sanitizeData(data),
+      taskId
     };
 
-    console.log(`[${module}] [${level.toUpperCase()}] ${message}`, data || '');
+    const taskPrefix = taskId ? `[Task:${taskId.substring(0, 8)}] ` : '';
+    console.log(`${taskPrefix}[${module}] [${level.toUpperCase()}] ${message}`, data || '');
 
     try {
       const result = await chrome.storage.local.get(LOGS_STORAGE_KEY);
@@ -47,20 +50,20 @@ export class LoggerService {
     }
   }
 
-  static async info(module: string, message: string, data?: any) {
-    return this.log('info', module, message, data);
+  static async info(module: string, message: string, data?: any, taskId?: string) {
+    return this.log('info', module, message, data, taskId);
   }
 
-  static async warn(module: string, message: string, data?: any) {
-    return this.log('warn', module, message, data);
+  static async warn(module: string, message: string, data?: any, taskId?: string) {
+    return this.log('warn', module, message, data, taskId);
   }
 
-  static async error(module: string, message: string, data?: any) {
-    return this.log('error', module, message, data);
+  static async error(module: string, message: string, data?: any, taskId?: string) {
+    return this.log('error', module, message, data, taskId);
   }
 
-  static async debug(module: string, message: string, data?: any) {
-    return this.log('debug', module, message, data);
+  static async debug(module: string, message: string, data?: any, taskId?: string) {
+    return this.log('debug', module, message, data, taskId);
   }
 
   /**

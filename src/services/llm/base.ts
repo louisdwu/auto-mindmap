@@ -12,6 +12,7 @@ export interface LLMResponse {
 export interface GenerateContext {
   isReflection?: boolean;
   systemPrompt?: string;
+  taskId?: string;
 }
 
 export interface ILLMAdapter {
