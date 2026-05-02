@@ -90,8 +90,8 @@ export function createDefaultLLMConfig(provider: LLMProvider = 'openai'): LLMCon
     id: generateLLMConfigId(),
     ...configs[provider],
     apiKey: '',
-    timeout: 60,
-    maxTokens: 4096,
+    timeout: 120,
+    maxTokens: 16384,
     temperature: 0.7,
     createdAt: now,
     updatedAt: now,
@@ -108,7 +108,7 @@ export const DEFAULT_LLM_CONFIG: LLMConfig = {
   model: 'gemini-3-flash-preview',
   timeout: 60,
   maxTokens: 40960,
-  num_ctx: 16384,
+  num_ctx: 32768,
   temperature: 0.5,
   createdAt: 0,
   updatedAt: 0,
@@ -144,7 +144,7 @@ export const DEFAULT_CONFIG: PluginConfig = {
     concurrencyLimit: 3,
     enableReflection: true,
     reflectionLLMConfigId: 'default',
-    clearLogsOnClose: false
+    clearLogsOnClose: true
   },
   exclusionKeywords: []
 };

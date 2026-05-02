@@ -15,7 +15,8 @@ export class StorageMigration {
         ...DEFAULT_CONFIG.prompt,
         ...config.prompt,
         systemPrompt: config.prompt?.systemPrompt || DEFAULT_CONFIG.prompt.systemPrompt,
-        template: config.prompt?.template || DEFAULT_CONFIG.prompt.template
+        template: config.prompt?.template || DEFAULT_CONFIG.prompt.template,
+        reflectionPrompt: config.prompt?.reflectionPrompt || DEFAULT_CONFIG.prompt.reflectionPrompt
       },
       settings: {
         ...DEFAULT_CONFIG.settings,

@@ -77,8 +77,18 @@ export const PromptSection: React.FC<PromptSectionProps> = ({ config, llmConfigs
           <div className="form-group">
             <label className="form-label">
               反思优化提示词（Reflection Prompt）
-              {config.prompt.reflectionPrompt.trim() === DEFAULT_PROMPTS.reflectionPrompt.trim() && (
+              {config.prompt.reflectionPrompt.trim() === DEFAULT_PROMPTS.reflectionPrompt.trim() ? (
                 <span className="source-hint">来自 Reflection.txt</span>
+              ) : (
+                <button 
+                  className="btn-link" 
+                  onClick={() => onConfigChange({
+                    ...config,
+                    prompt: { ...config.prompt, reflectionPrompt: DEFAULT_PROMPTS.reflectionPrompt }
+                  })}
+                >
+                  恢复默认
+                </button>
               )}
             </label>
             <textarea
@@ -101,8 +111,18 @@ export const PromptSection: React.FC<PromptSectionProps> = ({ config, llmConfigs
       <div className="form-group">
         <label className="form-label">
           系统提示词（System Prompt）
-          {config.prompt.systemPrompt.trim() === DEFAULT_PROMPTS.systemPrompt.trim() && (
+          {config.prompt.systemPrompt.trim() === DEFAULT_PROMPTS.systemPrompt.trim() ? (
             <span className="source-hint">来自 System.txt</span>
+          ) : (
+            <button 
+              className="btn-link" 
+              onClick={() => onConfigChange({
+                ...config,
+                prompt: { ...config.prompt, systemPrompt: DEFAULT_PROMPTS.systemPrompt }
+              })}
+            >
+              恢复默认
+            </button>
           )}
         </label>
         <textarea
@@ -120,8 +140,18 @@ export const PromptSection: React.FC<PromptSectionProps> = ({ config, llmConfigs
       <div className="form-group">
         <label className="form-label">
           用户消息模板（User Prompt Template）
-          {config.prompt.template.trim() === DEFAULT_PROMPTS.template.trim() && (
+          {config.prompt.template.trim() === DEFAULT_PROMPTS.template.trim() ? (
             <span className="source-hint">来自 User.txt</span>
+          ) : (
+            <button 
+              className="btn-link" 
+              onClick={() => onConfigChange({
+                ...config,
+                prompt: { ...config.prompt, template: DEFAULT_PROMPTS.template }
+              })}
+            >
+              恢复默认
+            </button>
           )}
         </label>
         <textarea

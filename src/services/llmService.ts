@@ -127,7 +127,12 @@ export class LLMService {
       .split('{subtitle_content}').join(subtitleText)
       .split('{initial_mindmap}').join(initialMindmap);
     
-    const reflectionSystemPrompt = '你是一个资深知识分析师与思维导图评审专家。你的任务是严格评价思维导图质量，并在必要时直接进行优化。严禁输出任何开场白、解释或结束语。';
+    const reflectionSystemPrompt = `你是一个资深知识分析师与思维导图可视化专家。你的任务是基于原视频字幕稿，严格评价初步生成的思维导图质量，并在必要时直接执行优化。
+必须遵循以下准则：
+1. 定性概括：将口语化表达转化为书面逻辑观点。
+2. 数据敏感：精准保留所有价格、日期、百分比等数字点位。
+3. 结构规范：最高层级唯一(#)，严禁标题编号，采用标准 Markdown 缩进。
+4. 严禁输出任何开场白、解释或结束语。`;
     const reflectionResult = await this.callLLM(config, reflectionLLMConfig, reflectionPrompt, {
       isReflection: true,
       systemPrompt: reflectionSystemPrompt,

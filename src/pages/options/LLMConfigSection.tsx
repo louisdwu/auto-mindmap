@@ -107,14 +107,14 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
                 } else if (provider === 'lmstudio') {
                   updates.apiUrl = 'http://localhost:1234/v1';
                   updates.model = 'qwen_qwen3.5-9b';
-                  updates.maxTokens = 4096;
-                  updates.num_ctx = 8192;
+                  updates.maxTokens = 16384;
+                  updates.num_ctx = 32768;
                   updates.temperature = 0.7;
                 } else if (provider === 'ollama') {
                   updates.apiUrl = 'http://localhost:11434/api';
                   updates.model = 'llama3';
-                  updates.maxTokens = 4096;
-                  updates.num_ctx = 8192;
+                  updates.maxTokens = 16384;
+                  updates.num_ctx = 32768;
                   updates.temperature = 0.7;
                 } else if (provider === 'custom') {
                   updates.apiUrl = '';
@@ -233,10 +233,10 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
               <input
                 className="form-input"
                 type="number"
-                value={editingConfig.maxTokens || 4096}
-                onChange={(e) => onUpdateEditingConfig({ maxTokens: parseInt(e.target.value) || 4096 })}
+                value={editingConfig.maxTokens || 16384}
+                onChange={(e) => onUpdateEditingConfig({ maxTokens: parseInt(e.target.value) || 16384 })}
                 min="1"
-                max="32768"
+                max="128000"
               />
               <p className="form-hint">单次请求最大生成的 Token 数。推理模型建议设为 4096 以上。</p>
             </div>
@@ -263,10 +263,10 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
             <input
               className="form-input"
               type="number"
-              value={editingConfig.num_ctx || 4096}
-              onChange={(e) => onUpdateEditingConfig({ num_ctx: parseInt(e.target.value) || 4096 })}
+              value={editingConfig.num_ctx || 16384}
+              onChange={(e) => onUpdateEditingConfig({ num_ctx: parseInt(e.target.value) || 16384 })}
               min="512"
-              max="131072"
+              max="1048576"
               step="512"
             />
             <p className="form-hint">

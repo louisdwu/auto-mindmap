@@ -54,7 +54,7 @@ export class OpenAIAdapter extends BaseAdapter implements ILLMAdapter {
       model: llmConfig.model.trim(),
       messages: messages,
       temperature: llmConfig.temperature ?? 0.7,
-      max_tokens: llmConfig.maxTokens ?? 2000
+      max_tokens: llmConfig.maxTokens ?? 8192
     };
 
     // 针对 LM Studio 或自定义 OpenAI 兼容后端，尝试传递上下文长度

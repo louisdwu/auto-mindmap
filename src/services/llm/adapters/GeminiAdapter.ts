@@ -39,7 +39,7 @@ export class GeminiAdapter extends BaseAdapter implements ILLMAdapter {
       contents: [{ parts: [{ text: prompt }] }],
       generationConfig: {
         temperature: llmConfig.temperature ?? 0.7,
-        maxOutputTokens: llmConfig.maxTokens ?? 2000
+        maxOutputTokens: llmConfig.maxTokens ?? 16384
       }
     };
 
