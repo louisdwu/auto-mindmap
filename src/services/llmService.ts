@@ -112,9 +112,7 @@ export class LLMService {
 
     await LoggerService.info('LLMService', `阶段 2: 正在调用反思模型 (${reflectionLLMConfig.name}) 进行评估与优化`);
     
-    // 在反思阶段前添加少量延迟，避免在线/本地大模型服务由于连续请求过快而报错或触发频率限制
-    await LoggerService.debug('LLMService', '反思阶段冷却中 (等待 2 秒)...');
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    // 在反思阶段前不再添加硬编码延迟，改为由适配器层的指数退避重试机制处理限流或负载问题
     
     let reflectionPromptTemplate = config.prompt.reflectionPrompt || DEFAULT_CONFIG.prompt.reflectionPrompt;
     // 兼容性处理：如果检测到用户仍在使用旧版三阶段 Prompt，则自动 fallback 到系统内置的新版两阶段 Prompt
@@ -252,10 +250,10 @@ export class LLMService {
     const errorMessage = error instanceof Error ? error.message : String(error);
 
     if (errorMessage.includes('fetch') || errorMessage.includes('网络') || errorMessage.includes('Failed to fetch')) {
-      return `网络错误：无法连接到 API 服务器 (${errorMessage})，请检查网络连接、API 地址或 CORS 设置`;
+      return `网络错误：无法连接到 API 服务器 (${errorMessage})，请检查网络连接、API 地址或 CORS 设置。系统已尝试自动重试，但未能成功。`;
     }
     if (errorMessage.includes('超时') || errorMessage.includes('timeout') || errorMessage.includes('AbortError')) {
-      return `请求超时，请检查服务状态或在设置中调大超时时间`;
+      return `请求超时，请检查服务状态或在设置中调大超时时间。系统已尝试重试，但请求仍未在预定时间内完成。`;
     }
     if (errorMessage.includes('exceeds the available context size') || errorMessage.includes('try increasing it')) {
       const match = errorMessage.match(/request \((\d+) tokens\) exceeds the available context size \((\d+) tokens\)/i);

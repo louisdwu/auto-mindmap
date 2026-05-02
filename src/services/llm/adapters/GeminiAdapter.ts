@@ -50,7 +50,7 @@ export class GeminiAdapter extends BaseAdapter implements ILLMAdapter {
       };
     }
 
-    const response = await this.fetchWithTimeout(url, {
+    const response = await this.fetchWithRetry(url, {
       method: 'POST',
       headers: {
         'Accept': 'application/json',

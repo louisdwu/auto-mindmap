@@ -52,7 +52,7 @@ export class OllamaAdapter extends BaseAdapter implements ILLMAdapter {
       headers['Authorization'] = `Bearer ${llmConfig.apiKey.trim()}`;
     }
 
-    const response = await this.fetchWithTimeout(url, {
+    const response = await this.fetchWithRetry(url, {
       method: 'POST',
       headers,
       body: JSON.stringify(requestBody)

@@ -74,7 +74,7 @@ export class OpenAIAdapter extends BaseAdapter implements ILLMAdapter {
       headers['Authorization'] = `Bearer ${llmConfig.apiKey.trim()}`;
     }
 
-    const response = await this.fetchWithTimeout(apiUrl, {
+    const response = await this.fetchWithRetry(apiUrl, {
       method: 'POST',
       headers,
       body: JSON.stringify(requestBody)
@@ -146,7 +146,7 @@ export class OpenAIAdapter extends BaseAdapter implements ILLMAdapter {
       headers['Authorization'] = `Bearer ${llmConfig.apiKey.trim()}`;
     }
 
-    const response = await this.fetchWithTimeout(apiUrl, {
+    const response = await this.fetchWithRetry(apiUrl, {
       method: 'POST',
       headers,
       body: formData
