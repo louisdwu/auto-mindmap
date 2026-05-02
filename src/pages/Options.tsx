@@ -62,6 +62,34 @@ export default function Options() {
     }
   };
 
+  // === 自动保存逻辑 ===
+  // 1. 自动保存基础配置 (PluginConfig)
+  useEffect(() => {
+    const timer = setTimeout(async () => {
+      const savedConfig = await StorageService.getConfig();
+      // 深度对比，避免初始加载或无意义重复保存
+      if (savedConfig && JSON.stringify(savedConfig) !== JSON.stringify(config)) {
+        await StorageService.saveConfig(config);
+        setSaved(true);
+        setTimeout(() => setSaved(false), 1500);
+      }
+    }, 800); // 800ms 抖动
+    return () => clearTimeout(timer);
+  }, [config]);
+
+  // 2. 自动保存正在编辑的 LLM 配置
+  useEffect(() => {
+    if (!editingConfig || isAddingNew) return;
+    const timer = setTimeout(async () => {
+      await StorageService.saveLLMConfig(editingConfig);
+      // 同步更新列表中的名称/提供商预览
+      setLLMConfigs(prev => prev.map(c => c.id === editingConfig.id ? editingConfig : c));
+      setSaved(true);
+      setTimeout(() => setSaved(false), 1500);
+    }, 800);
+    return () => clearTimeout(timer);
+  }, [editingConfig, isAddingNew]);
+
   const reloadAll = async () => {
     await loadConfig();
     await loadLLMConfigs();
@@ -77,32 +105,21 @@ export default function Options() {
     }
   };
 
-  const handleAddNewConfig = () => {
+  const handleAddNewConfig = async () => {
     const newConfig = createDefaultLLMConfig('custom');
     newConfig.name = `新配置 ${llmConfigs.length + 1}`;
+    
+    // 立即保存到存储，实现“即刻生效”
+    await StorageService.saveLLMConfig(newConfig);
+    const configs = await StorageService.getLLMConfigs();
+    setLLMConfigs(configs);
+    
     setEditingConfig(newConfig);
     setEditingConfigId(newConfig.id);
-    setIsAddingNew(true);
+    setIsAddingNew(false); // 不再需要“新增中”状态
   };
 
-  const handleSaveCurrentConfig = async () => {
-    if (!editingConfig) return;
 
-    try {
-      await StorageService.saveLLMConfig(editingConfig);
-
-      if (isAddingNew) {
-        setIsAddingNew(false);
-      }
-
-      await reloadAll();
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2000);
-    } catch (error) {
-      console.error('[Options] 保存配置失败:', error);
-      alert('保存失败: ' + (error instanceof Error ? error.message : String(error)));
-    }
-  };
 
   const handleDeleteConfig = async (id: string) => {
     if (llmConfigs.length <= 1) {
@@ -124,14 +141,7 @@ export default function Options() {
     }
   };
 
-  const handleCancelAdd = () => {
-    setIsAddingNew(false);
-    const selected = llmConfigs.find(c => c.id === editingConfigId) || llmConfigs[0];
-    if (selected) {
-      setEditingConfig(selected);
-      setEditingConfigId(selected.id);
-    }
-  };
+
 
   const updateEditingConfig = (updates: Partial<LLMConfig>) => {
     if (editingConfig) {
@@ -208,8 +218,6 @@ export default function Options() {
               onEditConfig={handleEditConfig}
               onDeleteConfig={handleDeleteConfig}
               onAddNewConfig={handleAddNewConfig}
-              onCancelAdd={handleCancelAdd}
-              onSaveCurrentConfig={handleSaveCurrentConfig}
               onUpdateEditingConfig={updateEditingConfig}
             />
           )}
@@ -262,14 +270,7 @@ export default function Options() {
           )}
         </div>
 
-        {/* 底部自动保存提示或全局保存按钮可以在这里添加 */}
-        {activeTab !== 'llm' && activeTab !== 'system' && activeTab !== 'asr' && (
-          <div className="fixed-footer">
-            <button className="btn--primary" onClick={handleSave}>
-              {saved ? '✓ 已保存' : '保存设置'}
-            </button>
-          </div>
-        )}
+        {/* 移除底部固定保存按钮，改为全自动保存 */}
       </main>
     </div>
   );

@@ -11,8 +11,6 @@ interface LLMConfigSectionProps {
   onEditConfig: (id: string) => void;
   onDeleteConfig: (id: string) => void;
   onAddNewConfig: () => void;
-  onCancelAdd: () => void;
-  onSaveCurrentConfig: () => void;
   onUpdateEditingConfig: (updates: Partial<LLMConfig>) => void;
 }
 
@@ -25,8 +23,6 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
   onEditConfig,
   onDeleteConfig,
   onAddNewConfig,
-  onCancelAdd,
-  onSaveCurrentConfig,
   onUpdateEditingConfig
 }) => {
   return (
@@ -281,15 +277,13 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
             </p>
           </div>
 
-          {/* 保存按钮 */}
-          <div className="btn-row--spaced">
-            <button className="btn--success" onClick={onSaveCurrentConfig}>
-              {saved ? '✓ 已保存' : (isAddingNew ? '保存新配置' : '保存当前配置')}
-            </button>
-            {isAddingNew && (
-              <button className="btn--cancel" onClick={onCancelAdd}>取消</button>
-            )}
+          {/* 自动保存提示 */}
+          <div style={{ marginTop: '24px', textAlign: 'right' }}>
+            <span style={{ fontSize: '12px', color: '#64748b', fontStyle: 'italic' }}>
+              {saved ? '✓ 所有更改已自动保存' : '修改将自动保存...'}
+            </span>
           </div>
+
         </>
       )}
     </section>
