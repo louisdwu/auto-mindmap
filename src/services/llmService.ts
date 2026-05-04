@@ -64,7 +64,8 @@ export class LLMService {
     // 使用 split/join 代替 replace 以避免字幕中包含 $ 符号导致的替换错误
     const template = config.prompt.template || DEFAULT_CONFIG.prompt.template;
     const prompt = template.split('{subtitle_content}').join(subtitleText);
-    return this.callLLM(config, llmConfig, prompt, { taskId });
+    const result = await this.callLLM(config, llmConfig, prompt, { taskId });
+    return this.extractMarkdown(result);
   }
 
   /**
@@ -142,7 +143,8 @@ export class LLMService {
     await LoggerService.debug('LLMService', '阶段 2 完成，收到反思结果', undefined, taskId);
 
     // 处理合并后的逻辑
-    if (reflectionResult.trim() === '优秀' || (reflectionResult.includes('优秀') && reflectionResult.length < 10)) {
+    const cleanedResult = this.extractMarkdown(reflectionResult);
+    if (cleanedResult === '优秀' || (cleanedResult.includes('优秀') && cleanedResult.length < 10)) {
       await LoggerService.info('LLMService', '评价结果为“优秀”，使用初稿', undefined, taskId);
       onProgress?.('评价结果：质量优秀，采用初稿');
       return { result: initialMindmap, initialResult: initialMindmap, reflectionSuccess: true };
@@ -150,7 +152,29 @@ export class LLMService {
 
     await LoggerService.info('LLMService', '发现优化内容，采用优化后的版本', undefined, taskId);
     onProgress?.('发现遗漏点，已完成自动优化');
-    return { result: reflectionResult, initialResult: initialMindmap, reflectionSuccess: false };
+    return { result: cleanedResult, initialResult: initialMindmap, reflectionSuccess: false };
+  }
+
+  /**
+   * 提取纯净的 Markdown 导图文本
+   */
+  private static extractMarkdown(text: string): string {
+    // 优先寻找 ```markdown 或 ```md 代码块
+    const mdBlockMatch = text.match(/```(?:markdown|md)?\s*([\s\S]*?)```/i);
+    if (mdBlockMatch) {
+      return mdBlockMatch[1].trim();
+    }
+    
+    // 如果没有代码块，从第一个 # 标题开始截断，舍弃前面的非规范内容
+    const firstHeadingIndex = text.indexOf('# ');
+    if (firstHeadingIndex !== -1) {
+      const match = text.match(/(?:^|\n)(#\s.*[\s\S]*)/);
+      if (match) {
+         return match[1].trim();
+      }
+    }
+    
+    return text.trim();
   }
 
 

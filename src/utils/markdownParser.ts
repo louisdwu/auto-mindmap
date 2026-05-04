@@ -58,8 +58,11 @@ export function parseMarkdown(markdown: string): INodeData {
     expanded: true
   };
 
+  let firstHeadingIndex = -1;
+
   // 查找第一个 # 标题
-  for (const line of lines) {
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
     const trimmedLine = line.trim();
     if (!trimmedLine) continue;
 
@@ -75,6 +78,7 @@ export function parseMarkdown(markdown: string): INodeData {
           children: [],
           expanded: true
         };
+        firstHeadingIndex = i;
         break;
       }
     }
@@ -88,7 +92,11 @@ export function parseMarkdown(markdown: string): INodeData {
   let currentBaseLevel = 0; // 当前基础层级（用于列表项的相对层级计算）
   let isFirstHeading = true; // 标记是否是第一个 # 标题
 
-  for (const line of lines) {
+  // 如果找到了标题，从标题所在行开始遍历；否则为了容错，从头开始遍历（针对没有任何标题的极端情况）
+  const startIndex = firstHeadingIndex !== -1 ? firstHeadingIndex : 0;
+
+  for (let i = startIndex; i < lines.length; i++) {
+    const line = lines[i];
     const trimmedLine = line.trim();
     if (!trimmedLine) continue;
 
