@@ -92,6 +92,9 @@ COMPUTE_TYPE = os.getenv("WHISPER_COMPUTE", "float16")
 NUM_WORKERS = int(os.getenv("WHISPER_NUM_WORKERS", 1))
 # CPU 并行线程数，防止喂数据瓶颈
 CPU_THREADS = int(os.getenv("WHISPER_CPU_THREADS", 4))
+# 默认识别语言 (针对不带参数的第三方工具)
+DEFAULT_LANGUAGE = os.getenv("WHISPER_DEFAULT_LANGUAGE", None)
+DEFAULT_INITIAL_PROMPT = os.getenv("WHISPER_DEFAULT_INITIAL_PROMPT", None)
 
 print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] 正在初始化 ASR 服务 (性能增强模式)...")
 print(f"模型名称: {MODEL_NAME}")
@@ -133,14 +136,15 @@ def load_model():
 
 load_model()
 
-@app.post("/transcribe")
-async def transcribe(
-    file: UploadFile = File(None),
-    audio_url: str = Form(None),
-    video_id: str = Form(None),
-    model_name: str = Form("large-v2"),
-    beam_size: str = Form(None),
-    vad_filter: str = Form(None)
+async def do_transcribe(
+    file: UploadFile = None,
+    audio_url: str = None,
+    video_id: str = None,
+    model_name: str = "large-v2",
+    beam_size: str = None,
+    vad_filter: str = None,
+    language: str = None,
+    initial_prompt: str = None
 ):
     start_time = time.time()
     tmp_path = None
@@ -225,11 +229,17 @@ async def transcribe(
         request_beam_size = int(beam_size) if beam_size else int(os.getenv("WHISPER_BEAM_SIZE", 2))
         request_vad_filter = str(vad_filter).lower() == "true" if vad_filter is not None else os.getenv("WHISPER_VAD_FILTER", "true").lower() == "true"
         
-        print(f"[{time.strftime('%H:%M:%S')}] 启动识别流程 (beam_size={request_beam_size}, vad_filter={request_vad_filter})...")
+        # 强制语言逻辑：请求参数 > 环境变量 > 自动检测(None)
+        final_language = language if language else DEFAULT_LANGUAGE
+        final_initial_prompt = initial_prompt if initial_prompt else DEFAULT_INITIAL_PROMPT
+
+        print(f"[{time.strftime('%H:%M:%S')}] 启动识别流程 (beam_size={request_beam_size}, vad_filter={request_vad_filter}, language={final_language})...")
         segments, info = model.transcribe(
             tmp_path, 
             beam_size=request_beam_size, 
-            vad_filter=request_vad_filter
+            vad_filter=request_vad_filter,
+            language=final_language,
+            initial_prompt=final_initial_prompt
         )
         
         full_text = []
@@ -250,7 +260,7 @@ async def transcribe(
         
         result_text = " ".join(full_text).strip()
         duration = time.time() - start_time
-        print(f"转录完成！语言: {info.language}, 耗时: {duration:.2f}s, 字数: {len(result_text)}")
+        print(f"转录完成！语言: {info.language} (置信度: {info.language_probability:.2f}), 耗时: {duration:.2f}s, 字数: {len(result_text)}")
         
         # 3.5 写入字幕文本缓存
         if video_id and result_text and txt_cache_path:
@@ -293,6 +303,76 @@ async def transcribe(
                     os.remove(tmp_path)
                 except:
                     pass
+
+@app.post("/transcribe")
+async def transcribe(
+    file: UploadFile = File(None),
+    audio_url: str = Form(None),
+    video_id: str = Form(None),
+    model_name: str = Form("large-v2"),
+    beam_size: str = Form(None),
+    vad_filter: str = Form(None)
+):
+    return await do_transcribe(file, audio_url, video_id, model_name, beam_size, vad_filter)
+
+@app.post("/v1/audio/transcriptions")
+async def openai_transcribe(
+    file: UploadFile = File(None),
+    model: str = Form("large-v2"),
+    response_format: str = Form("json"),
+    language: str = Form(None),
+    beam_size: str = Form(None),
+    vad_filter: str = Form(None),
+    audio_url: str = Form(None),
+    video_id: str = Form(None)
+):
+    """
+    OpenAI 兼容接口，支持标准的语音转文字请求
+    """
+    print(f"[{time.strftime('%H:%M:%S')}] 收到 OpenAI 兼容格式请求 (model={model}, lang={language})")
+    # 调用内部核心逻辑
+    result = await do_transcribe(
+        file=file, 
+        model_name=model, 
+        language=language,
+        beam_size=beam_size,
+        vad_filter=vad_filter,
+        audio_url=audio_url,
+        video_id=video_id
+    )
+    
+    # 处理可能的 JSONResponse 错误返回
+    if isinstance(result, JSONResponse):
+        return result
+
+    if response_format == "text":
+        return result["text"]
+    
+    # 返回 OpenAI 标准的 JSON 格式
+    return {"text": result["text"]}
+
+@app.get("/v1/models")
+async def list_models():
+    """
+    OpenAI 兼容接口，返回模型列表以便工具验证
+    """
+    return {
+        "object": "list",
+        "data": [
+            {
+                "id": "large-v2",
+                "object": "model",
+                "created": 1677610602,
+                "owned_by": "openai"
+            },
+            {
+                "id": "whisper-1",
+                "object": "model",
+                "created": 1677610602,
+                "owned_by": "openai"
+            }
+        ]
+    }
 
 @app.get("/health")
 async def health():

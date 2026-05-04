@@ -180,7 +180,14 @@ export class SubtitleService {
 
       if (isLocal) {
         onProgress?.('正在通过本地服务器识别...');
-        text = await LLMService.transcribeAudio(config, audioUrl, { videoId: videoInfo.bvid }, onProgress);
+        try {
+          text = await LLMService.transcribeAudio(config, audioUrl, { videoId: videoInfo.bvid }, onProgress);
+        } catch (e: any) {
+          console.warn('本地 ASR 通过 URL 识别失败，尝试下载音频后识别:', e);
+          onProgress?.('URL 识别受阻，正在下载音频文件...');
+          const audioBlob = await AudioService.downloadAudioBlob(audioUrl);
+          text = await LLMService.transcribeAudio(config, audioBlob, { videoId: videoInfo.bvid }, onProgress);
+        }
       } else {
         const audioBlob = await AudioService.downloadAudioBlob(audioUrl);
         text = await LLMService.transcribeAudio(config, audioBlob, { videoId: videoInfo.bvid }, onProgress);

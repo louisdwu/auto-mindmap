@@ -133,6 +133,23 @@ export class OpenAIAdapter extends BaseAdapter implements ILLMAdapter {
     formData.append('model', isLocal ? 'large-v2' : 'whisper-1');
     formData.append('response_format', 'json');
     
+    // 强制指定识别语言（解决短音频识别为 cy 的问题）
+    const langMap: Record<string, string> = {
+      'zh-CN': 'zh',
+      'zh-TW': 'zh',
+      'en-US': 'en',
+      'ja-JP': 'ja'
+    };
+    const whisperLang = langMap[config.settings.language] || config.settings.language?.split('-')[0];
+    if (whisperLang) {
+      formData.append('language', whisperLang);
+      
+      // 如果是中文，添加初始提示词以优化中英混说识别
+      if (whisperLang === 'zh') {
+        formData.append('initial_prompt', '这是一段中文视频的音频，其中可能包含部分专业英文单词或短语。');
+      }
+    }
+    
     if (isLocal) {
       if (options?.videoId) {
         formData.append('video_id', options.videoId);

@@ -40,7 +40,7 @@ export class LLMService {
     onPhase1Complete?: (initialMindmap: string) => Promise<void>,
     cachedInitialMindmap?: string,
     taskId?: string
-  ): Promise<{ result: string, initialResult?: string }> {
+  ): Promise<{ result: string, initialResult?: string, reflectionSuccess?: boolean }> {
     const isReflectionEnabled = config.settings.enableReflection;
 
     if (!isReflectionEnabled) {
@@ -77,7 +77,7 @@ export class LLMService {
     onPhase1Complete?: (initialMindmap: string) => Promise<void>,
     cachedInitialMindmap?: string,
     taskId?: string
-  ): Promise<{ result: string, initialResult?: string }> {
+  ): Promise<{ result: string, initialResult?: string, reflectionSuccess?: boolean }> {
     await LoggerService.info('LLMService', '开始反思模式生成流程', undefined, taskId);
     
     // 阶段 1: 初步生成
@@ -145,13 +145,14 @@ export class LLMService {
     if (reflectionResult.trim() === '优秀' || (reflectionResult.includes('优秀') && reflectionResult.length < 10)) {
       await LoggerService.info('LLMService', '评价结果为“优秀”，使用初稿', undefined, taskId);
       onProgress?.('评价结果：质量优秀，采用初稿');
-      return { result: initialMindmap, initialResult: initialMindmap };
+      return { result: initialMindmap, initialResult: initialMindmap, reflectionSuccess: true };
     }
 
     await LoggerService.info('LLMService', '发现优化内容，采用优化后的版本', undefined, taskId);
     onProgress?.('发现遗漏点，已完成自动优化');
-    return { result: reflectionResult, initialResult: initialMindmap };
+    return { result: reflectionResult, initialResult: initialMindmap, reflectionSuccess: false };
   }
+
 
   /**
    * 通用的 LLM 调用方法

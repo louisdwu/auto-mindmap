@@ -6,6 +6,7 @@ import { StorageService } from '../services/storageService';
 import { FileService } from '../services/fileService';
 import { LoggerService } from '../services/loggerService';
 import { VideoUtils } from '../utils/videoUtils';
+import { StatsService } from '../services/statsService';
 
 const TASKS_STORAGE_KEY = 'active_tasks';
 
@@ -159,6 +160,20 @@ export class TaskManager {
       task.error = errorMessage;
       task.updatedAt = Date.now();
       await this.saveTasks();
+
+      // 记录失败统计
+      if (task.type === 'generate_mindmap') {
+        const videoUrl = task.data.videoUrl;
+        const videoId = VideoUtils.extractVideoId(videoUrl);
+        const config = await StorageService.getConfig();
+        const selectedId = config?.selectedLLMConfigId || 'default';
+        await StatsService.recordGeneration({
+          videoId,
+          modelId: selectedId,
+          isReflectionEnabled: config?.settings.enableReflection || false,
+          isSuccess: false
+        });
+      }
       
       // 必须通过 LoggerService 记录，否则用户的日志面板里看不到报错信息
       await LoggerService.error('TaskManager', `任务执行失败 (${task.type})`, error, task.id);
@@ -270,7 +285,7 @@ export class TaskManager {
     }
 
     // 调用大模型生成思维导图
-    const { result: mindmapMarkdown, initialResult: initialMindmapMarkdown } = await LLMService.generateMindmap(
+    const { result: mindmapMarkdown, initialResult: initialMindmapMarkdown, reflectionSuccess } = await LLMService.generateMindmap(
       config, 
       subtitleText,
       async (msg) => {
@@ -283,11 +298,19 @@ export class TaskManager {
           await StorageService.savePhase1Cache(videoId, initialMindmap);
           await LoggerService.debug('TaskManager', `阶段 1 初稿已存入浏览器内置存储 (用于断点续传)`, undefined, task.id);
         }
-        // 移除阶段 1 的本地文件保存，统一由任务结束时的 saveFilesToCacheDirectory 处理，避免重复下载
       },
       cachedInitialMindmap,
       task.id
     );
+
+    // 记录成功统计
+    await StatsService.recordGeneration({
+      videoId,
+      modelId: selectedId,
+      isReflectionEnabled: config.settings.enableReflection,
+      reflectionSuccess,
+      isSuccess: true
+    });
 
     // 成功完成全部生成，清除 Phase 1 缓存，以免下次影响全新生成
     if (videoId) {

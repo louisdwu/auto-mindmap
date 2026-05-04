@@ -12,6 +12,7 @@ import { ImportExportSection } from './options/ImportExportSection';
 import { AsrSection } from './options/AsrSection';
 import { SystemSettingsSection } from './options/SystemSettingsSection';
 import { LogSection } from './options/LogSection';
+import { StatsSection } from './options/StatsSection';
 
 import './options/Options.css';
 
@@ -21,6 +22,7 @@ export default function Options() {
     { id: 'llm', label: '大模型配置', icon: '🤖' },
     { id: 'asr', label: '语音识别', icon: '🎤' },
     { id: 'system', label: '高级设置', icon: '⚙️' },
+    { id: 'stats', label: '数据统计', icon: '📊' },
     { id: 'logs', label: '运行日志', icon: '📋' },
   ];
 
@@ -267,6 +269,10 @@ export default function Options() {
 
           {activeTab === 'logs' && (
             <LogSection config={config} />
+          )}
+
+          {activeTab === 'stats' && (
+            <StatsSection llmConfigs={llmConfigs} />
           )}
         </div>
 
