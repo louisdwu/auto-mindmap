@@ -157,6 +157,7 @@ export class LLMService {
 
   /**
    * 提取纯净的 Markdown 导图文本
+   * 同时清理头部（思考过程前缀）和尾部（自我检查后缀）的非导图内容
    */
   private static extractMarkdown(text: string): string {
     // 优先寻找 ```markdown 或 ```md 代码块
@@ -166,15 +167,38 @@ export class LLMService {
     }
     
     // 如果没有代码块，从第一个 # 标题开始截断，舍弃前面的非规范内容
-    const firstHeadingIndex = text.indexOf('# ');
-    if (firstHeadingIndex !== -1) {
-      const match = text.match(/(?:^|\n)(#\s.*[\s\S]*)/);
-      if (match) {
-         return match[1].trim();
-      }
+    let extracted = text;
+    const headingMatch = text.match(/(?:^|\n)(#\s.*[\s\S]*)/);
+    if (headingMatch) {
+      extracted = headingMatch[1];
     }
     
-    return text.trim();
+    // 清理尾部：检测连续的非 Markdown 结构文本并截断
+    // 合法的导图行：标题(#)、列表项(-/*)、缩进文本(以空格开头)、空行
+    const lines = extracted.split('\n');
+    let lastValidLineIndex = lines.length - 1;
+    
+    // 从末尾向前扫描，找到最后一个合法的 Markdown 导图行
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const line = lines[i];
+      const trimmed = line.trim();
+      
+      // 空行跳过
+      if (!trimmed) continue;
+      
+      // 合法的导图结构行：以 #、-、*、空格缩进 开头
+      if (/^#{1,6}\s/.test(trimmed) || /^[-*]\s/.test(trimmed) || /^\s+[-*]\s/.test(line)) {
+        lastValidLineIndex = i;
+        break;
+      }
+      
+      // 如果是以 **、> 开头的 Markdown 格式（如粗体标记、引用），判定为非导图思考内容
+      // 纯文本行（非标题、非列表）也判定为非导图内容
+    }
+    
+    // 截断尾部非导图内容
+    const cleanedLines = lines.slice(0, lastValidLineIndex + 1);
+    return cleanedLines.join('\n').trim();
   }
 
 
