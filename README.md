@@ -58,7 +58,7 @@ npm run dev
 - Vite + CRXJS
 - 自定义 SVG 思维导图渲染器
 - Chrome Extension Manifest V3
-关于本地 ASR 语音识别功能的详细环境配置与开发说明，请参考 [DEVELOPMENT.md](./DEVELOPMENT.md)。
+关于本地 ASR 语音识别功能的详细环境配置与开发说明，请参考 [ASR DEVELOPMENT.md](./ASR%20DEVELOPMENT.md)。
 
 ## 许可证
 

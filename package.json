@@ -19,7 +19,6 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "generate-icons": "node scripts/generate-icons.js",
     "test": "vitest"
   },
   "dependencies": {
