@@ -1,5 +1,7 @@
 import { initEventListener } from './eventListener';
 import { initFloatingBall } from './floatingBall';
+import { StorageService } from '../services/storageService';
+import { NotificationUtils } from '../utils/notificationUtils';
 import './styles.css';
 
 // 初始化
@@ -27,6 +29,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     case 'MINDMAP_GENERATED':
       // 显示悬浮球红点
       showFloatingBallNotification();
+      // 播放提示音
+      checkAndPlayDing();
       break;
 
     case 'FETCH_SUBTITLES':
@@ -84,4 +88,11 @@ async function fetchSubtitlesInPageContext(payload: { bvid: string; cid: number 
 function showFloatingBallNotification() {
   const event = new CustomEvent('mindmap-generated');
   window.dispatchEvent(event);
+}
+
+async function checkAndPlayDing() {
+  const config = await StorageService.getConfig();
+  if (config?.settings?.enableSoundNotification !== false) {
+    NotificationUtils.playDing();
+  }
 }

@@ -1,5 +1,6 @@
 import React from 'react';
 import { PluginConfig } from '../../types/config';
+import { NotificationUtils } from '../../utils/notificationUtils';
 
 interface SystemSettingsSectionProps {
   config: PluginConfig;
@@ -80,6 +81,35 @@ export const SystemSettingsSection: React.FC<SystemSettingsSectionProps> = ({ co
         </label>
         <p className="form-hint">
           启用后，每次切换标签页或关闭设置页面时，都会自动清除运行日志，保护隐私并减少存储占用。
+        </p>
+      </div>
+
+      <div className="form-group">
+        <div className="flex-row" style={{ alignItems: 'center', gap: '12px' }}>
+          <label className="flex-row" style={{ cursor: 'pointer', gap: '8px', flex: 1 }}>
+            <input 
+              type="checkbox" 
+              checked={config.settings.enableSoundNotification !== false}
+              onChange={e => onConfigChange({
+                ...config,
+                settings: {
+                  ...config.settings,
+                  enableSoundNotification: e.target.checked
+                }
+              })}
+            />
+            <span className="form-label" style={{ margin: 0 }}>生成完成后播放提示音</span>
+          </label>
+          <button 
+            className="secondary-button" 
+            style={{ padding: '4px 12px', fontSize: '13px' }}
+            onClick={() => NotificationUtils.playDing()}
+          >
+            🔊 试听
+          </button>
+        </div>
+        <p className="form-hint">
+          启用后，当思维导图生成成功时，会发出“叮”的声音提醒。
         </p>
       </div>
 

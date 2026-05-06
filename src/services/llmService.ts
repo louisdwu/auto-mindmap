@@ -124,7 +124,7 @@ export class LLMService {
     
     let reflectionPromptTemplate = config.prompt.reflectionPrompt || DEFAULT_CONFIG.prompt.reflectionPrompt;
     // 兼容性处理：如果检测到用户仍在使用旧版三阶段 Prompt，则自动 fallback 到系统内置的新版两阶段 Prompt
-    if (!reflectionPromptTemplate.includes('优化补充后的完整 Markdown')) {
+    if (!reflectionPromptTemplate.includes('补充优化后的完整 Markdown')) {
       await LoggerService.warn('LLMService', '检测到旧版反思 Prompt，已自动切换为两阶段合并逻辑', undefined, taskId);
       reflectionPromptTemplate = DEFAULT_CONFIG.prompt.reflectionPrompt;
     }
