@@ -160,15 +160,18 @@ export class LLMService {
    * 同时清理头部（思考过程前缀）和尾部（自我检查后缀）的非导图内容
    */
   private static extractMarkdown(text: string): string {
+    // 预处理：移除 <think> 标签及其包裹的所有打草稿内容，防止干扰后续提取
+    const processedText = text.replace(/<think>[\s\S]*?<\/think>\n?/gi, '');
+
     // 优先寻找 ```markdown 或 ```md 代码块
-    const mdBlockMatch = text.match(/```(?:markdown|md)?\s*([\s\S]*?)```/i);
+    const mdBlockMatch = processedText.match(/```(?:markdown|md)?\s*([\s\S]*?)```/i);
     if (mdBlockMatch) {
       return mdBlockMatch[1].trim();
     }
     
     // 如果没有代码块，从第一个 # 标题开始截断，舍弃前面的非规范内容
-    let extracted = text;
-    const headingMatch = text.match(/(?:^|\n)(#\s.*[\s\S]*)/);
+    let extracted = processedText;
+    const headingMatch = processedText.match(/(?:^|\n)(#\s.*[\s\S]*)/);
     if (headingMatch) {
       extracted = headingMatch[1];
     }
