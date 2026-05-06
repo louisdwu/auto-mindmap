@@ -1,0 +1,33 @@
+/* ============================================================
+   样式 5: Handdrawn (手绘) - 活泼、非对称
+   ============================================================ */
+.mm-container.style-handdrawn {
+  background: #fafafa;
+}
+
+.style-handdrawn .mm-floating-title {
+  background: #ffec99;
+  border-bottom: 2px solid #333;
+}
+
+.style-handdrawn .mm-node:not(.root) {
+  border: none;
+  background: transparent;
+}
+
+.style-handdrawn .mm-node.root {
+  background: #ffec99;
+  color: #333;
+  box-shadow: 3px 3px 0 #333;
+  border: 2px solid #333;
+  border-radius: 8px;
+}
+
+.style-handdrawn .mm-link {
+  stroke: #333;
+  stroke-width: 2.5;
+  stroke-dasharray: 4, 4;
+}
+
+.style-handdrawn .mm-node-underline { display: none; }
+.style-handdrawn .mm-node-dot { border: 2px solid #333; }

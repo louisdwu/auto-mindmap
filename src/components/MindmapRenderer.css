@@ -1,3 +1,8 @@
+@import './MindmapRenderer/themes/classic.css';
+@import './MindmapRenderer/themes/dark.css';
+@import './MindmapRenderer/themes/colorful.css';
+@import './MindmapRenderer/themes/handdrawn.css';
+
 /* 思维导图渲染器样式 - 现代简约设计 */
 
 .mm-container {
@@ -59,166 +64,7 @@
   background: #fecaca;
 }
 
-/* 动态适应各个样式主题 */
-.style-dark .mm-floating-title {
-  background: rgba(37, 38, 43, 0.85);
-  color: #c1c2c5;
-  border-bottom-color: rgba(55, 58, 64, 0.5);
-}
 
-.style-classic .mm-floating-title {
-  background: rgba(52, 58, 64, 0.9);
-  color: #dee2e6;
-}
-
-.style-colorful .mm-floating-title {
-  border-bottom: 2px solid #ff922b;
-}
-
-.style-handdrawn .mm-floating-title {
-  background: #ffec99;
-  border-bottom: 2px solid #333;
-}
-
-/* ============================================================
-   样式 1: Modern (现代) - 默认样式，已存在于基础样式中
-   ============================================================ */
-
-/* ============================================================
-   样式 2: Classic (经典) - 商务、稳重、矩形框
-   ============================================================ */
-.mm-container.style-classic {
-  background: #f8f9fa;
-}
-
-.style-classic .mm-node:not(.root) {
-  background: transparent;
-  border: none;
-  box-shadow: none;
-}
-
-.style-classic .mm-node.root {
-  background: #343a40;
-  border-color: #343a40;
-  color: white;
-}
-
-.style-classic .mm-link {
-  stroke: #adb5bd;
-  stroke-width: 1.5;
-}
-
-/* ============================================================
-   样式 3: Dark (深色) - 极客风、护眼
-   ============================================================ */
-.mm-container.style-dark {
-  background: #1a1b1e;
-}
-
-.style-dark .mm-node {
-  color: #c1c2c5;
-}
-
-.style-dark .mm-node.root {
-  background: #228be6;
-  color: white;
-}
-
-.style-dark .mm-node-text {
-  color: #c1c2c5;
-}
-
-.style-dark .mm-node.root .mm-node-text {
-  color: white;
-}
-
-.style-dark .mm-toolbar {
-  background: rgba(37, 38, 43, 0.85);
-  border-color: rgba(55, 58, 64, 0.5);
-}
-
-.style-dark .mm-toolbar button {
-  background: #25262b;
-  color: #c1c2c5;
-  border-color: #373a40;
-}
-
-.style-dark .mm-toolbar button:hover {
-  background: #2c2e33;
-}
-
-.style-dark .mm-mode-toggle {
-  background: #141517;
-  border-color: #373a40;
-}
-
-.style-dark .mm-toolbar .mm-mode-toggle button {
-  color: #909296;
-}
-
-.style-dark .mm-toolbar .mm-mode-toggle button:hover {
-  background: rgba(255,255,255,0.05);
-}
-
-.style-dark .mm-toolbar .mm-mode-toggle button.active {
-  background: #25262b;
-  color: #228be6;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.2);
-}
-
-/* ============================================================
-   样式 4: Colorful (五彩) - 明亮、活泼、圆角
-   ============================================================ */
-.mm-container.style-colorful {
-  background: #fffcf0;
-}
-
-.style-colorful .mm-node:not(.root) {
-  background: transparent;
-  border: none;
-  box-shadow: none;
-}
-
-.style-colorful .mm-node.branch-0:not(.root) { color: #d6336c; }
-.style-colorful .mm-node.branch-1:not(.root) { color: #7048e8; }
-.style-colorful .mm-node.branch-2:not(.root) { color: #1c7ed6; }
-.style-colorful .mm-node.branch-3:not(.root) { color: #0ca678; }
-.style-colorful .mm-node.branch-4:not(.root) { color: #f08c00; }
-
-.style-colorful .mm-node.root {
-  background: #ff922b;
-  color: white;
-  border: none;
-}
-
-.style-colorful .mm-node-underline { display: none; }
-
-/* ============================================================
-   样式 5: Handdrawn (手绘) - 活泼、非对称
-   ============================================================ */
-.mm-container.style-handdrawn {
-  background: #fafafa;
-}
-
-.style-handdrawn .mm-node:not(.root) {
-  border: none;
-  background: transparent;
-}
-
-.style-handdrawn .mm-node.root {
-  background: #ffec99;
-  color: #333;
-  box-shadow: 2px 2px 0 #333;
-}
-
-.style-handdrawn .mm-link {
-  stroke: #333;
-  stroke-width: 2;
-  stroke-dasharray: 2, 2;
-}
-
-.style-handdrawn .mm-node-underline { display: none; }
-.style-handdrawn .mm-node-dot { border: 2px solid #333; }
 
 .mm-container:fullscreen {
   background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
@@ -400,7 +246,7 @@
   white-space: nowrap;
   cursor: pointer;
   user-select: none;
-  transition: all 0.2s ease;
+  transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
   pointer-events: auto;
   background: transparent;
   border: none;
@@ -537,10 +383,10 @@
 
 /* 动画优化 */
 .mm-node {
-  animation: fadeIn 0.4s ease-out;
+  animation: springFadeIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) backwards;
 }
 
-@keyframes fadeIn {
+@keyframes springFadeIn {
   from {
     opacity: 0;
     transform: translateY(8px) scale(0.95);

@@ -5,6 +5,8 @@ import { OpenAIAdapter } from './llm/adapters/OpenAIAdapter';
 import { GeminiAdapter } from './llm/adapters/GeminiAdapter';
 import { OllamaAdapter } from './llm/adapters/OllamaAdapter';
 import { LoggerService } from './loggerService';
+import { extractMarkdown } from '../utils/markdownParser';
+import { ErrorUtils } from '../utils/errorUtils';
 
 export class LLMService {
   private static adapters: Record<string, ILLMAdapter> = {
@@ -61,11 +63,13 @@ export class LLMService {
     const llmConfig = await StorageService.getSelectedLLMConfig();
     if (!llmConfig) throw new Error('未找到有效的 LLM 配置');
 
+    await LoggerService.info('LLMService', `正在调用模型 ${llmConfig.name} (${llmConfig.model}) 生成思维导图`, undefined, taskId);
+
     // 使用 split/join 代替 replace 以避免字幕中包含 $ 符号导致的替换错误
     const template = config.prompt.template || DEFAULT_CONFIG.prompt.template;
     const prompt = template.split('{subtitle_content}').join(subtitleText);
     const result = await this.callLLM(config, llmConfig, prompt, { taskId });
-    return this.extractMarkdown(result);
+    return extractMarkdown(result);
   }
 
   /**
@@ -87,8 +91,9 @@ export class LLMService {
       onProgress?.('阶段 1/2: 发现初版缓存，跳过生成...');
       await LoggerService.info('LLMService', '阶段 1: 发现初版缓存，跳过主模型生成', undefined, taskId);
     } else {
-      onProgress?.('阶段 1/2: 正在生成初步思维导图...');
-      await LoggerService.info('LLMService', '阶段 1: 正在调用主模型生成初稿', undefined, taskId);
+      const mainLLMConfig = await StorageService.getSelectedLLMConfig();
+      onProgress?.(`阶段 1/2: 正在通过 ${mainLLMConfig?.model || '主模型'} 生成初步思维导图...`);
+      await LoggerService.info('LLMService', `阶段 1: 正在调用主模型 ${mainLLMConfig?.name || '默认'} (${mainLLMConfig?.model || '未知'}) 生成初稿`, undefined, taskId);
       initialMindmap = await this.generateSinglePhase(config, subtitleText, taskId);
       await LoggerService.debug('LLMService', '阶段 1 完成，收到初稿内容', undefined, taskId);
 
@@ -113,7 +118,7 @@ export class LLMService {
       throw new Error('未找到反思阶段的 LLM 配置');
     }
 
-    await LoggerService.info('LLMService', `阶段 2: 正在调用反思模型 (${reflectionLLMConfig.name}) 进行评估与优化`, undefined, taskId);
+    await LoggerService.info('LLMService', `阶段 2: 正在调用反思模型 ${reflectionLLMConfig.name} (${reflectionLLMConfig.model}) 进行评估与优化`, undefined, taskId);
     
     // 在反思阶段前不再添加硬编码延迟，改为由适配器层的指数退避重试机制处理限流或负载问题
     
@@ -143,7 +148,7 @@ export class LLMService {
     await LoggerService.debug('LLMService', '阶段 2 完成，收到反思结果', undefined, taskId);
 
     // 处理合并后的逻辑
-    const cleanedResult = this.extractMarkdown(reflectionResult);
+    const cleanedResult = extractMarkdown(reflectionResult);
     if (cleanedResult === '优秀' || (cleanedResult.includes('优秀') && cleanedResult.length < 10)) {
       await LoggerService.info('LLMService', '评价结果为“优秀”，使用初稿', undefined, taskId);
       onProgress?.('评价结果：质量优秀，采用初稿');
@@ -153,55 +158,6 @@ export class LLMService {
     await LoggerService.info('LLMService', '发现优化内容，采用优化后的版本', undefined, taskId);
     onProgress?.('发现遗漏点，已完成自动优化');
     return { result: cleanedResult, initialResult: initialMindmap, reflectionSuccess: false };
-  }
-
-  /**
-   * 提取纯净的 Markdown 导图文本
-   * 同时清理头部（思考过程前缀）和尾部（自我检查后缀）的非导图内容
-   */
-  private static extractMarkdown(text: string): string {
-    // 预处理：移除 <think> 标签及其包裹的所有打草稿内容，防止干扰后续提取
-    const processedText = text.replace(/<think>[\s\S]*?<\/think>\n?/gi, '');
-
-    // 优先寻找 ```markdown 或 ```md 代码块
-    const mdBlockMatch = processedText.match(/```(?:markdown|md)?\s*([\s\S]*?)```/i);
-    if (mdBlockMatch) {
-      return mdBlockMatch[1].trim();
-    }
-    
-    // 如果没有代码块，从第一个 # 标题开始截断，舍弃前面的非规范内容
-    let extracted = processedText;
-    const headingMatch = processedText.match(/(?:^|\n)(#\s.*[\s\S]*)/);
-    if (headingMatch) {
-      extracted = headingMatch[1];
-    }
-    
-    // 清理尾部：检测连续的非 Markdown 结构文本并截断
-    // 合法的导图行：标题(#)、列表项(-/*)、缩进文本(以空格开头)、空行
-    const lines = extracted.split('\n');
-    let lastValidLineIndex = lines.length - 1;
-    
-    // 从末尾向前扫描，找到最后一个合法的 Markdown 导图行
-    for (let i = lines.length - 1; i >= 0; i--) {
-      const line = lines[i];
-      const trimmed = line.trim();
-      
-      // 空行跳过
-      if (!trimmed) continue;
-      
-      // 合法的导图结构行：以 #、-、*、空格缩进 开头
-      if (/^#{1,6}\s/.test(trimmed) || /^[-*]\s/.test(trimmed) || /^\s+[-*]\s/.test(line)) {
-        lastValidLineIndex = i;
-        break;
-      }
-      
-      // 如果是以 **、> 开头的 Markdown 格式（如粗体标记、引用），判定为非导图思考内容
-      // 纯文本行（非标题、非列表）也判定为非导图内容
-    }
-    
-    // 截断尾部非导图内容
-    const cleanedLines = lines.slice(0, lastValidLineIndex + 1);
-    return cleanedLines.join('\n').trim();
   }
 
 
@@ -247,13 +203,13 @@ export class LLMService {
       const content = await adapter.generateMindmap(config, finalLLMConfig, finalPrompt, timeout, finalContext);
       
       if (!content || typeof content !== 'string' || content.trim().length === 0) {
-        throw new Error('大模型返回的内容为空或不合法');
+        throw new Error('大模型返回的内容为空（可能是由于触发了敏感词过滤或政治文明敏感字符拒绝工作，请检查输入或更换模型）');
       }
 
       return content;
     } catch (error: any) {
       console.error(`[LLMService] 调用 ${llmConfig.provider} 失败:`, error);
-      throw new Error(this.parseError(error));
+      throw new Error(ErrorUtils.parseError(error));
     }
   }
 
@@ -303,27 +259,6 @@ export class LLMService {
     }
   }
 
-  /**
-   * 区分错误类型并返回友好的错误信息
-   */
-  static parseError(error: any): string {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-
-    if (errorMessage.includes('fetch') || errorMessage.includes('网络') || errorMessage.includes('Failed to fetch')) {
-      return `网络错误：无法连接到 API 服务器 (${errorMessage})，请检查网络连接、API 地址或 CORS 设置。系统已尝试自动重试，但未能成功。`;
-    }
-    if (errorMessage.includes('超时') || errorMessage.includes('timeout') || errorMessage.includes('AbortError')) {
-      return `请求超时，请检查服务状态或在设置中调大超时时间。系统已尝试重试，但请求仍未在预定时间内完成。`;
-    }
-    if (errorMessage.includes('exceeds the available context size') || errorMessage.includes('try increasing it')) {
-      const match = errorMessage.match(/request \((\d+) tokens\) exceeds the available context size \((\d+) tokens\)/i);
-      if (match) {
-        return `上下文长度超限：当前请求需要 ${match[1]} tokens，但本地模型仅允许 ${match[2]} tokens。请在 LM Studio 的 Server Configuration 中调大 "Context Length" 并重新加载模型。`;
-      }
-      return `上下文长度超限：当前发送的内容过多。请在本地大模型服务（如 LM Studio）中调大上下文窗口长度 (Context Length) 并重新加载模型。`;
-    }
-    return errorMessage;
-  }
 
   /**
    * 验证配置是否有效

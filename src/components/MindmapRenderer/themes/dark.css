@@ -1,0 +1,69 @@
+/* ============================================================
+   样式 3: Dark (深色) - 极客风、护眼、 Glassmorphism
+   ============================================================ */
+.mm-container.style-dark {
+  background: #121214;
+}
+
+.style-dark .mm-floating-title {
+  background: rgba(28, 28, 30, 0.85);
+  color: #e5e5ea;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+}
+
+.style-dark .mm-node {
+  color: #d1d1d6;
+}
+
+.style-dark .mm-node.root {
+  background: linear-gradient(135deg, #0a84ff 0%, #0040dd 100%);
+  color: white;
+  box-shadow: 0 4px 16px rgba(10, 132, 255, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.style-dark .mm-node-text {
+  color: #d1d1d6;
+}
+
+.style-dark .mm-node.root .mm-node-text {
+  color: white;
+}
+
+.style-dark .mm-toolbar {
+  background: rgba(28, 28, 30, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+}
+
+.style-dark .mm-toolbar button {
+  background: rgba(44, 44, 46, 0.8);
+  color: #d1d1d6;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.style-dark .mm-toolbar button:hover {
+  background: rgba(58, 58, 60, 0.9);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+}
+
+.style-dark .mm-mode-toggle {
+  background: rgba(28, 28, 30, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.style-dark .mm-toolbar .mm-mode-toggle button {
+  color: #8e8e93;
+}
+
+.style-dark .mm-toolbar .mm-mode-toggle button:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.style-dark .mm-toolbar .mm-mode-toggle button.active {
+  background: rgba(58, 58, 60, 0.9);
+  color: #0a84ff;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.4);
+}

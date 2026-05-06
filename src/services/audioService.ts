@@ -16,7 +16,7 @@ export class AudioService {
   /**
    * 获取最新的 WBI keys
    */
-  private static async getWbiKeys(): Promise<WbiKeys> {
+  public static async getWbiKeys(): Promise<WbiKeys> {
     const res = await fetch('https://api.bilibili.com/x/web-interface/nav', {
       credentials: 'include'
     });
@@ -30,7 +30,7 @@ export class AudioService {
   /**
    * 为参数生成 WBI 签名
    */
-  private static async encWbi(params: Record<string, any>, { img_key, sub_key }: WbiKeys): Promise<string> {
+  public static async encWbi(params: Record<string, any>, { img_key, sub_key }: WbiKeys): Promise<string> {
     const mixin_key = this.mixinKeyEncTab
       .map(n => (img_key + sub_key)[n])
       .join('')

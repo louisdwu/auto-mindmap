@@ -1,0 +1,28 @@
+/* ============================================================
+   样式 2: Classic (经典) - 商务、稳重、矩形框
+   ============================================================ */
+.mm-container.style-classic {
+  background: #f8f9fa;
+}
+
+.style-classic .mm-floating-title {
+  background: rgba(52, 58, 64, 0.9);
+  color: #dee2e6;
+}
+
+.style-classic .mm-node:not(.root) {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+}
+
+.style-classic .mm-node.root {
+  background: #343a40;
+  border-color: #343a40;
+  color: white;
+}
+
+.style-classic .mm-link {
+  stroke: #adb5bd;
+  stroke-width: 1.5;
+}

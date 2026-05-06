@@ -1,0 +1,34 @@
+/* ============================================================
+   样式 4: Colorful (五彩) - 明亮、活泼、现代质感
+   ============================================================ */
+.mm-container.style-colorful {
+  background: #fdfaf6;
+}
+
+.style-colorful .mm-floating-title {
+  background: rgba(255, 255, 255, 0.9);
+  border-bottom: 2px solid #ff7b00;
+  box-shadow: 0 4px 12px rgba(255, 123, 0, 0.1);
+}
+
+.style-colorful .mm-node:not(.root) {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+}
+
+/* 优化后的 HSL 调色板，更具高级感 */
+.style-colorful .mm-node.branch-0:not(.root) { color: #e91e63; }
+.style-colorful .mm-node.branch-1:not(.root) { color: #9c27b0; }
+.style-colorful .mm-node.branch-2:not(.root) { color: #03a9f4; }
+.style-colorful .mm-node.branch-3:not(.root) { color: #4caf50; }
+.style-colorful .mm-node.branch-4:not(.root) { color: #ff9800; }
+
+.style-colorful .mm-node.root {
+  background: linear-gradient(135deg, #ff9a44 0%, #fc6076 100%);
+  color: white;
+  border: none;
+  box-shadow: 0 8px 24px rgba(252, 96, 118, 0.35);
+}
+
+.style-colorful .mm-node-underline { display: none; }

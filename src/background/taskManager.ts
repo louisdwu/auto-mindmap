@@ -233,7 +233,8 @@ export class TaskManager {
         task.updatedAt = Date.now();
         await this.saveTasks();
       },
-      task.data.force === true
+      task.data.force === true,
+      task.tabId
     );
 
     task.result = result;
