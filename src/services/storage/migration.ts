@@ -21,7 +21,8 @@ export class StorageMigration {
       settings: {
         ...DEFAULT_CONFIG.settings,
         ...config.settings,
-        enableCache: config.settings?.enableCache !== undefined ? config.settings.enableCache : true
+        enableCache: config.settings?.enableCache !== undefined ? config.settings.enableCache : true,
+        soundNotificationVolume: config.settings?.soundNotificationVolume !== undefined ? config.settings.soundNotificationVolume : 0.8
       },
       exclusionKeywords: config.exclusionKeywords || []
     };

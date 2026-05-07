@@ -21,6 +21,9 @@ export interface GetLatestMindmapByUrlMessage {
 
 export interface GetCurrentTaskMessage {
   type: 'GET_CURRENT_TASK';
+  payload?: {
+    videoUrl?: string;
+  };
 }
 
 export interface ClearMindmapsMessage {

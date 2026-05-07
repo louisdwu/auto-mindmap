@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { VideoUtils } from '../utils/videoUtils';
 
 export interface CurrentTask {
   type: string;
@@ -38,42 +39,52 @@ export function useFloatingBallState() {
 
   const fetchCurrentTask = useCallback(async () => {
     try {
-      const response = await chrome.runtime.sendMessage({ type: 'GET_CURRENT_TASK' });
-      if (response && response.task) {
-        const task = response.task;
-        const currentUrl = window.location.href;
-        const taskUrl = task.data?.videoUrl;
+      const response = await chrome.runtime.sendMessage({ 
+        type: 'GET_CURRENT_TASK',
+        payload: { videoUrl: window.location.href }
+      });
+      
+      const task = response?.task;
+      if (task) {
+          // 由于后台已经根据 URL 进行了过滤，这里只需要进行二次确认或直接使用
+          const taskUrl = task.data?.videoUrl;
+          const currentUrl = window.location.href;
+          
+          // 使用更健壮的 VideoUtils 匹配
+          const id1 = VideoUtils.extractVideoId(currentUrl);
+          const id2 = VideoUtils.extractVideoId(taskUrl);
+          const isMatch = (id1 && id1 === id2) || normalizeUrl(currentUrl) === normalizeUrl(taskUrl);
 
-        if (taskUrl && normalizeUrl(currentUrl) === normalizeUrl(taskUrl)) {
-          let videoTitle: string | undefined;
-          if (task.data) {
-            videoTitle = task.data.videoTitle || task.data.subtitleText?.substring(0, 30) || '处理中...';
-          }
+          if (isMatch) {
+            let videoTitle: string | undefined;
+            if (task.data) {
+              videoTitle = task.data.videoTitle || task.data.subtitleText?.substring(0, 30) || '处理中...';
+            }
 
-          const newTaskState = {
-            type: task.type,
-            status: task.status,
-            videoTitle,
-            result: task.result,
-            errorMessage: task.error,
-            statusMessage: task.statusMessage
-          };
+            const newTaskState = {
+              type: task.type,
+              status: task.status,
+              videoTitle,
+              result: task.result,
+              errorMessage: task.error,
+              statusMessage: task.statusMessage
+            };
 
-          setCurrentTask(newTaskState);
+            setCurrentTask(newTaskState);
 
-          if (task.status === 'completed' && !showNotification && !showViewer) {
-            setShowNotification(true);
-          }
+            if (task.status === 'completed' && !showNotification && !showViewer) {
+              setShowNotification(true);
+            }
 
-          if (task.status === 'failed' && currentTask?.status !== 'failed') {
-            showToast('⚠️ 任务失败，请点击红色悬浮球查看报错详情', 5000);
+            if (task.status === 'failed' && currentTask?.status !== 'failed') {
+              showToast('⚠️ 任务失败，请点击红色悬浮球查看报错详情', 5000);
+            }
+          } else {
+            setCurrentTask(undefined);
           }
         } else {
           setCurrentTask(undefined);
         }
-      } else {
-        setCurrentTask(undefined);
-      }
     } catch (error) {
       console.error('[FloatingBall] Failed to get current task:', error);
       setCurrentTask(undefined);

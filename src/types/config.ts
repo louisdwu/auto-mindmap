@@ -38,6 +38,7 @@ export interface PluginConfig {
     reflectionLLMConfigId: string;     // 反思阶段使用的 LLM 配置 ID
     clearLogsOnClose: boolean;         // 退出日志页面时是否清空记录
     enableSoundNotification: boolean;  // 生成完成后是否播放提示音
+    soundNotificationVolume: number;   // 提示音音量 (0-1)
   };
   // 排除关键词列表
   exclusionKeywords: string[];
@@ -146,7 +147,8 @@ export const DEFAULT_CONFIG: PluginConfig = {
     enableReflection: true,
     reflectionLLMConfigId: 'default',
     clearLogsOnClose: true,
-    enableSoundNotification: true
+    enableSoundNotification: true,
+    soundNotificationVolume: 0.8
   },
   exclusionKeywords: []
 };

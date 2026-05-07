@@ -93,6 +93,7 @@ function showFloatingBallNotification() {
 async function checkAndPlayDing() {
   const config = await StorageService.getConfig();
   if (config?.settings?.enableSoundNotification !== false) {
-    NotificationUtils.playDing();
+    const volume = config?.settings?.soundNotificationVolume ?? 0.8;
+    NotificationUtils.playDing(volume);
   }
 }

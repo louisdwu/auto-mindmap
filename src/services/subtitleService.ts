@@ -280,33 +280,53 @@ export class SubtitleService {
     forceMode: boolean,
     videoUrl: string
   ): Promise<any> {
+    const getTime = () => `[${new Date().toLocaleTimeString('zh-CN', { hour12: false })}]`;
     const unlock = await this.acquireAsrLock(onProgress);
     
     try {
+      onProgress?.(`${getTime()} 正在获取音频流地址...`);
       const audioUrl = await AudioService.getAudioUrl(videoInfo.bvid, videoInfo.cid);
       
       if (!forceMode) {
-        onProgress?.('正在检索本地 ASR 缓存...');
+        onProgress?.(`${getTime()} 正在检索本地 ASR 缓存...`);
         const cachedText = await StorageService.getAsrCache(videoInfo.bvid);
         if (cachedText) return { videoUrl, videoTitle: videoInfo.title, subtitleText: cachedText, isAsr: true };
       }
 
       const isLocal = config.settings.asrProvider === 'local';
+      
+      // 构建识别参数描述
+      const beamSize = config.settings.asrBeamSize || 2;
+      const vad = config.settings.asrVadFilter !== false;
+      const lang = config.settings.language || 'auto';
+      const paramsDesc = `(beam_size=${beamSize}, vad_filter=${vad}, language=${lang})`;
+
       let text = '';
 
       if (isLocal) {
-        onProgress?.('正在通过本地服务器识别...');
+        onProgress?.(`${getTime()} 准备通过本地服务器识别... ${paramsDesc}`);
         try {
-          text = await LLMService.transcribeAudio(config, audioUrl, { videoId: videoInfo.bvid }, onProgress);
+          text = await LLMService.transcribeAudio(config, audioUrl, { videoId: videoInfo.bvid }, (msg) => {
+             onProgress?.(msg);
+          });
         } catch (e: any) {
           console.warn('本地 ASR 通过 URL 识别失败，尝试下载音频后识别:', e);
-          onProgress?.('URL 识别受阻，正在下载音频文件...');
+          onProgress?.(`${getTime()} URL 识别受阻，正在下载音频文件...`);
           const audioBlob = await AudioService.downloadAudioBlob(audioUrl);
-          text = await LLMService.transcribeAudio(config, audioBlob, { videoId: videoInfo.bvid }, onProgress);
+          const sizeMB = (audioBlob.size / 1024 / 1024).toFixed(2);
+          onProgress?.(`${getTime()} 音频准备完成，大小: ${sizeMB} MB`);
+          text = await LLMService.transcribeAudio(config, audioBlob, { videoId: videoInfo.bvid }, (msg) => {
+            onProgress?.(msg);
+          });
         }
       } else {
+        onProgress?.(`${getTime()} 正在下载音频文件...`);
         const audioBlob = await AudioService.downloadAudioBlob(audioUrl);
-        text = await LLMService.transcribeAudio(config, audioBlob, { videoId: videoInfo.bvid }, onProgress);
+        const sizeMB = (audioBlob.size / 1024 / 1024).toFixed(2);
+        onProgress?.(`${getTime()} 音频下载完成 (${sizeMB} MB)，正在调用远程识别...`);
+        text = await LLMService.transcribeAudio(config, audioBlob, { videoId: videoInfo.bvid }, (msg) => {
+          onProgress?.(msg);
+        });
       }
 
       if (text?.trim()) {

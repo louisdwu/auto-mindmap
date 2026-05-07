@@ -446,14 +446,52 @@ export class TaskManager {
     return this.tasks.get(taskId);
   }
 
-  getCurrentTask(): Task | undefined {
+  getCurrentTask(videoUrl?: string): Task | undefined {
+    const allTasks = Array.from(this.tasks.values());
+    
+    // 1. 如果指定了 videoUrl，优先返回与该 URL 匹配的任务
+    if (videoUrl) {
+      const matchUrl = (t: Task) => {
+        const taskUrl = t.data?.videoUrl;
+        if (!taskUrl) return false;
+        
+        // 尝试提取 ID 匹配
+        const id1 = VideoUtils.extractVideoId(videoUrl);
+        const id2 = VideoUtils.extractVideoId(taskUrl);
+        if (id1 && id2) return id1 === id2;
+        
+        // 否则 fallback 到字符串包含判断（处理一些非标准 URL）
+        return videoUrl.includes(taskUrl) || taskUrl.includes(videoUrl);
+      };
+
+      // 优先返回匹配的正在运行的任务
+      const runningTask = allTasks.find(t => t.status === 'running' && matchUrl(t));
+      if (runningTask) return runningTask;
+
+      // 否则返回匹配的等待中的任务
+      const pendingTask = allTasks
+        .filter(t => t.status === 'pending' && matchUrl(t))
+        .sort((a, b) => a.createdAt - b.createdAt)[0];
+      if (pendingTask) return pendingTask;
+
+      // 最后返回匹配的最近完成任务
+      const now = Date.now();
+      const recentTask = allTasks
+        .filter(t => (t.status === 'completed' || t.status === 'failed') && 
+                     matchUrl(t) && 
+                     (now - (t.updatedAt || 0) < 30000))
+        .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))[0];
+      if (recentTask) return recentTask;
+    }
+
+    // 2. 如果没提供 videoUrl 或没找到匹配，回退到全局逻辑
+    
     // 优先返回正在运行的任务
-    const runningTask = Array.from(this.tasks.values())
-      .find(t => t.status === 'running');
+    const runningTask = allTasks.find(t => t.status === 'running');
     if (runningTask) return runningTask;
 
     // 否则返回最早等待的任务
-    const pendingTasks = Array.from(this.tasks.values())
+    const pendingTasks = allTasks
       .filter(t => t.status === 'pending')
       .sort((a, b) => a.createdAt - b.createdAt);
 
@@ -461,7 +499,7 @@ export class TaskManager {
 
     // 最后返回最近完成的任务（30秒内），给用户一点反馈时间
     const now = Date.now();
-    const recentCompletedTask = Array.from(this.tasks.values())
+    const recentCompletedTask = allTasks
       .filter(t => (t.status === 'completed' || t.status === 'failed') && (now - (t.updatedAt || 0) < 30000))
       .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))[0];
 

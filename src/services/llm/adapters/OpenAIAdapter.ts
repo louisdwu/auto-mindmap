@@ -158,6 +158,10 @@ export class OpenAIAdapter extends BaseAdapter implements ILLMAdapter {
       if (config.settings.asrVadFilter !== undefined) formData.append('vad_filter', config.settings.asrVadFilter.toString());
     }
 
+    if (isLocal) {
+      formData.append('stream', 'true');
+    }
+
     const headers: Record<string, string> = { 'Accept': 'application/json' };
     if (!isLocal && llmConfig.apiKey) {
       headers['Authorization'] = `Bearer ${llmConfig.apiKey.trim()}`;
@@ -174,7 +178,54 @@ export class OpenAIAdapter extends BaseAdapter implements ILLMAdapter {
       throw new Error(`识别失败 (HTTP ${response.status}): ${responseText}`);
     }
 
+    // 如果是本地流式模式，手动解析流内容
+    if (isLocal) {
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error('无法读取响应流');
+      
+      const decoder = new TextDecoder();
+      let resultText = '';
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          
+          if (line.startsWith('JSON:')) {
+            try {
+              const json = JSON.parse(line.substring(5));
+              resultText = json.text || '';
+            } catch (e) {
+              console.error('Failed to parse final JSON from stream:', e);
+            }
+          } else if (line.startsWith('ERROR:')) {
+            throw new Error(line.substring(6));
+          } else {
+            // 普通日志，通过 onProgress 回传给 UI
+            onProgress?.(line);
+          }
+        }
+      }
+      return resultText;
+    }
+
     const data = await response.json();
-    return data.text || '';
+    const text = data.text || '';
+    
+    if (text && onProgress) {
+      const duration = data.duration ? `${data.duration.toFixed(2)}s` : '未知';
+      const lang = data.language || '未知';
+      const words = text.length;
+      onProgress(`转录完成！语言: ${lang}, 耗时: ${duration}, 字数: ${words}`);
+    }
+    
+    return text;
   }
 }

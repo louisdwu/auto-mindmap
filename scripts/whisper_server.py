@@ -6,9 +6,10 @@ import site
 import tempfile
 import traceback
 import requests
+import json
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 # --- 修复 CUDA 12 DLL 缺失问题 (针对 Windows) ---
 if sys.platform == "win32":
@@ -271,15 +272,22 @@ async def do_transcribe(
             except Exception as e:
                 print(f"保存字幕缓存时发生异常: {e}")
         
-        return {
-            "text": result_text,
-            "language": info.language,
-            "duration": duration,
-            "info": {
-                "language_probability": info.language_probability,
-                "duration": info.duration
+        # --- 核心逻辑封装 ---
+        def get_result():
+            return {
+                "text": result_text,
+                "language": info.language,
+                "duration": duration,
+                "word_count": len(result_text),
+                "cached_mp3": mp3_cache_path if (video_id and os.path.exists(mp3_cache_path)) else None,
+                "cached_txt": txt_cache_path if (video_id and os.path.exists(txt_cache_path)) else None,
+                "info": {
+                    "language_probability": info.language_probability,
+                    "duration": info.duration
+                }
             }
-        }
+
+        return get_result()
 
     except requests.exceptions.RequestException as e:
         print(f"下载失败: {e}")
@@ -324,32 +332,113 @@ async def openai_transcribe(
     beam_size: str = Form(None),
     vad_filter: str = Form(None),
     audio_url: str = Form(None),
-    video_id: str = Form(None)
+    video_id: str = Form(None),
+    stream: bool = Form(False)
 ):
     """
-    OpenAI 兼容接口，支持标准的语音转文字请求
+    OpenAI 兼容接口，支持标准的语音转文字请求，增加 stream 模式返回实时日志
     """
-    print(f"[{time.strftime('%H:%M:%S')}] 收到 OpenAI 兼容格式请求 (model={model}, lang={language})")
-    # 调用内部核心逻辑
-    result = await do_transcribe(
-        file=file, 
-        model_name=model, 
-        language=language,
-        beam_size=beam_size,
-        vad_filter=vad_filter,
-        audio_url=audio_url,
-        video_id=video_id
-    )
+    if not stream:
+        print(f"[{time.strftime('%H:%M:%S')}] 收到 OpenAI 兼容格式请求 (model={model}, lang={language})")
+        result = await do_transcribe(
+            file=file, model_name=model, language=language,
+            beam_size=beam_size, vad_filter=vad_filter,
+            audio_url=audio_url, video_id=video_id
+        )
+        if isinstance(result, JSONResponse): return result
+        if response_format == "text": return result["text"]
+        return {"text": result["text"]}
     
-    # 处理可能的 JSONResponse 错误返回
-    if isinstance(result, JSONResponse):
-        return result
+    # 流式模式逻辑
+    async def log_generator():
+        def log(msg):
+            return f"{msg}\n".encode("utf-8")
 
-    if response_format == "text":
-        return result["text"]
-    
-    # 返回 OpenAI 标准的 JSON 格式
-    return {"text": result["text"]}
+        start_time = time.time()
+        tmp_path = None
+        
+        # 复用 do_transcribe 的变量设置
+        cache_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cache")
+        safe_video_id = "".join(c for c in video_id if c.isalnum() or c in "-_") if video_id else None
+        txt_cache_path = os.path.join(cache_dir, f"{safe_video_id}.txt") if safe_video_id else None
+        mp3_cache_path = os.path.join(cache_dir, f"{safe_video_id}.mp3") if safe_video_id else None
+
+        try:
+            yield log(f"[{time.strftime('%H:%M:%S')}] 开始流式转录任务 (model={model})...")
+            
+            if safe_video_id and os.path.exists(txt_cache_path) and os.path.getsize(txt_cache_path) > 0:
+                yield log(f"[{time.strftime('%H:%M:%S')}] 命中字幕文本缓存: {safe_video_id}, 瞬发返回!")
+                with open(txt_cache_path, "r", encoding="utf-8") as f:
+                    text = f.read()
+                yield log(f"JSON:{json.dumps({'text': text, 'language': 'auto', 'duration': 0})}")
+                return
+
+            if video_id and mp3_cache_path and os.path.exists(mp3_cache_path) and os.path.getsize(mp3_cache_path) > 0:
+                yield log(f"[{time.strftime('%H:%M:%S')}] 命中音频缓存: {safe_video_id}")
+                tmp_path = mp3_cache_path
+            else:
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp:
+                    tmp_path = tmp.name
+                    if audio_url:
+                        yield log(f"[{time.strftime('%H:%M:%S')}] 正在从 URL 下载音频: {audio_url[:50]}...")
+                        headers = {"Referer": "https://www.bilibili.com", "User-Agent": "Mozilla/5.0"}
+                        with requests.get(audio_url, headers=headers, stream=True, timeout=30) as r:
+                            r.raise_for_status()
+                            for chunk in r.iter_content(chunk_size=81920):
+                                tmp.write(chunk)
+                    elif file:
+                        yield log(f"[{time.strftime('%H:%M:%S')}] 收到文件上传: {file.filename}")
+                        tmp.write(await file.read())
+                
+                if video_id and mp3_cache_path:
+                    os.makedirs(cache_dir, exist_ok=True)
+                    import shutil
+                    shutil.copy2(tmp_path, mp3_cache_path)
+                    yield log(f"[{time.strftime('%H:%M:%S')}] 已缓存音频到: {mp3_cache_path}")
+
+            file_size = os.path.getsize(tmp_path)
+            yield log(f"音频准备完成，大小: {file_size / 1024 / 1024:.2f} MB")
+
+            request_beam_size = int(beam_size) if beam_size else 2
+            request_vad_filter = str(vad_filter).lower() == "true"
+            yield log(f"[{time.strftime('%H:%M:%S')}] 启动识别流程 (beam_size={request_beam_size}, vad_filter={request_vad_filter})...")
+            
+            segments, info = model.transcribe(tmp_path, beam_size=request_beam_size, vad_filter=request_vad_filter, language=language)
+            
+            full_text = []
+            duration_total = info.duration
+            last_p = -1
+            last_end = 0
+            
+            for segment in segments:
+                full_text.append(segment.text)
+                segment_end = min(segment.end, duration_total)
+                percent = int((segment_end / duration_total) * 100) if duration_total > 0 else 100
+                
+                # 简化进度显示：只显示百分比和时间，不显示进度条
+                if percent != last_p:
+                    yield log(f"Transcribing: {percent:3d}% ({segment_end:.1f}/{duration_total:.1f}s)")
+                    last_p = percent
+            
+            result_text = " ".join(full_text).strip()
+            total_time = time.time() - start_time
+            yield log(f"转录完成！语言: {info.language}, 耗时: {total_time:.2f}s, 字数: {len(result_text)}")
+            
+            if video_id and result_text and txt_cache_path:
+                with open(txt_cache_path, "w", encoding="utf-8") as f:
+                    f.write(result_text)
+                yield log(f"[{time.strftime('%H:%M:%S')}] 成功保存字幕文本缓存: {txt_cache_path}")
+            
+            yield log(f"JSON:{json.dumps({'text': result_text, 'language': info.language, 'duration': total_time})}")
+
+        except Exception as e:
+            yield log(f"ERROR:{str(e)}")
+        finally:
+            if tmp_path and os.path.exists(tmp_path) and tmp_path != mp3_cache_path:
+                try: os.remove(tmp_path)
+                except: pass
+
+    return StreamingResponse(log_generator(), media_type="text/plain")
 
 @app.get("/v1/models")
 async def list_models():

@@ -35,6 +35,15 @@ export const FloatingBall: React.FC<FloatingBallProps> = ({
       'generate_mindmap': '生成思维导图'
     };
     
+    let typeText = typeMap[currentTask.type] || currentTask.type;
+    
+    // 识别 ASR 状态：如果是在获取字幕阶段，且消息包含识别相关字样，则显示为“语音识别”
+    if (currentTask.type === 'download_subtitle') {
+      const msg = currentTask.statusMessage || '';
+      if (msg.includes('识别') || msg.includes('ASR') || msg.includes('语音')) {
+        typeText = '语音识别';
+      }
+    }
     const statusMap: Record<string, { text: string; color: string }> = {
       'pending': { text: '等待中', color: '#f39c12' },
       'running': { text: '进行中', color: '#27ae60' },
@@ -42,7 +51,6 @@ export const FloatingBall: React.FC<FloatingBallProps> = ({
       'failed': { text: '失败', color: '#e74c3c' }
     };
 
-    const typeText = typeMap[currentTask.type] || currentTask.type;
     const statusInfo = statusMap[currentTask.status] || { text: currentTask.status, color: '#95a5a6' };
 
     return (
@@ -184,9 +192,11 @@ export const FloatingBall: React.FC<FloatingBallProps> = ({
             fontSize: '13px',
             zIndex: 999999,
             minWidth: '180px',
-            maxWidth: '280px',
+            maxWidth: '320px',
             boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)',
-            animation: 'fadeIn 0.2s ease-out'
+            animation: 'fadeIn 0.2s ease-out',
+            whiteSpace: 'pre-wrap',
+            wordBreak: 'break-word'
           }}
         >
           {getTaskDescription()}

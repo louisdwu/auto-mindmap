@@ -41,7 +41,7 @@ export class MessageHandler {
         return await this.handleGetLatestMindmapByUrl(message.payload);
       
       case 'GET_CURRENT_TASK':
-        return await this.handleGetCurrentTask();
+        return await this.handleGetCurrentTask(message.payload);
       
       case 'CLEAR_MINDMAPS':
         return await this.handleClearMindmaps();
@@ -117,8 +117,8 @@ export class MessageHandler {
     return { success: true };
   }
 
-  private async handleGetCurrentTask() {
-    const task = this.taskManager.getCurrentTask();
+  private async handleGetCurrentTask(payload?: { videoUrl?: string }) {
+    const task = this.taskManager.getCurrentTask(payload?.videoUrl);
     return { task };
   }
 

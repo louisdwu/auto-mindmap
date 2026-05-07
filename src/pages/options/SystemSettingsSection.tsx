@@ -103,11 +103,38 @@ export const SystemSettingsSection: React.FC<SystemSettingsSectionProps> = ({ co
           <button 
             className="secondary-button" 
             style={{ padding: '4px 12px', fontSize: '13px' }}
-            onClick={() => NotificationUtils.playDing()}
+            onClick={() => NotificationUtils.playDing(config.settings.soundNotificationVolume)}
           >
             🔊 试听
           </button>
         </div>
+        
+        {config.settings.enableSoundNotification !== false && (
+          <div style={{ marginTop: '12px', paddingLeft: '24px' }}>
+            <label className="form-label" style={{ fontSize: '13px', marginBottom: '8px', display: 'block' }}>
+              提示音音量: <span className="value-highlight">{Math.round((config.settings.soundNotificationVolume || 0.8) * 100)}%</span>
+            </label>
+            <div className="flex-row" style={{ alignItems: 'center', gap: '12px' }}>
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.1"
+                value={config.settings.soundNotificationVolume || 0.8}
+                onChange={e => onConfigChange({
+                  ...config,
+                  settings: {
+                    ...config.settings,
+                    soundNotificationVolume: parseFloat(e.target.value)
+                  }
+                })}
+                className="form-range"
+                style={{ flex: 1 }}
+              />
+            </div>
+          </div>
+        )}
+
         <p className="form-hint">
           启用后，当思维导图生成成功时，会发出“叮”的声音提醒。
         </p>

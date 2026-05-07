@@ -5,7 +5,11 @@ export class NotificationUtils {
   /**
    * 播放“叮”的一声
    */
-  static async playDing() {
+  /**
+   * 播放“叮”的一声
+   * @param volume 音量 (0-1)
+   */
+  static async playDing(volume: number = 0.8) {
     try {
       const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
       const now = audioContext.currentTime;
@@ -20,7 +24,7 @@ export class NotificationUtils {
 
         gain.gain.setValueAtTime(0, now);
         gain.gain.linearRampToValueAtTime(gainValue, now + 0.002); // 极速起始
-        gain.gain.exponentialRampToValueAtTime(0.001, now + decay); // 极速衰减，几乎无尾音
+        gain.gain.exponentialRampToValueAtTime(0.001, now + decay); // 极速衰减
 
         osc.connect(gain);
         gain.connect(audioContext.destination);
@@ -29,10 +33,11 @@ export class NotificationUtils {
         osc.stop(now + decay + 0.01);
       };
 
+      // 使用传入的音量作为增益基数
       // 主音：极短的高音
-      createOscillator(2000, 0.4, 0.12);
-      // 泛音：极短的更高频
-      createOscillator(3200, 0.2, 0.08);
+      createOscillator(2000, volume, 0.12);
+      // 泛音：极短的更高频 (音量减半)
+      createOscillator(3200, volume * 0.5, 0.08);
 
       // 结束后关闭 context
       setTimeout(() => {
