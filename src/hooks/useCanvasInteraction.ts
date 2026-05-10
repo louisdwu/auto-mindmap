@@ -39,7 +39,6 @@ export const useCanvasInteraction = ({
   }, [offset]);
 
   const handleWheel = useCallback((e: React.WheelEvent) => {
-    e.preventDefault();
     if (interactionMode === 'move') {
       let dx = e.deltaX;
       let dy = e.deltaY;
@@ -68,6 +67,15 @@ export const useCanvasInteraction = ({
       }
     }
   }, [interactionMode, scale, offset, setOffset, setScale, containerRef]);
+
+  // 独立的原生监听器，仅负责阻止默认滚动（passive: false 允许 preventDefault）
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const prevent = (e: WheelEvent) => e.preventDefault();
+    container.addEventListener('wheel', prevent, { passive: false });
+    return () => container.removeEventListener('wheel', prevent);
+  }, [containerRef]);
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
