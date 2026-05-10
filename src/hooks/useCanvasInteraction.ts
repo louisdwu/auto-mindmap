@@ -38,51 +38,36 @@ export const useCanvasInteraction = ({
     setIsDragging(true);
   }, [offset]);
 
-  const stateRef = useRef({ interactionMode, scale, offset });
-  useEffect(() => {
-    stateRef.current = { interactionMode, scale, offset };
-  }, [interactionMode, scale, offset]);
-
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
-
-    const onWheel = (e: WheelEvent) => {
-      e.preventDefault();
-      const { interactionMode, scale, offset } = stateRef.current;
-
-      if (interactionMode === 'move') {
-        let dx = e.deltaX;
-        let dy = e.deltaY;
-        if (e.shiftKey && dx === 0) {
-          dx = dy;
-          dy = 0;
-        }
-        setOffset({
-          x: offset.x - dx,
-          y: offset.y - dy
-        });
-      } else {
-        const delta = e.deltaY > 0 ? 0.9 : 1.1;
-        const newScale = Math.max(0.1, Math.min(5, scale * delta));
-        if (newScale !== scale) {
-          const rect = container.getBoundingClientRect();
-          const mouseX = e.clientX - rect.left;
-          const mouseY = e.clientY - rect.top;
-          const mouseRelX = (mouseX - offset.x) / scale;
-          const mouseRelY = (mouseY - offset.y) / scale;
-          setScale(newScale);
-          setOffset({
-            x: mouseX - mouseRelX * newScale,
-            y: mouseY - mouseRelY * newScale
-          });
-        }
+  const handleWheel = useCallback((e: React.WheelEvent) => {
+    e.preventDefault();
+    if (interactionMode === 'move') {
+      let dx = e.deltaX;
+      let dy = e.deltaY;
+      if (e.shiftKey && dx === 0) {
+        dx = dy;
+        dy = 0;
       }
-    };
-
-    container.addEventListener('wheel', onWheel, { passive: false });
-    return () => container.removeEventListener('wheel', onWheel);
-  }, [containerRef, setOffset, setScale]);
+      setOffset({
+        x: offset.x - dx,
+        y: offset.y - dy
+      });
+    } else {
+      const delta = e.deltaY > 0 ? 0.9 : 1.1;
+      const newScale = Math.max(0.1, Math.min(5, scale * delta));
+      if (newScale !== scale && containerRef.current) {
+        const rect = containerRef.current.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
+        const mouseRelX = (mouseX - offset.x) / scale;
+        const mouseRelY = (mouseY - offset.y) / scale;
+        setScale(newScale);
+        setOffset({
+          x: mouseX - mouseRelX * newScale,
+          y: mouseY - mouseRelY * newScale
+        });
+      }
+    }
+  }, [interactionMode, scale, offset, setOffset, setScale, containerRef]);
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
@@ -133,6 +118,7 @@ export const useCanvasInteraction = ({
     interactionMode,
     setInteractionMode,
     isDragging,
-    handleMouseDown
+    handleMouseDown,
+    handleWheel
   };
 };
