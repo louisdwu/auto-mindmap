@@ -120,8 +120,7 @@ export const MindmapRenderer: React.FC<MindmapRendererProps> = ({
     interactionMode,
     setInteractionMode,
     isDragging,
-    handleMouseDown,
-    handleWheel
+    handleMouseDown
   } = useCanvasInteraction({
     containerRef,
     offset,
@@ -238,7 +237,7 @@ export const MindmapRenderer: React.FC<MindmapRendererProps> = ({
         onFontSizeChange={handleFontSizeChange}
         viewerActions={viewerActions}
       />
-      <div className={`mm-canvas ${isDragging ? 'grabbing' : 'grab'}`} onMouseDown={handleMouseDown} onWheel={handleWheel} onDoubleClick={handleReset}>
+      <div className={`mm-canvas ${isDragging ? 'grabbing' : 'grab'}`} onMouseDown={handleMouseDown} onDoubleClick={handleReset}>
         <div style={{ transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})`, transformOrigin: '0 0', position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }}>
           <svg className="mm-svg" style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', overflow: 'visible' }}>
             {renderLinks}
