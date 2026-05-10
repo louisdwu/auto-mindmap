@@ -1,5 +1,6 @@
 import { StorageService } from './storageService';
 import { VideoUtils } from '../utils/videoUtils';
+import { RuntimeUtils } from '../utils/runtimeUtils';
 
 export interface CheckResult {
   shouldProcess: boolean;
@@ -29,7 +30,7 @@ export class GeneratorService {
     // 2. 检查配置与关键词过滤
     const config = await StorageService.getConfig();
     if (config?.exclusionKeywords && config.exclusionKeywords.length > 0 && title) {
-      const matched = config.exclusionKeywords.find(k => title.includes(k));
+      const matched = config.exclusionKeywords.find((k: string) => title.includes(k));
       if (matched) {
         return { shouldProcess: false, reason: `标题匹配排除词: ${matched}` };
       }
@@ -50,7 +51,7 @@ export class GeneratorService {
    * 发起字幕下载任务 (B站)
    */
   static async requestSubtitleDownload(videoUrl: string): Promise<any> {
-    return chrome.runtime.sendMessage({
+    return RuntimeUtils.sendMessage({
       type: 'DOWNLOAD_SUBTITLE',
       payload: { videoUrl }
     });
@@ -64,7 +65,7 @@ export class GeneratorService {
     subtitleText: string;
     videoTitle: string;
   }): Promise<any> {
-    return chrome.runtime.sendMessage({
+    return RuntimeUtils.sendMessage({
       type: 'GENERATE_MINDMAP_DIRECT',
       payload
     });

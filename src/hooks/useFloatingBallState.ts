@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { VideoUtils } from '../utils/videoUtils';
+import { RuntimeUtils } from '../utils/runtimeUtils';
 
 export interface CurrentTask {
   type: string;
@@ -18,6 +19,8 @@ export function useFloatingBallState() {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isContextValid = useRef(true);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const showToast = useCallback((message: string, duration = 3000) => {
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
@@ -38,8 +41,17 @@ export function useFloatingBallState() {
   }, []);
 
   const fetchCurrentTask = useCallback(async () => {
+    if (!isContextValid.current || !chrome.runtime?.id) {
+      isContextValid.current = false;
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+      return;
+    }
+
     try {
-      const response = await chrome.runtime.sendMessage({ 
+      const response = await RuntimeUtils.sendMessage({ 
         type: 'GET_CURRENT_TASK',
         payload: { videoUrl: window.location.href }
       });
@@ -85,8 +97,18 @@ export function useFloatingBallState() {
         } else {
           setCurrentTask(undefined);
         }
-    } catch (error) {
-      console.error('[FloatingBall] Failed to get current task:', error);
+    } catch (error: any) {
+      const errMsg = String(error?.message || error);
+      if (errMsg.includes('context invalidated')) {
+        console.warn('[FloatingBall] Extension context invalidated, stopping polling.');
+        isContextValid.current = false;
+        if (intervalRef.current) {
+          clearInterval(intervalRef.current);
+          intervalRef.current = null;
+        }
+      } else {
+        console.error('[FloatingBall] Failed to get current task:', error);
+      }
       setCurrentTask(undefined);
     }
   }, [showNotification, showViewer, normalizeUrl, currentTask?.status, showToast]);
@@ -137,17 +159,26 @@ export function useFloatingBallState() {
 
     fetchCurrentTask();
     const intervalId = setInterval(fetchCurrentTask, 1000);
+    intervalRef.current = intervalId;
 
     return () => {
       document.removeEventListener('fullscreenchange', handleFullscreenChange);
-      chrome.runtime.onMessage.removeListener(handleMindmapMsg);
+      if (chrome.runtime?.id) {
+        chrome.runtime.onMessage.removeListener(handleMindmapMsg);
+      }
       window.removeEventListener('mindmap-generated', handleLocalGenerated);
-      clearInterval(intervalId);
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+      }
       urlObserver.disconnect();
     };
   }, [fetchCurrentTask, normalizeUrl]);
 
   const handleBallClick = async () => {
+    if (!isContextValid.current || !chrome.runtime?.id) {
+      showToast('⚠️ 扩展已更新，请刷新页面后继续使用', 5000);
+      return;
+    }
     setShowNotification(false);
     if (currentTask?.status === 'completed' && currentTask.result) {
       setMindmapData(currentTask.result);
@@ -159,7 +190,7 @@ export function useFloatingBallState() {
       return;
     }
     try {
-      const response = await chrome.runtime.sendMessage({
+      const response = await RuntimeUtils.sendMessage({
         type: 'GET_LATEST_MINDMAP_BY_URL',
         payload: { videoUrl: window.location.href }
       });
@@ -168,7 +199,7 @@ export function useFloatingBallState() {
         setShowViewer(true);
       } else {
         try {
-          await chrome.runtime.sendMessage({
+          await RuntimeUtils.sendMessage({
             type: 'DOWNLOAD_SUBTITLE',
             payload: { videoUrl: window.location.href }
           });
@@ -178,17 +209,26 @@ export function useFloatingBallState() {
           showToast('启动生成任务失败，请稍后重试');
         }
       }
-    } catch (error) {
-      console.error('[FloatingBall] 获取思维导图失败:', error);
+    } catch (error: any) {
+      const errMsg = String(error?.message || error);
+      if (errMsg.includes('context invalidated')) {
+          // 已经在 RuntimeUtils 处理
+      } else {
+          console.error('[FloatingBall] 获取思维导图失败:', error);
+      }
     }
   };
 
   const handleCloseViewer = () => setShowViewer(false);
 
   const handleRetry = async () => {
+    if (!isContextValid.current || !chrome.runtime?.id) {
+      showToast('⚠️ 扩展已更新，请刷新页面', 5000);
+      return;
+    }
     setShowViewer(false);
     try {
-      await chrome.runtime.sendMessage({
+      await RuntimeUtils.sendMessage({
         type: 'DOWNLOAD_SUBTITLE',
         payload: { videoUrl: window.location.href, force: false }
       });
@@ -199,10 +239,14 @@ export function useFloatingBallState() {
   };
 
   const handleReTranscribe = async () => {
+    if (!isContextValid.current || !chrome.runtime?.id) {
+      showToast('⚠️ 扩展已更新，请刷新页面', 5000);
+      return;
+    }
     if (!confirm('清除缓存重新生成？可能需要重新识别语音。')) return;
     setShowViewer(false);
     try {
-      await chrome.runtime.sendMessage({
+      await RuntimeUtils.sendMessage({
         type: 'DOWNLOAD_SUBTITLE',
         payload: { videoUrl: window.location.href, force: true }
       });

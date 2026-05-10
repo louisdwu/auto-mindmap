@@ -82,16 +82,64 @@ export class AudioService {
   /**
    * 下载音频内容为 Blob
    */
-  static async downloadAudioBlob(url: string): Promise<Blob> {
+  static async downloadAudioBlob(url: string, onProgress?: (msg: string) => void): Promise<Blob> {
+    onProgress?.('正在连接音频服务器...');
+    // Service Worker 中直接设置 Referer 容易被拦截或报错
     const res = await fetch(url, {
       headers: {
-        'Referer': 'https://www.bilibili.com',
         'User-Agent': navigator.userAgent
       }
     });
     if (!res.ok) {
-      throw new Error(`下载音频失败: ${res.statusText}`);
+      throw new Error(`HTTP ${res.status} ${res.statusText}`);
     }
+    
+    // 如果想要真正的下载进度，需要使用 response.body.getReader()
+    // 但为了代码简洁且音频通常不太大，这里先简单通过 content-length 模拟
+    onProgress?.('已建立连接，正在接收音频流...');
     return await res.blob();
+  }
+
+  /**
+   * 带回退机制的音频下载
+   */
+  static async downloadAudioWithFallback(url: string, tabId?: number, onProgress?: (msg: string) => void): Promise<Blob> {
+    try {
+      console.log('[AudioService] 尝试通过 Service Worker 直接下载音频...');
+      return await this.downloadAudioBlob(url, onProgress);
+    } catch (e: any) {
+      console.warn('[AudioService] Service Worker 下载音频失败:', e);
+      if (tabId) {
+        onProgress?.('后台下载受阻，正在尝试通过页面上下文下载...');
+        console.log('[AudioService] 尝试通过 Content Script 在页面上下文中下载音频...');
+        try {
+          const response = await chrome.tabs.sendMessage(tabId, {
+            type: 'FETCH_AUDIO_BLOB',
+            payload: { url }
+          });
+          
+          if (response?.error) {
+            throw new Error(response.error);
+          }
+          
+          if (response?.base64Data) {
+            onProgress?.('页面上下文下载成功，正在处理音频数据...');
+            console.log('[AudioService] Content Script 成功返回音频数据');
+            // 将 base64 转回 Blob
+            const binaryString = atob(response.base64Data.split(',')[1] || response.base64Data);
+            const bytes = new Uint8Array(binaryString.length);
+            for (let i = 0; i < binaryString.length; i++) {
+              bytes[i] = binaryString.charCodeAt(i);
+            }
+            return new Blob([bytes], { type: 'audio/mpeg' }); // DASH audio is usually m4a/mp3
+          }
+        } catch (csError: any) {
+          console.error('[AudioService] Content Script 下载也失败:', csError);
+        }
+      }
+      
+      // 如果没有 tabId 或者 Content Script 也失败，抛出明确错误
+      throw new Error(`${e.message || '未知错误'}`);
+    }
   }
 }

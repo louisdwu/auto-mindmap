@@ -121,7 +121,10 @@ export class OpenAIAdapter extends BaseAdapter implements ILLMAdapter {
       ? config.settings.localAsrUrl 
       : this.getFullUrl(llmConfig).replace('/chat/completions', '/audio/transcriptions');
 
-    onProgress?.('正在上传音频并识别中 (可能需要 15-60s)...');
+    const progressMsg = typeof audioData === 'string' 
+      ? '正在通过 URL 启动 ASR 任务...' 
+      : `正在上传音频数据 (${(audioData.size / 1024 / 1024).toFixed(2)} MB)...`;
+    onProgress?.(progressMsg);
 
     const formData = new FormData();
     if (typeof audioData === 'string') {
@@ -213,6 +216,20 @@ export class OpenAIAdapter extends BaseAdapter implements ILLMAdapter {
           }
         }
       }
+
+      // 如果循环结束后 resultText 仍为空，且 buffer 还有内容，尝试解析整个 buffer (兼容非流式响应)
+      if (!resultText) {
+        const finalContent = buffer.trim();
+        if (finalContent) {
+          try {
+            const json = JSON.parse(finalContent);
+            resultText = json.text || '';
+          } catch (e) {
+            // 忽略非 JSON 内容
+          }
+        }
+      }
+
       return resultText;
     }
 

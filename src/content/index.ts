@@ -39,8 +39,46 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         .then(sendResponse)
         .catch(err => sendResponse({ error: err.message }));
       return true; // 保持消息通道开放
+
+    case 'FETCH_AUDIO_BLOB':
+      // 在页面上下文中下载音频并转为 Base64 返回
+      fetchAudioBlobInPageContext(message.payload)
+        .then(sendResponse)
+        .catch(err => sendResponse({ error: err.message }));
+      return true; // 保持消息通道开放
   }
 });
+/**
+ * 在页面上下文中下载音频数据，以绕过 Service Worker 中的 Referer 和 Cookie 限制
+ */
+async function fetchAudioBlobInPageContext(payload: { url: string }): Promise<any> {
+  try {
+    console.log('[Content] 开始在页面上下文中下载音频...');
+    const response = await fetch(payload.url);
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status} ${response.statusText}`);
+    }
+    
+    const blob = await response.blob();
+    console.log(`[Content] 音频下载成功，大小: ${(blob.size / 1024 / 1024).toFixed(2)} MB`);
+    
+    // 转为 base64 发送回 background
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        resolve({ base64Data: reader.result });
+      };
+      reader.onerror = () => {
+        reject(new Error('将音频转为 Base64 失败'));
+      };
+      reader.readAsDataURL(blob);
+    });
+  } catch (error: any) {
+    console.error('[Content] 音频下载失败:', error);
+    throw new Error(`Content Script 音频下载失败: ${error.message || error}`);
+  }
+}
+
 
 /**
  * 在页面上下文中获取字幕列表

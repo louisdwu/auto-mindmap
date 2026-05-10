@@ -7,6 +7,7 @@ import tempfile
 import traceback
 import requests
 import json
+import asyncio
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -317,16 +318,29 @@ async def transcribe(
     file: UploadFile = File(None),
     audio_url: str = Form(None),
     video_id: str = Form(None),
-    model_name: str = Form("large-v2"),
+    model_name: str = Form("large-v2", alias="model"),
     beam_size: str = Form(None),
-    vad_filter: str = Form(None)
+    vad_filter: str = Form(None),
+    language: str = Form(None),
+    initial_prompt: str = Form(None),
+    stream: bool = Form(False)
 ):
-    return await do_transcribe(file, audio_url, video_id, model_name, beam_size, vad_filter)
+    if stream:
+        return await openai_transcribe(
+            file=file, model_name=model_name, audio_url=audio_url, 
+            video_id=video_id, beam_size=beam_size, 
+            vad_filter=vad_filter, language=language,
+            stream=True
+        )
+    return await do_transcribe(
+        file, audio_url, video_id, model_name, 
+        beam_size, vad_filter, language, initial_prompt
+    )
 
 @app.post("/v1/audio/transcriptions")
 async def openai_transcribe(
     file: UploadFile = File(None),
-    model: str = Form("large-v2"),
+    model_name: str = Form("large-v2", alias="model"),
     response_format: str = Form("json"),
     language: str = Form(None),
     beam_size: str = Form(None),
@@ -339,9 +353,9 @@ async def openai_transcribe(
     OpenAI 兼容接口，支持标准的语音转文字请求，增加 stream 模式返回实时日志
     """
     if not stream:
-        print(f"[{time.strftime('%H:%M:%S')}] 收到 OpenAI 兼容格式请求 (model={model}, lang={language})")
+        print(f"[{time.strftime('%H:%M:%S')}] 收到 OpenAI 兼容格式请求 (model={model_name}, lang={language})")
         result = await do_transcribe(
-            file=file, model_name=model, language=language,
+            file=file, model_name=model_name, language=language,
             beam_size=beam_size, vad_filter=vad_filter,
             audio_url=audio_url, video_id=video_id
         )
@@ -364,7 +378,7 @@ async def openai_transcribe(
         mp3_cache_path = os.path.join(cache_dir, f"{safe_video_id}.mp3") if safe_video_id else None
 
         try:
-            yield log(f"[{time.strftime('%H:%M:%S')}] 开始流式转录任务 (model={model})...")
+            yield log(f"[{time.strftime('%H:%M:%S')}] 开始流式转录任务 (model={model_name})...")
             
             if safe_video_id and os.path.exists(txt_cache_path) and os.path.getsize(txt_cache_path) > 0:
                 yield log(f"[{time.strftime('%H:%M:%S')}] 命中字幕文本缓存: {safe_video_id}, 瞬发返回!")
@@ -381,14 +395,19 @@ async def openai_transcribe(
                     tmp_path = tmp.name
                     if audio_url:
                         yield log(f"[{time.strftime('%H:%M:%S')}] 正在从 URL 下载音频: {audio_url[:50]}...")
-                        headers = {"Referer": "https://www.bilibili.com", "User-Agent": "Mozilla/5.0"}
+                        headers = {
+                            "Referer": "https://www.bilibili.com", 
+                            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                        }
                         with requests.get(audio_url, headers=headers, stream=True, timeout=30) as r:
                             r.raise_for_status()
                             for chunk in r.iter_content(chunk_size=81920):
                                 tmp.write(chunk)
+                                await asyncio.sleep(0.01)
                     elif file:
                         yield log(f"[{time.strftime('%H:%M:%S')}] 收到文件上传: {file.filename}")
                         tmp.write(await file.read())
+                        await asyncio.sleep(0.01)
                 
                 if video_id and mp3_cache_path:
                     os.makedirs(cache_dir, exist_ok=True)
@@ -401,7 +420,9 @@ async def openai_transcribe(
 
             request_beam_size = int(beam_size) if beam_size else 2
             request_vad_filter = str(vad_filter).lower() == "true"
-            yield log(f"[{time.strftime('%H:%M:%S')}] 启动识别流程 (beam_size={request_beam_size}, vad_filter={request_vad_filter})...")
+            msg = f"[{time.strftime('%H:%M:%S')}] 启动识别流程 (beam_size={request_beam_size}, vad_filter={request_vad_filter})..."
+            print(msg)
+            yield log(msg)
             
             segments, info = model.transcribe(tmp_path, beam_size=request_beam_size, vad_filter=request_vad_filter, language=language)
             
@@ -417,12 +438,18 @@ async def openai_transcribe(
                 
                 # 简化进度显示：只显示百分比和时间，不显示进度条
                 if percent != last_p:
-                    yield log(f"Transcribing: {percent:3d}% ({segment_end:.1f}/{duration_total:.1f}s)")
+                    progress_msg = f"Transcribing: {percent:3d}% ({segment_end:.1f}/{duration_total:.1f}s)"
+                    print(f"[{time.strftime('%H:%M:%S')}] {progress_msg}")
+                    yield log(progress_msg)
                     last_p = percent
+                
+                await asyncio.sleep(0.01)
             
             result_text = " ".join(full_text).strip()
             total_time = time.time() - start_time
-            yield log(f"转录完成！语言: {info.language}, 耗时: {total_time:.2f}s, 字数: {len(result_text)}")
+            final_msg = f"转录完成！语言: {info.language}, 耗时: {total_time:.2f}s, 字数: {len(result_text)}"
+            print(f"[{time.strftime('%H:%M:%S')}] {final_msg}")
+            yield log(final_msg)
             
             if video_id and result_text and txt_cache_path:
                 with open(txt_cache_path, "w", encoding="utf-8") as f:

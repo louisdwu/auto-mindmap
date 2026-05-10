@@ -243,7 +243,7 @@ export class SubtitleService {
 
     // 回退到 ASR (只有在完全没有任何字幕时才执行)
     onProgress?.('未检测到任何官方字幕，尝试进行语音识别...');
-    return this.handleAsrFlow(videoInfo, config, onProgress, forceMode, videoUrl);
+    return this.handleAsrFlow(videoInfo, config, onProgress, forceMode, videoUrl, tabId);
   }
 
   private static asrLock: Promise<void> = Promise.resolve();
@@ -278,7 +278,8 @@ export class SubtitleService {
     config: PluginConfig,
     onProgress: any,
     forceMode: boolean,
-    videoUrl: string
+    videoUrl: string,
+    tabId?: number
   ): Promise<any> {
     const getTime = () => `[${new Date().toLocaleTimeString('zh-CN', { hour12: false })}]`;
     const unlock = await this.acquireAsrLock(onProgress);
@@ -312,7 +313,9 @@ export class SubtitleService {
         } catch (e: any) {
           console.warn('本地 ASR 通过 URL 识别失败，尝试下载音频后识别:', e);
           onProgress?.(`${getTime()} URL 识别受阻，正在下载音频文件...`);
-          const audioBlob = await AudioService.downloadAudioBlob(audioUrl);
+          const audioBlob = await AudioService.downloadAudioWithFallback(audioUrl, tabId, (msg) => {
+            onProgress?.(`${getTime()} ${msg}`);
+          });
           const sizeMB = (audioBlob.size / 1024 / 1024).toFixed(2);
           onProgress?.(`${getTime()} 音频准备完成，大小: ${sizeMB} MB`);
           text = await LLMService.transcribeAudio(config, audioBlob, { videoId: videoInfo.bvid }, (msg) => {
@@ -321,7 +324,9 @@ export class SubtitleService {
         }
       } else {
         onProgress?.(`${getTime()} 正在下载音频文件...`);
-        const audioBlob = await AudioService.downloadAudioBlob(audioUrl);
+        const audioBlob = await AudioService.downloadAudioWithFallback(audioUrl, tabId, (msg) => {
+          onProgress?.(`${getTime()} ${msg}`);
+        });
         const sizeMB = (audioBlob.size / 1024 / 1024).toFixed(2);
         onProgress?.(`${getTime()} 音频下载完成 (${sizeMB} MB)，正在调用远程识别...`);
         text = await LLMService.transcribeAudio(config, audioBlob, { videoId: videoInfo.bvid }, (msg) => {
