@@ -253,7 +253,7 @@ export function useFloatingBallState() {
     try {
       await RuntimeUtils.sendMessage({
         type: 'DOWNLOAD_SUBTITLE',
-        payload: { videoUrl: window.location.href, force: false }
+        payload: { videoUrl: window.location.href, force: true }
       });
       showToast('正在重新生成思维导图...');
     } catch (err) {

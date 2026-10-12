@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { MindmapRenderer } from './MindmapRenderer';
 import { MindmapStyle } from '../types/mindmap';
+import { VideoUtils } from '../utils/videoUtils';
 
 interface MindmapViewerProps {
   mindmapData: {
@@ -148,6 +149,10 @@ export const MindmapViewer: React.FC<MindmapViewerProps> = ({
                   markdown={markdown}
                   styleName={style}
                   onNodeClick={(node) => { console.log('Node clicked:', node); }}
+                  onTimestampClick={(_timestamp, seconds) => {
+                    VideoUtils.seekVideoTo(seconds);
+                    onClose();
+                  }}
                   viewerActions={{
                     viewMode, setViewMode, style, setStyle,
                     onCopy: handleCopy, isCopied,

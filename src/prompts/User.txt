@@ -1,2 +1,2 @@
-字幕内容：
+带时间戳的视频字幕稿：
 {subtitle_content}

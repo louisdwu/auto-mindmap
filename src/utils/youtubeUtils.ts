@@ -16,7 +16,7 @@ export const YouTubeUtils = {
   },
 
   /**
-   * 解析 YouTube 字幕 JSON 数据
+   * 解析 YouTube 字幕 JSON 数据（带时间戳）
    */
   parseSubtitle(data: any): string {
     if (!data || !data.events) {
@@ -25,9 +25,15 @@ export const YouTubeUtils = {
 
     return data.events
       .filter((event: any) => event.segs && event.segs.length > 0)
-      .map((event: any) => event.segs.map((seg: any) => seg.utf8).join(''))
+      .map((event: any) => {
+        const text = event.segs.map((seg: any) => seg.utf8).join('').trim();
+        if (!text || text === '\n') return '';
+        const startSec = Math.floor((event.tStartMs || 0) / 1000);
+        const timeStr = VideoUtils.formatSecondsToTimestamp(startSec);
+        return `[${timeStr}] ${text}`;
+      })
+      .filter(Boolean)
       .join('\n')
-      .replace(/\n+/g, '\n')
       .replace(/^\s*_1__\s*/, '')
       .trim();
   },

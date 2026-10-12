@@ -139,13 +139,17 @@ export class SubtitleService {
   }
 
   /**
-   * 提取纯文本字幕
+   * 提取带时间戳的字幕文本
+   * 格式: [mm:ss] 字幕内容
    */
   static extractPlainText(subtitleData: any): string {
     if (!subtitleData.body || !Array.isArray(subtitleData.body)) return '';
     return subtitleData.body
-      .map((item: any) => item.content)
-      .filter((content: string) => content && content.trim())
+      .filter((item: any) => item.content && item.content.trim())
+      .map((item: any) => {
+        const timeStr = VideoUtils.formatSecondsToTimestamp(Number(item.from) || 0);
+        return `[${timeStr}] ${item.content.trim()}`;
+      })
       .join('\n');
   }
 
@@ -293,7 +297,12 @@ export class SubtitleService {
       if (!forceMode) {
         onProgress?.(`${getTime()} 正在检索本地 ASR 缓存...`);
         const cachedText = await StorageService.getAsrCache(videoInfo.bvid);
-        if (cachedText) return { videoUrl, videoTitle: videoInfo.title, subtitleText: cachedText, isAsr: true };
+        if (cachedText && /\[\d{1,2}:\d{2}/.test(cachedText)) {
+          return { videoUrl, videoTitle: videoInfo.title, subtitleText: cachedText, isAsr: true };
+        } else if (cachedText) {
+          console.log('[SubtitleService] 发现旧版无时间戳 ASR 缓存，自动作废并重新识别');
+          await StorageService.deleteAsrCache(videoInfo.bvid);
+        }
       }
 
       const isLocal = config.settings.asrProvider === 'local';

@@ -105,6 +105,15 @@ print(f"设备参数: {DEVICE} ({COMPUTE_TYPE}), Workers: {NUM_WORKERS}, CPU Thr
 
 model = None
 
+def format_seconds(seconds):
+    total_sec = max(0, int(seconds))
+    h = total_sec // 3600
+    m = (total_sec % 3600) // 60
+    s = total_sec % 60
+    if h > 0:
+        return f"{h:02d}:{m:02d}:{s:02d}"
+    return f"{m:02d}:{s:02d}"
+
 def find_ffmpeg():
     local_ffmpeg = r"D:\Green\卡卡字幕助手VideoCaptioner\resource\bin\ffmpeg.exe"
     if os.path.exists(local_ffmpeg):
@@ -297,7 +306,10 @@ async def do_transcribe(
         with tqdm(total=info.duration, unit="s", desc="Transcribing", bar_format="{l_bar}{bar}| {n:.1f}/{total:.1f}s [{elapsed}<{remaining}]") as pbar:
             last_end = 0
             for segment in segments:
-                full_text.append(segment.text)
+                text_content = segment.text.strip()
+                if text_content:
+                    t_str = format_seconds(segment.start)
+                    full_text.append(f"[{t_str}] {text_content}")
                 # 更新进度条: 防止 segment.end 超过或少于合法范围，从而导致 tqdm 崩溃崩溃(NoneType.__format__)
                 segment_end = min(segment.end, info.duration)
                 increment = segment_end - last_end
@@ -308,7 +320,7 @@ async def do_transcribe(
             if last_end < info.duration:
                 pbar.update(info.duration - last_end)
         
-        result_text = " ".join(full_text).strip()
+        result_text = "\n".join(full_text).strip()
         duration = time.time() - start_time
         print(f"转录完成！语言: {info.language} (置信度: {info.language_probability:.2f}), 耗时: {duration:.2f}s, 字数: {len(result_text)}")
         
@@ -433,11 +445,15 @@ async def openai_transcribe(
             yield log(f"[{time.strftime('%H:%M:%S')}] 开始流式转录任务 (model={model_name})...")
             
             if safe_video_id and os.path.exists(txt_cache_path) and os.path.getsize(txt_cache_path) > 0:
-                yield log(f"[{time.strftime('%H:%M:%S')}] 命中字幕文本缓存: {safe_video_id}, 瞬发返回!")
                 with open(txt_cache_path, "r", encoding="utf-8") as f:
                     text = f.read()
-                yield log(f"JSON:{json.dumps({'text': text, 'language': 'auto', 'duration': 0})}")
-                return
+                import re
+                if re.search(r"\[\d{1,2}:\d{2}", text):
+                    yield log(f"[{time.strftime('%H:%M:%S')}] 命中有效时间戳字幕缓存: {safe_video_id}, 瞬发返回!")
+                    yield log(f"JSON:{json.dumps({'text': text, 'language': 'auto', 'duration': 0})}")
+                    return
+                else:
+                    yield log(f"[{time.strftime('%H:%M:%S')}] 发现旧版无时间戳字幕缓存: {safe_video_id}，已作废并重新识别")
 
             if video_id and mp3_cache_path and os.path.exists(mp3_cache_path) and os.path.getsize(mp3_cache_path) > 0:
                 yield log(f"[{time.strftime('%H:%M:%S')}] 命中音频缓存: {safe_video_id}")
@@ -493,7 +509,10 @@ async def openai_transcribe(
             last_end = 0
             
             for segment in segments:
-                full_text.append(segment.text)
+                text_content = segment.text.strip()
+                if text_content:
+                    t_str = format_seconds(segment.start)
+                    full_text.append(f"[{t_str}] {text_content}")
                 segment_end = min(segment.end, duration_total)
                 percent = int((segment_end / duration_total) * 100) if duration_total > 0 else 100
                 
@@ -506,7 +525,7 @@ async def openai_transcribe(
                 
                 await asyncio.sleep(0.01)
             
-            result_text = " ".join(full_text).strip()
+            result_text = "\n".join(full_text).strip()
             total_time = time.time() - start_time
             final_msg = f"转录完成！语言: {info.language}, 耗时: {total_time:.2f}s, 字数: {len(result_text)}"
             print(f"[{time.strftime('%H:%M:%S')}] {final_msg}")

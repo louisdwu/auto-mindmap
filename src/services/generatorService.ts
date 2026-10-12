@@ -40,7 +40,19 @@ export class GeneratorService {
     if (config?.settings.enableCache) {
       const cached = await StorageService.getLatestMindmapByUrl(url);
       if (cached) {
-        return { shouldProcess: true, cachedMindmap: cached, reason: '命中缓存' };
+        // 关键逻辑：校验缓存是否包含时间戳，无时间戳的旧缓存自动失效并重新生成
+        const hasTimestamps = /\[\d{1,2}:\d{2}/.test(cached.subtitleText || '');
+        if (hasTimestamps) {
+          return { shouldProcess: true, cachedMindmap: cached, reason: '命中缓存' };
+        } else {
+          console.log('[GeneratorService] 发现旧版无时间戳缓存，自动清理并重新提取生成');
+          await StorageService.deleteMindmapByUrl(url);
+          if (videoId) {
+            await StorageService.deleteSubtitleCache(videoId);
+            await StorageService.deleteAsrCache(videoId);
+            await StorageService.deletePhase1Cache(videoId);
+          }
+        }
       }
     }
 
