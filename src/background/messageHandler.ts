@@ -60,20 +60,35 @@ export class MessageHandler {
 
     // 如果不是强制模式且启用了缓存，检查已有的思维导图
     const config = await StorageService.getConfig();
+    const videoId = VideoUtils.extractVideoId(payload.videoUrl);
+
     if (!isForce && config?.settings.enableCache) {
       const cachedMindmap = await StorageService.getLatestMindmapByUrl(payload.videoUrl);
       if (cachedMindmap) {
-        console.log('[MessageHandler] 找到缓存的思维导图，跳过下载字幕:', cachedMindmap.id);
-        return { taskId: null, cached: true, mindmap: cachedMindmap };
+        const hasTimestamps = /\[\d{1,2}:\d{2}/.test(cachedMindmap.subtitleText || '');
+        if (hasTimestamps) {
+          console.log('[MessageHandler] 找到有效的时间戳缓存，跳过下载字幕:', cachedMindmap.id);
+          return { taskId: null, cached: true, mindmap: cachedMindmap };
+        } else {
+          console.log('[MessageHandler] 发现旧版无时间戳缓存，自动清理并重新提取生成');
+          await StorageService.deleteMindmapByUrl(payload.videoUrl);
+          if (videoId) {
+            await StorageService.deleteSubtitleCache(videoId);
+            await StorageService.deleteAsrCache(videoId);
+            await StorageService.deletePhase1Cache(videoId);
+          }
+        }
       }
     }
     
-    // 如果是强制模式，显式删除 ASR 缓存 (如果是本地 ASR)
+    // 如果是强制模式，彻底清除该视频的所有相关缓存
     if (isForce) {
-      const videoId = VideoUtils.extractVideoId(payload.videoUrl);
+      console.log('[MessageHandler] 强制模式：正在彻底清除该视频所有缓存, ID:', videoId);
+      await StorageService.deleteMindmapByUrl(payload.videoUrl);
       if (videoId) {
-        console.log('[MessageHandler] 强制模式：正在清除 ASR 缓存, ID:', videoId);
         await StorageService.deleteAsrCache(videoId);
+        await StorageService.deleteSubtitleCache(videoId);
+        await StorageService.deletePhase1Cache(videoId);
       }
     }
 

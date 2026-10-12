@@ -166,6 +166,20 @@ export class StorageService {
   }
 
   /**
+   * 根据视频URL删除思维导图缓存
+   */
+  static async deleteMindmapByUrl(videoUrl: string): Promise<void> {
+    const mindmaps = await this.getMindmaps();
+    const targetVideoId = VideoUtils.extractVideoId(videoUrl);
+    const filtered = mindmaps.filter(m => {
+      if (!targetVideoId) return m.videoUrl !== videoUrl;
+      const storedVideoId = VideoUtils.extractVideoId(m.videoUrl);
+      return storedVideoId !== targetVideoId;
+    });
+    await chrome.storage.local.set({ [STORAGE_KEYS.MINDMAPS]: filtered });
+  }
+
+  /**
    * 获取最新的思维导图
    */
   static async getLatestMindmap(): Promise<MindmapData | null> {

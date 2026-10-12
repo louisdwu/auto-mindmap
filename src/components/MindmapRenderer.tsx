@@ -13,9 +13,12 @@ import { Toolbar, ViewerActions } from './MindmapRenderer/Toolbar';
 
 import './MindmapRenderer.css';
 
+import { VideoUtils } from '../utils/videoUtils';
+
 interface MindmapRendererProps {
   markdown: string;
   onNodeClick?: (node: INodeData) => void;
+  onTimestampClick?: (timestamp: string, seconds: number) => void;
   layoutOptions?: Partial<LayoutOptions>;
   styleName?: MindmapStyle;
   viewerActions?: ViewerActions;
@@ -24,6 +27,7 @@ interface MindmapRendererProps {
 export const MindmapRenderer: React.FC<MindmapRendererProps> = ({
   markdown,
   onNodeClick,
+  onTimestampClick,
   layoutOptions: userLayoutOptions,
   styleName = 'modern',
   viewerActions
@@ -205,19 +209,47 @@ export const MindmapRenderer: React.FC<MindmapRendererProps> = ({
             e.stopPropagation();
             onNodeClick?.(nodeData as any);
             if (nodeData.children.length > 0) toggleNode(nodeData.id, !nodeData.expanded);
-          }} 
+          }}
+          onTimestampClick={onTimestampClick}
         />
       );
     });
     return nodes;
-  }, [positions, treeData, styleName, getBranchIndex, onNodeClick, toggleNode, findNode]);
+  }, [positions, treeData, styleName, getBranchIndex, onNodeClick, onTimestampClick, toggleNode, findNode]);
+
+  // 解析根节点时间戳
+  const { rootTitleText, rootTimestampStr } = useMemo(() => {
+    if (!treeData) return { rootTitleText: '', rootTimestampStr: null };
+    const raw = treeData.text || '';
+    const match = raw.match(/(?:\[|\()(\d{1,2}:\d{2}(?::\d{2})?)(?:\]|\))/);
+    if (!match) return { rootTitleText: raw, rootTimestampStr: null };
+    return {
+      rootTitleText: raw.replace(match[0], '').trim() || raw,
+      rootTimestampStr: match[1]
+    };
+  }, [treeData]);
 
   if (!treeData) return <div className="mm-container"><div className="mm-empty">暂无思维导图内容</div></div>;
 
   return (
     <div className={`mm-container style-${styleName}`} ref={containerRef} tabIndex={0}>
       <div className="mm-floating-title">
-        <span className="title-text" title={treeData.text}>{treeData.text}</span>
+        <span className="title-text" title={treeData.text}>
+          {rootTitleText}
+          {rootTimestampStr && (
+            <span
+              className="mm-timestamp-badge"
+              onClick={(e) => {
+                e.stopPropagation();
+                const sec = VideoUtils.parseTimestampToSeconds(rootTimestampStr);
+                if (sec !== null) onTimestampClick?.(rootTimestampStr, sec);
+              }}
+              title={`点击跳转至视频 ${rootTimestampStr} 并收起导图`}
+            >
+              {rootTimestampStr}
+            </span>
+          )}
+        </span>
         {viewerActions?.onClose && (
           <button 
             className="title-close-btn" 

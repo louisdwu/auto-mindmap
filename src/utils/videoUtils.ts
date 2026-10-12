@@ -61,5 +61,64 @@ export const VideoUtils = {
       console.warn('[VideoUtils] Failed to extract video ID from:', url, e);
       return null;
     }
+  },
+
+  /**
+   * 将秒数格式化为时间戳字符串 (mm:ss 或 hh:mm:ss)
+   */
+  formatSecondsToTimestamp(seconds: number): string {
+    const totalSec = Math.max(0, Math.floor(seconds));
+    const h = Math.floor(totalSec / 3600);
+    const m = Math.floor((totalSec % 3600) / 60);
+    const s = totalSec % 60;
+
+    const pad = (n: number) => n.toString().padStart(2, '0');
+    if (h > 0) {
+      return `${pad(h)}:${pad(m)}:${pad(s)}`;
+    }
+    return `${pad(m)}:${pad(s)}`;
+  },
+
+  /**
+   * 将时间戳文本 (mm:ss 或 hh:mm:ss) 解析为秒数
+   */
+  parseTimestampToSeconds(ts: string): number | null {
+    if (!ts) return null;
+    const parts = ts.trim().split(':').map(Number);
+    if (parts.some(isNaN)) return null;
+
+    if (parts.length === 2) {
+      const [m, s] = parts;
+      return m * 60 + s;
+    } else if (parts.length === 3) {
+      const [h, m, s] = parts;
+      return h * 3600 + m * 60 + s;
+    }
+    return null;
+  },
+
+  /**
+   * 在当前页面中查找视频元素并跳转到指定秒数
+   */
+  seekVideoTo(seconds: number): boolean {
+    try {
+      const videos = Array.from(document.querySelectorAll('video')) as HTMLVideoElement[];
+      if (videos.length === 0) {
+        console.warn('[VideoUtils] 未找到任何 video 元素');
+        return false;
+      }
+
+      // 优先选取有效时长或正在播放的视频
+      const targetVideo = videos.find(v => !isNaN(v.duration) && v.duration > 0) || videos[0];
+      if (targetVideo) {
+        targetVideo.currentTime = seconds;
+        targetVideo.play().catch(() => {});
+        return true;
+      }
+      return false;
+    } catch (e) {
+      console.error('[VideoUtils] 跳转视频位置失败:', e);
+      return false;
+    }
   }
 };

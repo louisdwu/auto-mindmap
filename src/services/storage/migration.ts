@@ -7,6 +7,21 @@ export class StorageMigration {
   static normalizeConfig(config: any): PluginConfig {
     if (!config) return DEFAULT_CONFIG;
 
+    const userSystemPrompt = config.prompt?.systemPrompt;
+    const systemPrompt = (!userSystemPrompt || !userSystemPrompt.includes('时间戳'))
+      ? DEFAULT_CONFIG.prompt.systemPrompt
+      : userSystemPrompt;
+
+    const userTemplate = config.prompt?.template;
+    const template = (!userTemplate || !userTemplate.includes('时间戳'))
+      ? DEFAULT_CONFIG.prompt.template
+      : userTemplate;
+
+    const userReflectionPrompt = config.prompt?.reflectionPrompt;
+    const reflectionPrompt = (!userReflectionPrompt || !userReflectionPrompt.includes('时间戳'))
+      ? DEFAULT_CONFIG.prompt.reflectionPrompt
+      : userReflectionPrompt;
+
     return {
       ...DEFAULT_CONFIG,
       ...config,
@@ -14,9 +29,9 @@ export class StorageMigration {
       prompt: {
         ...DEFAULT_CONFIG.prompt,
         ...config.prompt,
-        systemPrompt: config.prompt?.systemPrompt || DEFAULT_CONFIG.prompt.systemPrompt,
-        template: config.prompt?.template || DEFAULT_CONFIG.prompt.template,
-        reflectionPrompt: config.prompt?.reflectionPrompt || DEFAULT_CONFIG.prompt.reflectionPrompt
+        systemPrompt,
+        template,
+        reflectionPrompt
       },
       settings: {
         ...DEFAULT_CONFIG.settings,
