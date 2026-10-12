@@ -9,6 +9,7 @@ export interface CurrentTask {
   result?: any;
   errorMessage?: string;
   statusMessage?: string;
+  subtitleText?: string;
 }
 
 export function useFloatingBallState() {
@@ -73,13 +74,31 @@ export function useFloatingBallState() {
               videoTitle = task.data.videoTitle || task.data.subtitleText?.substring(0, 30) || '处理中...';
             }
 
+            let subtitleText = task.data?.subtitleText || task.result?.subtitleText;
+
+            // 如果当前任务处于失败状态，且任务对象内未携带 subtitleText，主动尝试拉取字幕缓存进行补充
+            if (!subtitleText && task.status === 'failed') {
+              try {
+                const subRes = await RuntimeUtils.sendMessage({
+                  type: 'GET_SUBTITLE_CACHE',
+                  payload: { videoUrl: currentUrl }
+                });
+                if (subRes?.subtitleText) {
+                  subtitleText = subRes.subtitleText;
+                }
+              } catch (e) {
+                // 忽略缓存检索失败
+              }
+            }
+
             const newTaskState = {
               type: task.type,
               status: task.status,
               videoTitle,
               result: task.result,
               errorMessage: task.error,
-              statusMessage: task.statusMessage
+              statusMessage: task.statusMessage,
+              subtitleText
             };
 
             setCurrentTask(newTaskState);
@@ -89,7 +108,11 @@ export function useFloatingBallState() {
             }
 
             if (task.status === 'failed' && currentTask?.status !== 'failed') {
-              showToast('⚠️ 任务失败，请点击红色悬浮球查看报错详情', 5000);
+              if (subtitleText) {
+                showToast('⚠️ 导图生成失败，但字幕已就绪！点击悬浮球可复制字幕原文本', 6000);
+              } else {
+                showToast('⚠️ 任务失败，请点击红色悬浮球查看报错详情', 5000);
+              }
             }
           } else {
             setCurrentTask(undefined);
@@ -266,6 +289,7 @@ export function useFloatingBallState() {
     handleBallClick,
     handleCloseViewer,
     handleRetry,
-    handleReTranscribe
+    handleReTranscribe,
+    showToast
   };
 }

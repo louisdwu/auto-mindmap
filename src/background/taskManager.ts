@@ -40,6 +40,11 @@ export class TaskManager {
           task.error = '任务由于浏览器后台服务中断而停止，建议调大超时时间并重试。';
           task.updatedAt = Date.now();
           this.tasks.set(task.id, task);
+        } else if (task.status === 'failed') {
+          // 恢复 1 小时内的失败任务，确保 Service Worker 重启后用户依然可以查看报错并复制字幕
+          if (Date.now() - (task.updatedAt || task.createdAt || 0) < 3600000) {
+            this.tasks.set(task.id, task);
+          }
         }
       }
 
@@ -100,6 +105,15 @@ export class TaskManager {
 
     this.tasks.set(task.id, task);
     await this.saveTasks();
+
+    // 异步缓存原始字幕，保障即使 LLM 调用失败也能通过视频 ID 检索到字幕原文本
+    const videoId = VideoUtils.extractVideoId(videoUrl);
+    if (videoId && subtitleText) {
+      StorageService.saveSubtitleCache(videoId, subtitleText).catch(err => {
+        console.warn('[TaskManager] Failed to save subtitle cache:', err);
+      });
+    }
+
     this.processQueue();
 
     return task;
@@ -474,12 +488,16 @@ export class TaskManager {
         .sort((a, b) => a.createdAt - b.createdAt)[0];
       if (pendingTask) return pendingTask;
 
-      // 最后返回匹配的最近完成任务
+      // 最后返回匹配的最近完成任务或失败任务
       const now = Date.now();
       const recentTask = allTasks
-        .filter(t => (t.status === 'completed' || t.status === 'failed') && 
-                     matchUrl(t) && 
-                     (now - (t.updatedAt || 0) < 30000))
+        .filter(t => {
+          if (!matchUrl(t)) return false;
+          const timeDiff = now - (t.updatedAt || 0);
+          if (t.status === 'completed') return timeDiff < 30000;
+          if (t.status === 'failed') return timeDiff < 3600000; // 失败任务保留 1 小时，确保用户能复制已提取的字幕
+          return false;
+        })
         .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))[0];
       if (recentTask) return recentTask;
     }
@@ -497,10 +515,15 @@ export class TaskManager {
 
     if (pendingTasks.length > 0) return pendingTasks[0];
 
-    // 最后返回最近完成的任务（30秒内），给用户一点反馈时间
+    // 最后返回最近完成或失败的任务
     const now = Date.now();
     const recentCompletedTask = allTasks
-      .filter(t => (t.status === 'completed' || t.status === 'failed') && (now - (t.updatedAt || 0) < 30000))
+      .filter(t => {
+        const timeDiff = now - (t.updatedAt || 0);
+        if (t.status === 'completed') return timeDiff < 30000;
+        if (t.status === 'failed') return timeDiff < 3600000;
+        return false;
+      })
       .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))[0];
 
     return recentCompletedTask;

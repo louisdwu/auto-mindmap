@@ -25,7 +25,8 @@ function FloatingBallApp() {
     handleBallClick,
     handleCloseViewer,
     handleRetry,
-    handleReTranscribe
+    handleReTranscribe,
+    showToast
   } = useFloatingBallState();
 
   return (
@@ -35,6 +36,7 @@ function FloatingBallApp() {
         currentTask={currentTask}
         onClick={handleBallClick}
         isFullscreen={isFullscreen}
+        onToast={showToast}
       />
       {showViewer && mindmapData && (
         <MindmapViewer

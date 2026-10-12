@@ -9,7 +9,8 @@ const STORAGE_KEYS = {
   MINDMAPS: 'mindmaps',
   LATEST_MINDMAP_ID: 'latest_mindmap_id',
   EXTENSION_STATE: 'extension_state',
-  ASR_CACHE_PREFIX: 'asr_cache_'
+  ASR_CACHE_PREFIX: 'asr_cache_',
+  SUBTITLE_CACHE_PREFIX: 'subtitle_cache_'
 };
 
 export class StorageService {
@@ -331,6 +332,23 @@ export class StorageService {
 
   static async deletePhase1Cache(videoId: string): Promise<void> {
     const key = 'phase1_cache_' + videoId;
+    await chrome.storage.local.remove(key);
+  }
+
+  // 原始字幕缓存相关
+  static async getSubtitleCache(videoId: string): Promise<string | null> {
+    const key = STORAGE_KEYS.SUBTITLE_CACHE_PREFIX + videoId;
+    const result = await chrome.storage.local.get(key);
+    return result[key] || null;
+  }
+
+  static async saveSubtitleCache(videoId: string, text: string): Promise<void> {
+    const key = STORAGE_KEYS.SUBTITLE_CACHE_PREFIX + videoId;
+    await chrome.storage.local.set({ [key]: text });
+  }
+
+  static async deleteSubtitleCache(videoId: string): Promise<void> {
+    const key = STORAGE_KEYS.SUBTITLE_CACHE_PREFIX + videoId;
     await chrome.storage.local.remove(key);
   }
 }
