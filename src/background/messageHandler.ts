@@ -46,6 +46,9 @@ export class MessageHandler {
       case 'CLEAR_MINDMAPS':
         return await this.handleClearMindmaps();
       
+      case 'GET_SUBTITLE_CACHE':
+        return await this.handleGetSubtitleCache(message.payload);
+      
       default:
         // 处理未知消息类型
         return { error: 'Unknown message type' };
@@ -135,5 +138,46 @@ export class MessageHandler {
     
     const task = await this.taskManager.createMindmapTask(payload.videoUrl, payload.subtitleText, payload.videoTitle, tabId);
     return { taskId: task.id };
+  }
+
+  private async handleGetSubtitleCache(payload?: { videoUrl?: string }) {
+    if (!payload?.videoUrl) {
+      return { subtitleText: null };
+    }
+    const { videoUrl } = payload;
+    const videoId = VideoUtils.extractVideoId(videoUrl);
+
+    // 1. 检查当前或最近任务中的 subtitleText
+    const task = this.taskManager.getCurrentTask(videoUrl);
+    if (task?.data?.subtitleText) {
+      return { subtitleText: task.data.subtitleText };
+    }
+    if (task?.result?.subtitleText) {
+      return { subtitleText: task.result.subtitleText };
+    }
+
+    // 2. 检查 StorageService 的通用字幕缓存
+    if (videoId) {
+      const cachedSub = await StorageService.getSubtitleCache(videoId);
+      if (cachedSub) {
+        return { subtitleText: cachedSub };
+      }
+    }
+
+    // 3. 检查 ASR 缓存
+    if (videoId) {
+      const asrSub = await StorageService.getAsrCache(videoId);
+      if (asrSub) {
+        return { subtitleText: asrSub };
+      }
+    }
+
+    // 4. 检查已有的思维导图数据
+    const mindmap = await StorageService.getLatestMindmapByUrl(videoUrl);
+    if (mindmap?.subtitleText) {
+      return { subtitleText: mindmap.subtitleText };
+    }
+
+    return { subtitleText: null };
   }
 }

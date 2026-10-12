@@ -203,6 +203,7 @@ export class SubtitleService {
       
       if (subtitleText?.trim()) {
         console.log('[SubtitleService] ===== 字幕获取成功（官方字幕）=====');
+        await StorageService.saveSubtitleCache(videoInfo.bvid, subtitleText);
         return { videoUrl, videoTitle: videoInfo.title, subtitleText, isAsr: false };
       }
     }
@@ -226,6 +227,7 @@ export class SubtitleService {
           const subtitleText = this.extractPlainText(subtitleData);
           if (subtitleText?.trim()) {
             console.log('[SubtitleService] ===== 字幕获取成功（content script 代理）=====');
+            await StorageService.saveSubtitleCache(videoInfo.bvid, subtitleText);
             return { videoUrl, videoTitle: videoInfo.title, subtitleText, isAsr: false };
           }
         }
@@ -336,6 +338,7 @@ export class SubtitleService {
 
       if (text?.trim()) {
         await StorageService.saveAsrCache(videoInfo.bvid, text);
+        await StorageService.saveSubtitleCache(videoInfo.bvid, text);
         return { videoUrl, videoTitle: videoInfo.title, subtitleText: text, isAsr: true };
       }
       throw new Error('语音识别返回内容为空');

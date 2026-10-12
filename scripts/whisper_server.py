@@ -105,6 +105,43 @@ print(f"设备参数: {DEVICE} ({COMPUTE_TYPE}), Workers: {NUM_WORKERS}, CPU Thr
 
 model = None
 
+def find_ffmpeg():
+    local_ffmpeg = r"D:\Green\卡卡字幕助手VideoCaptioner\resource\bin\ffmpeg.exe"
+    if os.path.exists(local_ffmpeg):
+        return local_ffmpeg
+    import shutil
+    return shutil.which("ffmpeg")
+
+def preprocess_audio_if_needed(file_path: str) -> str:
+    """
+    使用 ffmpeg 探测并抽取音频。针对 .m4s 或包含视频轨的文件，自动提取出纯音频临时文件进行识别。
+    若发现没有音频轨，抛出明确的 ValueError。
+    """
+    ffmpeg_bin = find_ffmpeg()
+    if not ffmpeg_bin:
+        return file_path
+    
+    tmp_converted = file_path + ".converted.mp3"
+    if os.path.exists(tmp_converted) and os.path.getsize(tmp_converted) > 0:
+        return tmp_converted
+
+    import subprocess
+    cmd = [
+        ffmpeg_bin, "-y", "-i", file_path, 
+        "-vn", "-acodec", "libmp3lame", "-q:a", "2", tmp_converted
+    ]
+    res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="ignore")
+    if res.returncode == 0 and os.path.exists(tmp_converted) and os.path.getsize(tmp_converted) > 0:
+        print(f"[{time.strftime('%H:%M:%S')}] 已成功通过 ffmpeg 提取音频流: {tmp_converted}")
+        return tmp_converted
+    
+    # 彻底检查 ffmpeg 输出信息
+    err_msg = res.stderr or ""
+    if "Output file does not contain any stream" in err_msg or "does not contain any stream" in err_msg:
+        raise ValueError(f"媒体文件不包含任何音频轨 (Audio Stream)，无法进行语音转文字！")
+    
+    return file_path
+
 def load_model():
     global model
     try:
@@ -142,6 +179,7 @@ async def do_transcribe(
     file: UploadFile = None,
     audio_url: str = None,
     video_id: str = None,
+    file_path: str = None,
     model_name: str = "large-v2",
     beam_size: str = None,
     vad_filter: str = None,
@@ -184,12 +222,22 @@ async def do_transcribe(
         )
 
     try:
-        # 2. 如果存在音频缓存，跳过下载；否则正常下载
+        # 2. 如果存在音频缓存，跳过下载；如果有本地文件路径，直接使用；否则正常下载/上传
         if video_id and mp3_cache_path and os.path.exists(mp3_cache_path) and os.path.getsize(mp3_cache_path) > 0:
             print(f"[{time.strftime('%H:%M:%S')}] 命中音频缓存: {safe_video_id}, 跳过下载!")
             tmp_path = mp3_cache_path
             file_size = os.path.getsize(tmp_path)
             print(f"缓存音频大小: {file_size / 1024 / 1024:.2f} MB")
+        elif file_path:
+            if not os.path.exists(file_path):
+                return JSONResponse(status_code=400, content={"error": f"指定的本地文件不存在: {file_path}"})
+            print(f"[{time.strftime('%H:%M:%S')}] 使用本地文件: {file_path}")
+            try:
+                tmp_path = preprocess_audio_if_needed(file_path)
+            except ValueError as ve:
+                return JSONResponse(status_code=400, content={"error": str(ve)})
+            file_size = os.path.getsize(tmp_path)
+            print(f"音频文件准备完成，大小: {file_size / 1024 / 1024:.2f} MB")
         else:
             with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp:
                 tmp_path = tmp.name
@@ -209,7 +257,7 @@ async def do_transcribe(
                     content = await file.read()
                     tmp.write(content)
                 else:
-                    return JSONResponse(status_code=400, content={"error": "未提供音频文件或 URL"})
+                    return JSONResponse(status_code=400, content={"error": "未提供音频文件、URL 或本地文件路径"})
 
             # 2. 检查文件是否有效
             file_size = os.path.getsize(tmp_path)
@@ -304,10 +352,11 @@ async def do_transcribe(
             }
         )
     finally:
-        # 清理临时文件，如果是缓存音频则不要删除
+        # 清理临时文件，如果是缓存音频或指定的本地文件则不要删除
         if tmp_path and os.path.exists(tmp_path):
             is_cached_file = mp3_cache_path is not None and tmp_path == mp3_cache_path
-            if not is_cached_file:
+            is_local_file = file_path is not None and tmp_path == file_path
+            if not is_cached_file and not is_local_file:
                 try:
                     os.remove(tmp_path)
                 except:
@@ -318,6 +367,7 @@ async def transcribe(
     file: UploadFile = File(None),
     audio_url: str = Form(None),
     video_id: str = Form(None),
+    file_path: str = Form(None),
     model_name: str = Form("large-v2", alias="model"),
     beam_size: str = Form(None),
     vad_filter: str = Form(None),
@@ -328,13 +378,14 @@ async def transcribe(
     if stream:
         return await openai_transcribe(
             file=file, model_name=model_name, audio_url=audio_url, 
-            video_id=video_id, beam_size=beam_size, 
+            video_id=video_id, file_path=file_path, beam_size=beam_size, 
             vad_filter=vad_filter, language=language,
             stream=True
         )
     return await do_transcribe(
-        file, audio_url, video_id, model_name, 
-        beam_size, vad_filter, language, initial_prompt
+        file=file, audio_url=audio_url, video_id=video_id, file_path=file_path,
+        model_name=model_name, beam_size=beam_size, vad_filter=vad_filter, 
+        language=language, initial_prompt=initial_prompt
     )
 
 @app.post("/v1/audio/transcriptions")
@@ -347,6 +398,7 @@ async def openai_transcribe(
     vad_filter: str = Form(None),
     audio_url: str = Form(None),
     video_id: str = Form(None),
+    file_path: str = Form(None),
     stream: bool = Form(False)
 ):
     """
@@ -357,7 +409,7 @@ async def openai_transcribe(
         result = await do_transcribe(
             file=file, model_name=model_name, language=language,
             beam_size=beam_size, vad_filter=vad_filter,
-            audio_url=audio_url, video_id=video_id
+            audio_url=audio_url, video_id=video_id, file_path=file_path
         )
         if isinstance(result, JSONResponse): return result
         if response_format == "text": return result["text"]
@@ -390,6 +442,12 @@ async def openai_transcribe(
             if video_id and mp3_cache_path and os.path.exists(mp3_cache_path) and os.path.getsize(mp3_cache_path) > 0:
                 yield log(f"[{time.strftime('%H:%M:%S')}] 命中音频缓存: {safe_video_id}")
                 tmp_path = mp3_cache_path
+            elif file_path:
+                if not os.path.exists(file_path):
+                    yield log(f"ERROR:本地文件不存在: {file_path}")
+                    return
+                yield log(f"[{time.strftime('%H:%M:%S')}] 使用本地文件: {file_path}")
+                tmp_path = file_path
             else:
                 with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp:
                     tmp_path = tmp.name
@@ -408,6 +466,9 @@ async def openai_transcribe(
                         yield log(f"[{time.strftime('%H:%M:%S')}] 收到文件上传: {file.filename}")
                         tmp.write(await file.read())
                         await asyncio.sleep(0.01)
+                    else:
+                        yield log("ERROR:未提供音频文件、URL 或本地文件路径")
+                        return
                 
                 if video_id and mp3_cache_path:
                     os.makedirs(cache_dir, exist_ok=True)
@@ -461,7 +522,7 @@ async def openai_transcribe(
         except Exception as e:
             yield log(f"ERROR:{str(e)}")
         finally:
-            if tmp_path and os.path.exists(tmp_path) and tmp_path != mp3_cache_path:
+            if tmp_path and os.path.exists(tmp_path) and tmp_path != mp3_cache_path and tmp_path != file_path:
                 try: os.remove(tmp_path)
                 except: pass
 
@@ -500,5 +561,38 @@ async def health():
     }
 
 if __name__ == "__main__":
-    print(f"ASR 服务器启动在 http://0.0.0.0:2233")
-    uvicorn.run(app, host="0.0.0.0", port=2233)
+    import argparse
+    parser = argparse.ArgumentParser(description="Faster Whisper Local ASR Server / CLI")
+    parser.add_argument("file_path", nargs="?", default=None, help="本地文件路径 (如果传入则直接转录)")
+    parser.add_argument("--file", "-f", dest="opt_file", default=None, help="本地文件路径")
+    parser.add_argument("--port", "-p", type=int, default=2233, help="Web 服务器端口号 (默认 2233)")
+    args = parser.parse_args()
+
+    target_file = args.file_path or args.opt_file
+
+    if target_file:
+        target_file = os.path.abspath(target_file)
+        print(f"\n==========================================")
+        print(f"收到 CLI 转录任务，目标文件: {target_file}")
+        print(f"==========================================")
+        if not os.path.exists(target_file):
+            print(f"错误：本地文件未找到 -> {target_file}")
+            sys.exit(1)
+        
+        # 直接执行异步转录
+        result = asyncio.run(do_transcribe(file_path=target_file))
+        if isinstance(result, dict) and "text" in result:
+            txt_output_path = os.path.splitext(target_file)[0] + ".txt"
+            with open(txt_output_path, "w", encoding="utf-8") as f:
+                f.write(result["text"])
+            print(f"\n[识别结果已成功导出至]: {txt_output_path}")
+            print(f"\n--- 转录文本预览 (前 500 字) ---\n{result['text'][:500]}...\n")
+        elif isinstance(result, JSONResponse):
+            import json
+            err_data = json.loads(result.body.decode("utf-8"))
+            print(f"\n转录失败: {err_data.get('error', err_data)}")
+        else:
+            print(f"转录失败: {result}")
+    else:
+        print(f"ASR 服务器启动在 http://0.0.0.0:{args.port}")
+        uvicorn.run(app, host="0.0.0.0", port=args.port)

@@ -39,6 +39,13 @@ export interface GenerateMindmapDirectMessage {
   };
 }
 
+export interface GetSubtitleCacheMessage {
+  type: 'GET_SUBTITLE_CACHE';
+  payload: {
+    videoUrl: string;
+  };
+}
+
 // Background -> Content
 export interface SubtitleDownloadedMessage {
   type: 'SUBTITLE_DOWNLOADED';
@@ -70,7 +77,8 @@ export type ExtensionMessage =
   | GetLatestMindmapByUrlMessage
   | GetCurrentTaskMessage
   | ClearMindmapsMessage
-  | GenerateMindmapDirectMessage;
+  | GenerateMindmapDirectMessage
+  | GetSubtitleCacheMessage;
 
 export type ContentMessage =
   | SubtitleDownloadedMessage
