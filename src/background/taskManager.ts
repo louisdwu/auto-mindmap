@@ -41,8 +41,10 @@ export class TaskManager {
           task.updatedAt = Date.now();
           this.tasks.set(task.id, task);
         } else if (task.status === 'failed') {
-          // 恢复 1 小时内的失败任务，确保 Service Worker 重启后用户依然可以查看报错并复制字幕
-          if (Date.now() - (task.updatedAt || task.createdAt || 0) < 3600000) {
+          // 只恢复 generate_mindmap 类型的失败任务（保留其字幕供用户复制/查看报错）
+          // download_subtitle 失败任务无字幕价值，且字幕获取逻辑已多次迭代，
+          // 保留旧失败任务会误导用户以为新代码仍有问题，故 Service Worker 重启时丢弃
+          if (task.type === 'generate_mindmap' && Date.now() - (task.updatedAt || task.createdAt || 0) < 3600000) {
             this.tasks.set(task.id, task);
           }
         }
@@ -230,9 +232,10 @@ export class TaskManager {
   private async executeDownloadTask(task: Task) {
     const { videoUrl } = task.data;
 
-    // 如果是 YouTube 视频，跳过下载步骤
+    // YouTube 视频：Service Worker 中无法直接拿到字幕，需通过 content script 代理获取
     if (videoUrl.includes('youtube.com') || videoUrl.includes('youtu.be')) {
-      console.log('[TaskManager] YouTube video detected, skipping manual download task.');
+      console.log('[TaskManager] YouTube video detected, delegating to content script for subtitle.');
+      await this.executeYouTubeDownloadTask(task, videoUrl);
       return;
     }
 
@@ -256,6 +259,103 @@ export class TaskManager {
 
     // 下载完成后，自动创建生成思维导图任务
     await this.createMindmapTask(videoUrl, result.subtitleText, result.videoTitle, task.tabId);
+  }
+
+  /**
+   * 执行 YouTube 字幕获取任务（通过 content script 代理）
+   * YouTube 字幕只能在页面上下文中读取，故由 background 向对应标签页发送
+   * FETCH_YOUTUBE_SUBTITLE 消息，content script 利用已缓存的字幕轨道/拦截到的
+   * 字幕请求主动获取并解析，返回带时间戳的纯文本后再走标准思维导图生成流程。
+   *
+   * 若该视频没有可用字幕（无 CC 字幕），则回退到 ASR 语音识别流程：
+   *   1. 通过 FETCH_YOUTUBE_AUDIO_URL 获取音频流地址
+   *   2. 调用 SubtitleService.runAsrFlow 下载并识别
+   * 这与 B 站“无字幕 → 下载音频 → ASR”的流程保持一致。
+   */
+  private async executeYouTubeDownloadTask(task: Task, videoUrl: string) {
+    const tabId = task.tabId;
+    if (!tabId) {
+      throw new Error('YouTube 字幕获取失败：缺少标签页上下文。请刷新视频页面后再次点击悬浮球。');
+    }
+
+    const videoId = VideoUtils.extractVideoId(videoUrl);
+    let videoTitle = 'YouTube 视频';
+    let subtitleText: string | null = null;
+    let isAsr = false;
+
+    // === 阶段 1：尝试获取 CC 字幕 ===
+    task.statusMessage = '正在通过页面上下文获取 YouTube 字幕...';
+    task.updatedAt = Date.now();
+    await this.saveTasks();
+
+    try {
+      const resp = await chrome.tabs.sendMessage(tabId, { type: 'FETCH_YOUTUBE_SUBTITLE' });
+      if (resp?.subtitleText && String(resp.subtitleText).trim()) {
+        subtitleText = String(resp.subtitleText);
+      }
+      if (resp?.videoTitle) videoTitle = resp.videoTitle;
+    } catch (e: any) {
+      console.warn('[TaskManager] FETCH_YOUTUBE_SUBTITLE 失败，将尝试 ASR 回退:', e?.message || e);
+    }
+
+    // === 阶段 2：无 CC 字幕，回退 ASR 语音识别 ===
+    if (!subtitleText) {
+      const config = await StorageService.getConfig();
+      if (!config) throw new Error('配置未初始化');
+
+      task.statusMessage = '未检测到 YouTube 字幕，准备下载音频进行语音识别...';
+      task.updatedAt = Date.now();
+      await this.saveTasks();
+
+      // 2.1 获取音频流地址
+      let audioUrl: string | null = null;
+      try {
+        const audioResp = await chrome.tabs.sendMessage(tabId, { type: 'FETCH_YOUTUBE_AUDIO_URL' });
+        audioUrl = audioResp?.audioUrl || null;
+        if (audioResp?.videoTitle) videoTitle = audioResp.videoTitle;
+      } catch (e: any) {
+        throw new Error(`YouTube 音频流地址获取失败：无法与页面通信（${e?.message || e}）。请刷新视频页面后重试。`);
+      }
+      if (!audioUrl) {
+        throw new Error('无法从页面提取 YouTube 音频流地址（可能是受签名保护的内容），暂不支持语音识别。');
+      }
+
+      // 2.2 调用通用 ASR 流程（复用 B 站的锁、缓存、transcribe 逻辑）
+      const asrResult = await SubtitleService.runAsrFlow({
+        audioUrl,
+        videoId: videoId || videoUrl,
+        videoTitle,
+        videoUrl,
+        config,
+        onProgress: async (msg) => {
+          task.statusMessage = msg;
+          task.updatedAt = Date.now();
+          await this.saveTasks();
+        },
+        forceMode: task.data.force === true,
+        tabId
+      });
+      subtitleText = asrResult.subtitleText;
+      isAsr = true;
+    }
+
+    if (!subtitleText || !subtitleText.trim()) {
+      throw new Error('YouTube 字幕与语音识别均未能获取到文本，请稍后重试。');
+    }
+
+    // 缓存字幕，保障 LLM 失败后也能通过 GET_SUBTITLE_CACHE 取回字幕原文本
+    if (videoId) {
+      StorageService.saveSubtitleCache(videoId, subtitleText).catch(err => {
+        console.warn('[TaskManager] Failed to save YouTube subtitle cache:', err);
+      });
+    }
+
+    task.result = { videoUrl, videoTitle, subtitleText, isAsr };
+    task.statusMessage = '字幕获取成功，即将开始生成思维导图';
+    await this.saveTasks();
+
+    // 与 B 站流程保持一致：获取到字幕后自动创建生成思维导图任务
+    await this.createMindmapTask(videoUrl, subtitleText, videoTitle, task.tabId);
   }
 
   /**
