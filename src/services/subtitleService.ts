@@ -277,7 +277,8 @@ export class SubtitleService {
   }
 
   /**
-   * 处理 ASR 语音识别流程
+   * 处理 ASR 语音识别流程（B 站）
+   * 获取 B 站音频流地址后，委托给通用的 runAsrFlow
    */
   private static async handleAsrFlow(
     videoInfo: any,
@@ -288,25 +289,53 @@ export class SubtitleService {
     tabId?: number
   ): Promise<any> {
     const getTime = () => `[${new Date().toLocaleTimeString('zh-CN', { hour12: false })}]`;
+    onProgress?.(`${getTime()} 正在获取音频流地址...`);
+    const audioUrl = await AudioService.getAudioUrl(videoInfo.bvid, videoInfo.cid);
+    return this.runAsrFlow({
+      audioUrl,
+      videoId: videoInfo.bvid,
+      videoTitle: videoInfo.title,
+      videoUrl,
+      config,
+      onProgress,
+      forceMode,
+      tabId
+    });
+  }
+
+  /**
+   * 通用 ASR 语音识别流程（B 站与 YouTube 共用）
+   * 给定音频流地址，按本地/远程 provider 下载并识别，结果带时间戳并缓存。
+   * YouTube 无字幕时由 TaskManager 调用本方法回退到语音识别。
+   */
+  static async runAsrFlow(opts: {
+    audioUrl: string;
+    videoId: string;
+    videoTitle: string;
+    videoUrl: string;
+    config: PluginConfig;
+    onProgress?: (msg: string) => void;
+    forceMode?: boolean;
+    tabId?: number;
+  }): Promise<{ videoUrl: string; videoTitle: string; subtitleText: string; isAsr: true }> {
+    const { audioUrl, videoId, videoTitle, videoUrl, config, onProgress, forceMode, tabId } = opts;
+    const getTime = () => `[${new Date().toLocaleTimeString('zh-CN', { hour12: false })}]`;
     const unlock = await this.acquireAsrLock(onProgress);
-    
+
     try {
-      onProgress?.(`${getTime()} 正在获取音频流地址...`);
-      const audioUrl = await AudioService.getAudioUrl(videoInfo.bvid, videoInfo.cid);
-      
       if (!forceMode) {
         onProgress?.(`${getTime()} 正在检索本地 ASR 缓存...`);
-        const cachedText = await StorageService.getAsrCache(videoInfo.bvid);
+        const cachedText = await StorageService.getAsrCache(videoId);
         if (cachedText && /\[\d{1,2}:\d{2}/.test(cachedText)) {
-          return { videoUrl, videoTitle: videoInfo.title, subtitleText: cachedText, isAsr: true };
+          return { videoUrl, videoTitle, subtitleText: cachedText, isAsr: true };
         } else if (cachedText) {
           console.log('[SubtitleService] 发现旧版无时间戳 ASR 缓存，自动作废并重新识别');
-          await StorageService.deleteAsrCache(videoInfo.bvid);
+          await StorageService.deleteAsrCache(videoId);
         }
       }
 
       const isLocal = config.settings.asrProvider === 'local';
-      
+
       // 构建识别参数描述
       const beamSize = config.settings.asrBeamSize || 2;
       const vad = config.settings.asrVadFilter !== false;
@@ -318,7 +347,7 @@ export class SubtitleService {
       if (isLocal) {
         onProgress?.(`${getTime()} 准备通过本地服务器识别... ${paramsDesc}`);
         try {
-          text = await LLMService.transcribeAudio(config, audioUrl, { videoId: videoInfo.bvid }, (msg) => {
+          text = await LLMService.transcribeAudio(config, audioUrl, { videoId }, (msg) => {
              onProgress?.(msg);
           });
         } catch (e: any) {
@@ -329,7 +358,7 @@ export class SubtitleService {
           });
           const sizeMB = (audioBlob.size / 1024 / 1024).toFixed(2);
           onProgress?.(`${getTime()} 音频准备完成，大小: ${sizeMB} MB`);
-          text = await LLMService.transcribeAudio(config, audioBlob, { videoId: videoInfo.bvid }, (msg) => {
+          text = await LLMService.transcribeAudio(config, audioBlob, { videoId }, (msg) => {
             onProgress?.(msg);
           });
         }
@@ -340,15 +369,15 @@ export class SubtitleService {
         });
         const sizeMB = (audioBlob.size / 1024 / 1024).toFixed(2);
         onProgress?.(`${getTime()} 音频下载完成 (${sizeMB} MB)，正在调用远程识别...`);
-        text = await LLMService.transcribeAudio(config, audioBlob, { videoId: videoInfo.bvid }, (msg) => {
+        text = await LLMService.transcribeAudio(config, audioBlob, { videoId }, (msg) => {
           onProgress?.(msg);
         });
       }
 
       if (text?.trim()) {
-        await StorageService.saveAsrCache(videoInfo.bvid, text);
-        await StorageService.saveSubtitleCache(videoInfo.bvid, text);
-        return { videoUrl, videoTitle: videoInfo.title, subtitleText: text, isAsr: true };
+        await StorageService.saveAsrCache(videoId, text);
+        await StorageService.saveSubtitleCache(videoId, text);
+        return { videoUrl, videoTitle, subtitleText: text, isAsr: true };
       }
       throw new Error('语音识别返回内容为空');
     } catch (e: any) {

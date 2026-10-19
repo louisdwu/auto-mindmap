@@ -2,10 +2,11 @@ import { initEventListener } from './eventListener';
 import { initFloatingBall } from './floatingBall';
 import { StorageService } from '../services/storageService';
 import { NotificationUtils } from '../utils/notificationUtils';
+import { YouTubeSubtitleCache } from './youtubeSubtitleCache';
 import './styles.css';
 
 // 初始化
-console.log('[Content] Script loaded');
+console.log('[Content] Script loaded (v2.1: youtube subtitle html-fallback + asr)');
 
 // 注入 YouTube 拦截器
 if (window.location.hostname.includes('youtube.com')) {
@@ -43,6 +44,20 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     case 'FETCH_AUDIO_BLOB':
       // 在页面上下文中下载音频并转为 Base64 返回
       fetchAudioBlobInPageContext(message.payload)
+        .then(sendResponse)
+        .catch(err => sendResponse({ error: err.message }));
+      return true; // 保持消息通道开放
+
+    case 'FETCH_YOUTUBE_SUBTITLE':
+      // 在页面上下文中主动获取 YouTube 字幕（手动点击悬浮球时由 background 调用）
+      fetchYouTubeSubtitleForBackground()
+        .then(sendResponse)
+        .catch(err => sendResponse({ error: err.message }));
+      return true; // 保持消息通道开放
+
+    case 'FETCH_YOUTUBE_AUDIO_URL':
+      // 获取 YouTube 音频流地址（无字幕时回退 ASR 用，由 background 调用）
+      fetchYouTubeAudioUrlForBackground()
         .then(sendResponse)
         .catch(err => sendResponse({ error: err.message }));
       return true; // 保持消息通道开放
@@ -126,6 +141,46 @@ async function fetchSubtitlesInPageContext(payload: { bvid: string; cid: number 
 function showFloatingBallNotification() {
   const event = new CustomEvent('mindmap-generated');
   window.dispatchEvent(event);
+}
+
+/**
+ * 响应 background 的 FETCH_YOUTUBE_SUBTITLE 请求
+ * 通过 YouTubeSubtitleCache 主动获取字幕文本（多级回退，含 fetch HTML 兜底）：
+ *   1. observer 已拦截并解析的字幕文本
+ *   2. observer 拦截到的字幕 URL（重新 fetch 完整轨道）
+ *   3. main world 推送的 captionTracks（任选一条 fetch）
+ *   4. 直接 fetch 当前页面 HTML 提取 captionTracks（最可靠兜底）
+ * 返回 { subtitleText, videoTitle } 或 { error }
+ * 注意：返回 error 时，background 会回退到 ASR 语音识别流程，因此这里的提示
+ * 文案不要写成“请确认有字幕”，而是让 background 自行决定回退。
+ */
+async function fetchYouTubeSubtitleForBackground(): Promise<any> {
+  console.log('[Content] 收到 FETCH_YOUTUBE_SUBTITLE 请求，开始主动获取 YouTube 字幕');
+  const result = await YouTubeSubtitleCache.fetchSubtitle();
+  if (result && result.subtitleText && result.subtitleText.trim()) {
+    console.log('[Content] YouTube 字幕获取成功，长度:', result.subtitleText.length);
+    return {
+      subtitleText: result.subtitleText,
+      videoTitle: result.videoTitle
+    };
+  }
+  // 返回空结果而非 error，让 background 判断为“无字幕”并回退 ASR
+  return { subtitleText: null, videoTitle: YouTubeSubtitleCache.getVideoTitle() };
+}
+
+/**
+ * 响应 background 的 FETCH_YOUTUBE_AUDIO_URL 请求
+ * 获取 YouTube 音频流地址（用于无字幕时回退 ASR）
+ * 返回 { audioUrl, videoTitle } 或 { error }
+ */
+async function fetchYouTubeAudioUrlForBackground(): Promise<any> {
+  console.log('[Content] 收到 FETCH_YOUTUBE_AUDIO_URL 请求，开始获取 YouTube 音频流地址');
+  const audioUrl = await YouTubeSubtitleCache.fetchAudioUrl();
+  if (audioUrl) {
+    console.log('[Content] YouTube 音频流地址获取成功');
+    return { audioUrl, videoTitle: YouTubeSubtitleCache.getVideoTitle() };
+  }
+  return { error: '无法从页面提取 YouTube 音频流地址（可能是受签名保护的内容），暂不支持语音识别。' };
 }
 
 async function checkAndPlayDing() {
