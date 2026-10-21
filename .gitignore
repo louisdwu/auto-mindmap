@@ -40,3 +40,10 @@ src/types/secrets.ts
 
 # Cache
 scripts/cache/
+
+# Python bytecode / cache
+__pycache__/
+*.py[cod]
+
+# Local model backups (keep out of version control)
+scripts/*.bak
