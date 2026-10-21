@@ -1,0 +1,608 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>视频语音识别 · SRT 字幕生成器</title>
+<style>
+:root{
+  --bg:#0e1117; --panel:#161b22; --panel2:#1c2330; --line:#2b3440;
+  --txt:#e6edf3; --sub:#8b98a9; --acc:#4f9cf9; --acc2:#6fb1ff;
+  --ok:#3fb950; --warn:#d29922; --err:#f85149; --r:10px;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;
+  background:
+    radial-gradient(900px 500px at 85% -8%,#1d2937 0%,transparent 60%),
+    radial-gradient(700px 400px at 0% 100%,#18202c 0%,transparent 55%),
+    var(--bg);
+  color:var(--txt);
+  font:14px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",Roboto,Helvetica,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+.wrap{max-width:1000px;margin:0 auto;padding:28px 20px 60px}
+header{display:flex;align-items:center;gap:14px;margin-bottom:22px}
+.logo{width:40px;height:40px;border-radius:11px;background:linear-gradient(135deg,var(--acc),#8b5cf6);
+  display:flex;align-items:center;justify-content:center;font-size:20px;flex:none;
+  box-shadow:0 6px 18px rgba(79,156,249,.28)}
+h1{font-size:19px;margin:0;letter-spacing:.2px}
+.sub{color:var(--sub);font-size:12.5px}
+.card{background:linear-gradient(180deg,var(--panel2),var(--panel));border:1px solid var(--line);
+  border-radius:var(--r);padding:16px 18px;margin-bottom:16px;box-shadow:0 10px 30px rgba(0,0,0,.22)}
+.card h2{margin:0 0 12px;font-size:13.5px;display:flex;align-items:center;gap:8px;color:#cdd9e5}
+.row{display:flex;gap:10px;flex-wrap:wrap}
+.grow{flex:1;min-width:0}
+label.f{display:block;font-size:12px;color:var(--sub);margin:0 0 5px}
+input[type=text],input[type=url],select,textarea{
+  width:100%;background:#0d1117;border:1px solid var(--line);color:var(--txt);
+  border-radius:8px;padding:9px 11px;font-size:13px;outline:none;transition:.15s;font-family:inherit}
+input:focus,select:focus,textarea:focus{border-color:var(--acc);box-shadow:0 0 0 3px rgba(79,156,249,.14)}
+textarea{resize:vertical;min-height:58px}
+button{cursor:pointer;border:1px solid var(--line);background:#212a36;color:var(--txt);
+  border-radius:8px;padding:9px 14px;font-size:13px;font-family:inherit;transition:.15s;white-space:nowrap}
+button:hover:not(:disabled){border-color:#3a4756;background:#28323f;transform:translateY(-1px)}
+button:disabled{opacity:.5;cursor:not-allowed}
+.btn-acc{background:linear-gradient(135deg,var(--acc),#3d7fe0);border-color:transparent;font-weight:600}
+.btn-acc:hover:not(:disabled){background:linear-gradient(135deg,var(--acc2),var(--acc));border-color:transparent}
+.btn-lg{padding:12px 22px;font-size:14.5px;border-radius:9px}
+.btn-ghost{background:transparent}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--sub);flex:none;transition:.2s}
+.dot.ok{background:var(--ok);box-shadow:0 0 0 4px rgba(63,185,80,.15)}
+.dot.bad{background:var(--err);box-shadow:0 0 0 4px rgba(248,81,73,.15)}
+.dot.busy{background:var(--warn);animation:pulse 1.1s infinite}
+@keyframes pulse{50%{opacity:.4}}
+.drop{border:1.5px dashed #38434f;border-radius:10px;padding:26px 16px;text-align:center;color:var(--sub);
+  cursor:pointer;transition:.18s;background:#0d1117}
+.drop:hover,.drop.over{border-color:var(--acc);background:rgba(79,156,249,.07);color:#cdd9e5}
+.drop .big{font-size:26px;margin-bottom:6px}
+.fileinfo{display:flex;align-items:center;gap:10px;margin-top:12px;padding:10px 12px;background:#0d1117;
+  border:1px solid var(--line);border-radius:8px;font-size:13px}
+.fileinfo .nm{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
+.badge{font-size:11px;padding:2px 8px;border-radius:20px;background:#212a36;color:var(--sub);border:1px solid var(--line)}
+.adv{border-top:1px solid var(--line);margin-top:14px;padding-top:12px}
+details summary{cursor:pointer;color:var(--sub);font-size:12.5px;list-style:none;display:flex;
+  align-items:center;gap:6px;user-select:none}
+details summary::-webkit-details-marker{display:none}
+details[open] summary .chev{transform:rotate(90deg)}
+.chev{transition:.15s;display:inline-block;font-size:9px}
+.log{background:#0a0d12;border:1px solid var(--line);border-radius:8px;padding:12px;height:230px;
+  overflow-y:auto;font:12px/1.8 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:#a9b7c6}
+.log .t{color:#5f6b7a;margin-right:8px}
+.log .err{color:var(--err)}
+.log .ok{color:var(--ok)}
+.log .warn{color:var(--warn)}
+.log .hi{color:var(--acc2)}
+.tabs{display:flex;gap:6px;margin-bottom:0}
+.tab{padding:8px 14px;border-radius:8px 8px 0 0;font-size:12.5px;color:var(--sub);cursor:pointer;
+  border:1px solid transparent;background:transparent;border-bottom:none}
+.tab.on{background:#0a0d12;color:var(--txt);border-color:var(--line)}
+.pane{display:none;background:#0a0d12;border:1px solid var(--line);border-radius:0 8px 8px 8px;
+  padding:12px;max-height:380px;overflow:auto;white-space:pre-wrap;word-break:break-word;
+  font:12.5px/1.9 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:#c3cdd8}
+.pane.on{display:block}
+.stats{display:flex;gap:12px;flex-wrap:wrap;margin:2px 0 12px}
+.stat{background:#0d1117;border:1px solid var(--line);border-radius:8px;padding:8px 14px;min-width:100px}
+.stat .k{font-size:11px;color:var(--sub)}
+.stat .v{font-size:16px;font-weight:600;margin-top:2px}
+.hint{font-size:11.5px;color:#6b7885;margin-top:8px;line-height:1.8}
+.toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.right{margin-left:auto;display:flex;gap:8px}
+.toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(20px);background:#212a36;
+  border:1px solid var(--line);color:var(--txt);padding:10px 18px;border-radius:9px;font-size:13px;
+  opacity:0;pointer-events:none;transition:.25s;box-shadow:0 12px 30px rgba(0,0,0,.4);z-index:50}
+.toast.show{opacity:1;transform:translateX(-50%)}
+footer{color:#5c6773;font-size:11.5px;text-align:center;margin-top:26px;line-height:1.9}
+code{background:#0d1117;border:1px solid var(--line);padding:1px 5px;border-radius:4px;font-size:11.5px}
+@media(max-width:640px){.row{flex-direction:column}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="logo">🎬</div>
+    <div style="flex:1">
+      <h1>视频语音识别 · SRT 字幕生成器</h1>
+      <div class="sub">调用本地 ASR 服务转写视频音频，导出带词级时间戳的 SRT 字幕</div>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px" title="ASR 服务连接状态">
+      <span class="dot" id="statusDot"></span>
+      <span class="sub" id="statusText">检测中…</span>
+    </div>
+  </header>
+
+  <!-- 1. 服务地址 -->
+  <div class="card">
+    <h2>🔌 ASR 服务地址</h2>
+    <div class="row">
+      <div class="grow">
+        <label class="f">服务地址（/transcribe 接口）</label>
+        <input type="url" id="serverUrl" value="http://localhost:2233/transcribe" spellcheck="false" />
+      </div>
+      <div style="align-self:flex-end">
+        <button id="btnTest" class="btn-ghost">测试连接</button>
+      </div>
+    </div>
+    <div class="hint" id="healthInfo"></div>
+  </div>
+
+  <!-- 2. 选择文件 -->
+  <div class="card">
+    <h2>📁 选择视频 / 音频文件</h2>
+    <div class="drop" id="drop">
+      <div class="big">⬆️</div>
+      <div>拖拽文件到此处，或 <span style="color:var(--acc2)">点击选择</span></div>
+      <div class="hint" style="margin-top:8px">
+        支持 mp4 / mkv / mov / avi / flv / ts / webm / m4a / mp3 / flac / wav / ogg<br>
+        视频会由服务端 ffmpeg 自动提取音轨，无需手动转码
+      </div>
+    </div>
+    <input type="file" id="fileInput" hidden
+      accept="video/*,audio/*,.mp4,.mkv,.mov,.avi,.flv,.ts,.webm,.m4v,.wmv,.mp3,.m4a,.aac,.flac,.wav,.ogg,.opus" />
+    <div class="fileinfo" id="fileInfo" style="display:none">
+      <span>🎞️</span>
+      <span class="nm" id="fileName"></span>
+      <span class="badge" id="fileSize"></span>
+      <button class="btn-ghost" id="btnClearFile" style="padding:4px 10px;font-size:12px">清除</button>
+    </div>
+    <div class="adv">
+      <details>
+        <summary><span class="chev">▶</span> 高级选项</summary>
+        <div class="row" style="margin-top:12px">
+          <div style="flex:0 0 44%">
+            <label class="f">识别语言</label>
+            <select id="optLang">
+              <option value="">自动检测</option>
+              <option value="zh">中文</option>
+              <option value="en">英文</option>
+              <option value="ja">日语</option>
+              <option value="ko">韩语</option>
+              <option value="fr">法语</option>
+              <option value="de">德语</option>
+              <option value="es">西班牙语</option>
+              <option value="ru">俄语</option>
+            </select>
+          </div>
+          <div class="grow">
+            <label class="f">视频 ID（可选）— 用于服务端缓存音频与字幕，重复识别可秒回</label>
+            <input type="text" id="optVideoId" placeholder="留空则不启用缓存，如 BV1xx411c7mD" spellcheck="false" />
+          </div>
+        </div>
+        <div class="row" style="margin-top:12px">
+          <div class="grow">
+            <label class="f">上下文 / 领域提示词（可选）— 提升专业术语识别准确率</label>
+            <textarea id="optPrompt"
+              placeholder="例如：这是一段中文科技讲解视频，可能包含 AI、LLM、CUDA、美股等术语"></textarea>
+          </div>
+        </div>
+        <div class="row" style="margin-top:12px">
+          <div class="grow">
+            <label class="f">本地文件路径（可选）— 与上方上传二选一，需与本服务在同一台机器</label>
+            <input type="text" id="optPath" placeholder="例如 D:\Videos\demo.mp4 — 填写后无需再选文件" spellcheck="false" />
+          </div>
+        </div>
+      </details>
+    </div>
+  </div>
+
+  <!-- 3. 执行 -->
+  <div class="card">
+    <div class="toolbar">
+      <button id="btnStart" class="btn-acc btn-lg" disabled>▶ 开始识别</button>
+      <button id="btnCancel" class="btn-lg" disabled style="display:none">■ 取消</button>
+      <div class="right">
+        <span class="badge" id="timer">用时 0.0s</span>
+      </div>
+    </div>
+    <div class="log" id="log">
+      <div><span class="t">--:--:--</span>等待操作…选择文件（或填写本地路径）后点击「开始识别」。</div>
+    </div>
+  </div>
+
+  <!-- 4. 结果 -->
+  <div class="card" id="resultCard" style="display:none">
+    <h2>📄 识别结果</h2>
+    <div class="stats" id="stats" style="display:none"></div>
+    <div class="toolbar" style="margin-bottom:12px">
+      <button id="btnSrt" class="btn-acc">⬇ 下载 SRT 字幕</button>
+      <button id="btnTxt">⬇ 下载 TXT 文本</button>
+      <button id="btnCopy" class="btn-ghost">📋 复制当前内容</button>
+    </div>
+    <div class="tabs">
+      <div class="tab on" data-pane="txt">识别文本</div>
+      <div class="tab" data-pane="srt">SRT 字幕</div>
+    </div>
+    <div class="pane on" id="paneTxt"></div>
+    <div class="pane" id="paneSrt"></div>
+  </div>
+
+  <footer>
+    由本项目本地 ASR 服务驱动 · 长视频首次识别可能需要数分钟，页面会通过流式日志实时反馈进度<br>
+    接口：健康检查 <code>GET /health</code> · 转录 <code>POST /transcribe</code>
+  </footer>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+(function(){
+'use strict';
+
+var $ = function(id){ return document.getElementById(id); };
+var serverUrl = $('serverUrl'), btnTest = $('btnTest'), statusDot = $('statusDot'),
+    statusText = $('statusText'), healthInfo = $('healthInfo'),
+    drop = $('drop'), fileInput = $('fileInput'), fileInfo = $('fileInfo'),
+    fileName = $('fileName'), fileSize = $('fileSize'), btnClearFile = $('btnClearFile'),
+    optLang = $('optLang'), optVideoId = $('optVideoId'), optPrompt = $('optPrompt'),
+    optPath = $('optPath'),
+    btnStart = $('btnStart'), btnCancel = $('btnCancel'), timer = $('timer'),
+    logEl = $('log'), resultCard = $('resultCard'), statsEl = $('stats'),
+    btnSrt = $('btnSrt'), btnTxt = $('btnTxt'), btnCopy = $('btnCopy'),
+    paneTxt = $('paneTxt'), paneSrt = $('paneSrt'), toast = $('toast');
+
+var selectedFile = null;
+var abortCtrl = null;
+var resultData = { text: '', srt: '', language: '', duration: 0 };
+var t0 = 0, timerInt = null;
+
+/* ---------- 记住上次填写的服务地址 ---------- */
+var LS_KEY = 'asr_webui_server_url';
+try {
+  var saved = localStorage.getItem(LS_KEY);
+  if (saved) serverUrl.value = saved;
+} catch(e){}
+serverUrl.addEventListener('change', function(){
+  try { localStorage.setItem(LS_KEY, serverUrl.value.trim()); } catch(e){}
+  checkHealth();
+});
+
+function showToast(msg){
+  toast.textContent = msg;
+  toast.classList.add('show');
+  clearTimeout(toast._t);
+  toast._t = setTimeout(function(){ toast.classList.remove('show'); }, 2200);
+}
+
+function nowTime(){
+  var d = new Date();
+  function p(n){ return String(n).padStart(2,'0'); }
+  return p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds());
+}
+
+function logLine(text, cls){
+  var div = document.createElement('div');
+  if (cls) div.className = cls;
+  var ts = document.createElement('span');
+  ts.className = 't';
+  ts.textContent = nowTime();
+  div.appendChild(ts);
+  div.appendChild(document.createTextNode(text));
+  logEl.appendChild(div);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+function formatSize(b){
+  if (b < 1024) return b + ' B';
+  if (b < 1048576) return (b/1024).toFixed(1) + ' KB';
+  if (b < 1073741824) return (b/1048576).toFixed(1) + ' MB';
+  return (b/1073741824).toFixed(2) + ' GB';
+}
+
+/* 从 /transcribe 地址中取 origin，用于 /health 探测 */
+function originOf(url){
+  try { return new URL(url).origin; }
+  catch(e){
+    return url.replace(/\/(transcribe|v1\/audio\/transcriptions)\/?$/, '');
+  }
+}
+
+/* ---------- 健康检查 ---------- */
+async function checkHealth(silent){
+  var base = originOf(serverUrl.value.trim());
+  statusDot.className = 'dot busy';
+  statusText.textContent = '检测中…';
+  try {
+    var ctrl = new AbortController();
+    var t = setTimeout(function(){ ctrl.abort(); }, 8000);
+    var r = await fetch(base + '/health', { signal: ctrl.signal });
+    clearTimeout(t);
+    var j = await r.json();
+    if (j.model_loaded && j.status === 'ok') {
+      statusDot.className = 'dot ok';
+      statusText.textContent = '服务正常';
+      healthInfo.innerHTML = '模型已就绪 · ' + (j.model || 'unknown') +
+        ' · 设备 <code>' + (j.device || '-') + '</code> · 对齐模型：' +
+        (j.aligner ? '✅ 已加载（可生成词级时间戳）' : '❌ 未加载（时间戳为整段）');
+    } else {
+      statusDot.className = 'dot bad';
+      statusText.textContent = '模型未就绪';
+      healthInfo.textContent = j.status || '模型仍在初始化或加载失败，请查看服务日志';
+    }
+  } catch(e) {
+    statusDot.className = 'dot bad';
+    statusText.textContent = '无法连接';
+    if (!silent) healthInfo.textContent = '无法连接服务，请确认已运行 python scripts/whisper_server.py';
+  }
+}
+btnTest.addEventListener('click', function(){ checkHealth(false); });
+
+/* ---------- 文件选择 ---------- */
+function canStart(){ return !!selectedFile || optPath.value.trim() !== ''; }
+
+function setFile(f){
+  selectedFile = f;
+  fileName.textContent = f.name;
+  fileSize.textContent = formatSize(f.size);
+  fileInfo.style.display = 'flex';
+  btnStart.disabled = !canStart();
+  logLine('已选择文件：' + f.name + '（' + formatSize(f.size) + '）', 'hi');
+}
+
+drop.addEventListener('click', function(){ fileInput.click(); });
+fileInput.addEventListener('change', function(){
+  if (fileInput.files[0]) setFile(fileInput.files[0]);
+});
+['dragenter','dragover'].forEach(function(ev){
+  drop.addEventListener(ev, function(e){ e.preventDefault(); drop.classList.add('over'); });
+});
+['dragleave','drop'].forEach(function(ev){
+  drop.addEventListener(ev, function(e){ e.preventDefault(); drop.classList.remove('over'); });
+});
+drop.addEventListener('drop', function(e){
+  var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+  if (f) setFile(f);
+});
+['dragover','drop'].forEach(function(ev){
+  window.addEventListener(ev, function(e){ e.preventDefault(); });
+});
+btnClearFile.addEventListener('click', function(){
+  selectedFile = null;
+  fileInput.value = '';
+  fileInfo.style.display = 'none';
+  btnStart.disabled = !canStart();
+  logLine('已清除文件选择。');
+});
+optPath.addEventListener('input', function(){ btnStart.disabled = !canStart(); });
+
+/* ---------- 识别任务 ---------- */
+btnStart.addEventListener('click', startTranscribe);
+btnCancel.addEventListener('click', function(){
+  if (abortCtrl) { abortCtrl.abort(); logLine('正在取消任务…', 'err'); }
+});
+
+async function startTranscribe(){
+  var url = serverUrl.value.trim();
+  var localPath = optPath.value.trim();
+  if (!url) { showToast('请填写服务地址'); return; }
+  if (!canStart()) { showToast('请先选择文件，或填写本地文件路径'); return; }
+
+  abortCtrl = new AbortController();
+  btnStart.style.display = 'none';
+  btnCancel.style.display = '';
+  btnCancel.disabled = false;
+  resultCard.style.display = 'none';
+  statsEl.style.display = 'none';
+  logEl.innerHTML = '';
+  resultData = { text: '', srt: '', language: '', duration: 0 };
+
+  t0 = performance.now();
+  clearInterval(timerInt);
+  timerInt = setInterval(function(){
+    timer.textContent = '用时 ' + ((performance.now()-t0)/1000).toFixed(1) + 's';
+  }, 100);
+
+  logLine('开始提交任务 → ' + url, 'hi');
+
+  try {
+    var fd = new FormData();
+    if (localPath) {
+      fd.append('file_path', localPath);
+      logLine('使用本地文件路径：' + localPath);
+    } else if (selectedFile) {
+      fd.append('file', selectedFile, selectedFile.name || 'audio.mp4');
+      logLine('上传音频 / 视频数据（' + formatSize(selectedFile.size) + '）…');
+    }
+    fd.append('model', 'large-v2');
+    fd.append('response_format', 'json');
+    fd.append('stream', 'true');
+    if (optLang.value) fd.append('language', optLang.value);
+    if (optVideoId.value.trim()) fd.append('video_id', optVideoId.value.trim());
+    if (optPrompt.value.trim()) fd.append('initial_prompt', optPrompt.value.trim());
+
+    var resp = await fetch(url, { method: 'POST', body: fd, signal: abortCtrl.signal });
+    if (!resp.ok) {
+      var errText = await resp.text().catch(function(){ return ''; });
+      throw new Error('服务端返回 HTTP ' + resp.status + '：' + (errText.slice(0, 300) || '无详情'));
+    }
+    if (!resp.body) throw new Error('当前浏览器不支持流式读取响应');
+
+    await readStream(resp);
+
+    if (resultData.text) {
+      logLine('识别完成：语言 ' + (resultData.language || 'auto') +
+        '，耗时 ' + resultData.duration.toFixed(2) + 's，共 ' + resultData.text.length + ' 字', 'ok');
+      showResult();
+    } else {
+      throw new Error('未收到识别结果，请查看上方日志');
+    }
+  } catch(e) {
+    if (e.name === 'AbortError') {
+      logLine('任务已取消。', 'err');
+    } else {
+      logLine('❌ ' + (e.message || String(e)), 'err');
+    }
+  } finally {
+    clearInterval(timerInt);
+    timer.textContent = '用时 ' + ((performance.now()-t0)/1000).toFixed(1) + 's';
+    abortCtrl = null;
+    btnStart.style.display = '';
+    btnStart.disabled = !canStart();
+    btnCancel.style.display = 'none';
+    btnCancel.disabled = true;
+  }
+}
+
+/* 逐行解析服务端流：普通行为日志，JSON: 行为最终结果，ERROR: 行为错误 */
+async function readStream(resp){
+  var reader = resp.body.getReader();
+  var dec = new TextDecoder();
+  var buf = '';
+  while (true) {
+    var chunk = await reader.read();
+    if (chunk.done) break;
+    buf += dec.decode(chunk.value, { stream: true });
+    var idx;
+    while ((idx = buf.indexOf('\n')) >= 0) {
+      var line = buf.slice(0, idx).replace(/\r$/, '');
+      buf = buf.slice(idx + 1);
+      handleLine(line);
+    }
+  }
+  if (buf.trim()) handleLine(buf.trim());
+}
+
+function handleLine(line){
+  line = line.trim();
+  if (!line) return;
+  if (line.indexOf('JSON:') === 0) {
+    try {
+      var j = JSON.parse(line.slice(5));
+      resultData.text = j.text || '';
+      resultData.srt = j.srt || '';
+      resultData.language = j.language || '';
+      resultData.duration = Number(j.duration) || 0;
+    } catch(e) {
+      logLine('解析最终结果失败：' + e.message, 'err');
+    }
+  } else if (line.indexOf('ERROR:') === 0) {
+    logLine(line.slice(6), 'err');
+  } else {
+    logLine(line);
+  }
+}
+
+/* ---------- 结果展示 ---------- */
+function showResult(){
+  if (!resultData.srt && resultData.text) {
+    resultData.srt = inlineToSrt(resultData.text);
+    logLine('服务端未返回 SRT，已根据行内 [mm:ss] 时间戳在本地生成。', 'warn');
+  }
+  paneTxt.textContent = resultData.text || '(空)';
+  paneSrt.textContent = resultData.srt || '(空)';
+  resultCard.style.display = '';
+  statsEl.style.display = 'flex';
+  statsEl.innerHTML =
+    '<div class="stat"><div class="k">字幕条数</div><div class="v">' + countCues(resultData.srt) + '</div></div>' +
+    '<div class="stat"><div class="k">字符数</div><div class="v">' + resultData.text.length + '</div></div>' +
+    '<div class="stat"><div class="k">识别语言</div><div class="v">' + (resultData.language || 'auto') + '</div></div>' +
+    '<div class="stat"><div class="k">服务耗时</div><div class="v">' + resultData.duration.toFixed(1) + 's</div></div>';
+}
+
+function countCues(srt){
+  if (!srt) return 0;
+  var m = srt.match(/^\d+\s*$/gm);
+  return m ? m.length : 0;
+}
+
+Array.prototype.forEach.call(document.querySelectorAll('.tab'), function(t){
+  t.addEventListener('click', function(){
+    Array.prototype.forEach.call(document.querySelectorAll('.tab'), function(x){ x.classList.remove('on'); });
+    Array.prototype.forEach.call(document.querySelectorAll('.pane'), function(x){ x.classList.remove('on'); });
+    t.classList.add('on');
+    var pane = t.getAttribute('data-pane');
+    $('pane' + pane.charAt(0).toUpperCase() + pane.slice(1)).classList.add('on');
+  });
+});
+
+btnCopy.addEventListener('click', function(){
+  var active = document.querySelector('.pane.on');
+  var txt = active ? active.textContent : '';
+  function fallback(){
+    var ta = document.createElement('textarea');
+    ta.value = txt;
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand('copy'); showToast('已复制到剪贴板'); }
+    catch(e2){ showToast('复制失败，请手动选择复制'); }
+    document.body.removeChild(ta);
+  }
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(txt).then(function(){ showToast('已复制到剪贴板'); }).catch(fallback);
+  } else {
+    fallback();
+  }
+});
+
+function download(name, content){
+  var blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); }, 500);
+  showToast('已开始下载 ' + name);
+}
+
+function baseName(){
+  if (optVideoId.value.trim()) return optVideoId.value.trim();
+  if (selectedFile) return selectedFile.name.replace(/\.[^.]+$/, '');
+  var d = new Date();
+  function p(n){ return String(n).padStart(2,'0'); }
+  return 'subtitle_' + d.getFullYear() + p(d.getMonth()+1) + p(d.getDate()) +
+    '_' + p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds());
+}
+
+btnSrt.addEventListener('click', function(){
+  if (!resultData.srt) { showToast('暂无 SRT 内容'); return; }
+  download(baseName() + '.srt', resultData.srt.replace(/\r/g, '') + '\n');
+});
+btnTxt.addEventListener('click', function(){
+  if (!resultData.text) { showToast('暂无文本内容'); return; }
+  download(baseName() + '.txt', resultData.text + '\n');
+});
+
+/* ---------- 行内 [mm:ss] 文本 -> SRT（服务端未返回 srt 时的兜底） ---------- */
+function parseInlineTime(s){
+  var parts = s.split(':').map(Number);
+  if (parts.length === 2) return parts[0] * 60 + parts[1];
+  if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+  return 0;
+}
+
+function toSrtTime(sec){
+  sec = Math.max(0, sec);
+  var ms = Math.round(sec * 1000);
+  var h = Math.floor(ms / 3600000);
+  var m = Math.floor(ms % 3600000 / 60000);
+  var s = Math.floor(ms % 60000 / 1000);
+  var mm = ms % 1000;
+  function p(n){ return String(n).padStart(2,'0'); }
+  return p(h) + ':' + p(m) + ':' + p(s) + ',' + String(mm).padStart(3,'0');
+}
+
+function inlineToSrt(text){
+  var cues = [];
+  String(text).split('\n').forEach(function(raw){
+    var m = raw.match(/^\[([0-9:]+)\]\s*(.*)$/);
+    if (!m) return;
+    cues.push({ start: parseInlineTime(m[1]), text: m[2].trim() });
+  });
+  if (!cues.length) return '';
+  return cues.map(function(c, i){
+    var next = cues[i+1] ? cues[i+1].start : null;
+    var end;
+    if (next !== null) {
+      end = Math.max(next, c.start + 0.4);
+      if (end - c.start > 12) end = c.start + 12;
+    } else {
+      end = c.start + 5;
+    }
+    return (i+1) + '\n' + toSrtTime(c.start) + ' --> ' + toSrtTime(end) + '\n' + c.text + '\n';
+  }).join('\n');
+}
+
+checkHealth(true);
+})();
+</script>
+</body>
+</html>

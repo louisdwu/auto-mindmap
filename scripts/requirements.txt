@@ -1,6 +1,21 @@
+# === 服务端框架 ===
 fastapi
 uvicorn
-faster-whisper
 python-multipart
-tqdm
-# 不需要手动指定 torch，faster-whisper 会根据环境自动处理依赖
+requests
+soundfile
+numpy
+
+# === 引擎依赖（两个都装上，按需切换）===
+# 默认引擎 faster-whisper 必须装；不装则服务启动会报模型加载失败
+faster-whisper>=1.2.0
+
+# 备用引擎 Qwen3-ASR（ASR_ENGINE=qwen3 时才用到）
+qwen-asr
+transformers>=4.57
+
+# === 说明 ===
+# 1. torch 请按你的 CUDA 版本单独安装（RTX 2080 Ti / Turing 建议 CUDA 12.x 对应 torch 2.x）
+#    例如：pip install torch --index-url https://download.pytorch.org/whl/cu121
+# 2. ffmpeg 需可用（本项目默认复用 卡卡字幕助手 自带的 ffmpeg.exe）
+# 3. 详细引擎参数见 scripts/ENGINE_PARAMS.md
