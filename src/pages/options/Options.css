@@ -811,3 +811,47 @@ input:checked + .switch-label:before {
   box-shadow: var(--shadow-sm);
   background: rgba(99, 102, 241, 0.01);
 }
+
+/* === ASR 服务状态与显存面板 === */
+.asr-status-panel {
+  margin-top: 12px;
+  padding: 14px 16px;
+  background: #f8fafc;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+}
+.asr-status-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.asr-status-row .status-dot {
+  margin-right: 0;
+  flex-shrink: 0;
+}
+.asr-status-text {
+  font-size: 14px;
+  color: var(--text-main);
+  font-weight: 500;
+}
+.asr-status-detail {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+.asr-status-actions {
+  margin-top: 12px;
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.asr-status-msg {
+  margin-top: 10px;
+  font-size: 12px;
+  color: #075985;
+  background: #f0f9ff;
+  border: 1px solid #e0f2fe;
+  padding: 6px 10px;
+  border-radius: 6px;
+}

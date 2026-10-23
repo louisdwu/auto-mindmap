@@ -16,7 +16,21 @@ HTTP 接口契约与旧版（Faster-Whisper 后端）**完全不变**，
   POST /transcribe                  （支持 stream 流式日志）
   POST /v1/audio/transcriptions     （OpenAI 兼容，支持 stream）
   GET  /v1/models
-  GET  /health
+  GET  /health                      （含 model_loaded / in_flight / idle_seconds 等）
+  POST /unload                      手动卸载模型、立即归还显存（服务继续运行）
+  POST /shutdown                    手动关停服务进程（彻底退出）
+  POST /cache/cleanup               手动清理过期 .mp3 音频缓存
+
+模型加载策略（默认惰性，平时不占显存）：
+  * 启动时不加载模型；首次 /transcribe（或 /v1/audio/transcriptions）时按需加载。
+  * 空闲超过 ASR_IDLE_UNLOAD_SEC（默认 900s）自动卸载、归还显存；0=关闭。
+  * 缓存命中（同 video_id 的 .txt）会在加载模型前直接返回，故命中不触显存。
+  * 设 ASR_EAGER_LOAD=1 可回到旧版「启动即加载」。
+
+音频缓存策略：
+  * cache/*.txt 与 *.srt 体积小且命中可免加载模型，长期保留。
+  * cache/*.mp3 体积大，仅按 ASR_MP3_TTL_DAYS（默认 7 天）回收；0=不清理。
+    启动时清一次，之后每 ASR_MP3_CLEANUP_INTERVAL_SEC（默认 86400s）周期清理。
 
 网页版前端：浏览器直接访问 http://<host>:2233 即为
 「视频语音识别 / SRT 字幕生成器」（scripts/asr_webui.html）。
@@ -170,23 +184,133 @@ engine = create_engine(ENGINE_NAME)
 
 
 def load_model():
-    """加载当前选定的引擎模型。"""
+    """加载当前选定的引擎模型，成功返回 True。"""
     return bool(engine.load())
 
 
-# 导入本模块即完成初始化（CLI 与 uvicorn 两条路径都需要模型就绪）
-# 冒烟测试可用 _BOOT_GUARD=1 跳过模型加载，只做接口契约校验。
-if os.getenv("_BOOT_GUARD") != "1":
-    load_model()
+# ------------------------------------------------------------------ #
+# 模型生命周期：惰性加载 + 空闲自动卸载
+# ------------------------------------------------------------------ #
+# 设计目标：平时不占显存。HTTP 服务常驻（开销极小，不占 GPU 显存），
+# 模型在「首次需要转录时」按需加载，空闲超过 ASR_IDLE_UNLOAD_SEC 秒后
+# 自动卸载、归还显存。可用 POST /unload 手动卸载，POST /shutdown 关停。
+# 如需回到旧版「启动即加载」，设 ASR_EAGER_LOAD=1。
+_EAGER_LOAD = os.getenv("ASR_EAGER_LOAD", "0") == "1"
+_IDLE_UNLOAD_SEC = int(os.getenv("ASR_IDLE_UNLOAD_SEC", "900"))   # 默认 15 分钟；0 = 关闭自动卸载
+_IDLE_CHECK_SEC = max(5, int(os.getenv("ASR_IDLE_CHECK_SEC", "30")))
 
+_MODEL_LOCK = threading.Lock()
+_IN_FLIGHT = 0
+_LAST_ACTIVITY = time.time()
+
+
+def _mark_activity():
+    global _LAST_ACTIVITY
+    _LAST_ACTIVITY = time.time()
+
+
+def ensure_model_loaded():
+    """首次需要模型时按需加载（线程安全、幂等）。
+
+    返回 True 表示模型已就绪；返回 False 表示加载失败（调用方应回 503）。
+    """
+    global _LAST_ACTIVITY
+    with _MODEL_LOCK:
+        _mark_activity()
+        if engine.is_loaded:
+            return True
+        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] 模型未加载，按需启动加载...")
+        ok = load_model()
+        _mark_activity()
+        if not ok:
+            print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] 模型按需加载失败。"
+                  "请检查上方错误日志，或设置 ASR_ENGINE 切换引擎。")
+        return ok
+
+
+def _enter_inference():
+    """标记一次推理开始（占用模型，阻止空闲看门狗在转录途中卸载）。"""
+    global _IN_FLIGHT
+    with _MODEL_LOCK:
+        _IN_FLIGHT += 1
+        _mark_activity()
+
+
+def _exit_inference():
+    """标记一次推理结束。"""
+    global _IN_FLIGHT
+    with _MODEL_LOCK:
+        _IN_FLIGHT = max(0, _IN_FLIGHT - 1)
+        _mark_activity()
+
+
+def unload_model():
+    """卸载模型、归还显存（空闲看门狗与 POST /unload 共用）。
+
+    有推理进行中（_IN_FLIGHT>0）时不卸载，返回 False。
+    """
+    with _MODEL_LOCK:
+        if not engine.is_loaded:
+            return False
+        if _IN_FLIGHT > 0:
+            return False
+        try:
+            engine.unload()
+            print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] 模型已卸载，显存已归还。")
+        except Exception as e:
+            print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] 卸载模型时发生异常: {e}")
+        _mark_activity()
+        return True
+
+
+def _idle_unload_watcher():
+    """后台守护线程：空闲超时自动卸载模型，释放显存。"""
+    while True:
+        time.sleep(_IDLE_CHECK_SEC)
+        if _IDLE_UNLOAD_SEC <= 0:
+            continue
+        with _MODEL_LOCK:
+            loaded = engine.is_loaded
+            in_flight = _IN_FLIGHT
+            idle_for = time.time() - _LAST_ACTIVITY
+        if loaded and in_flight == 0 and idle_for >= _IDLE_UNLOAD_SEC:
+            print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] 空闲 {int(idle_for)}s 超过阈值 "
+                  f"{_IDLE_UNLOAD_SEC}s，自动卸载模型释放显存。")
+            unload_model()
+
+
+# ------------------------------------------------------------------ #
+# 启动模式：默认惰性加载（平时不占显存），ASR_EAGER_LOAD=1 回到旧版启动即加载。
+# 冒烟测试仍用 _BOOT_GUARD=1 跳过模型加载，只做接口契约校验。
+# ------------------------------------------------------------------ #
+if os.getenv("_BOOT_GUARD") == "1":
     print("=" * 60)
-    print(f"ASR 引擎: {engine.name}  ({engine.display_name})")
+    print(f"ASR 引擎: {engine.name}  ({engine.display_name})  [BOOT_GUARD：跳过模型加载]")
+    print(f"网页版字幕生成器: http://127.0.0.1:{SERVER_PORT}")
+    print("=" * 60)
+elif _EAGER_LOAD:
+    load_model()
+    print("=" * 60)
+    print(f"ASR 引擎: {engine.name}  ({engine.display_name})  [EAGER：启动即加载]")
     print(f"模型加载: {'成功' if engine.is_loaded else '失败'}")
     if not engine.is_loaded:
         print("提示: 模型未加载成功，请检查上方错误日志，"
               "或设置 ASR_ENGINE 切换到其他引擎")
-    print(f"网页版字幕生成器: http://127.0.0.1:{SERVER_PORT}  (浏览器打开即可选视频生成 SRT)")
+    print(f"网页版字幕生成器: http://127.0.0.1:{SERVER_PORT}")
     print("=" * 60)
+else:
+    print("=" * 60)
+    print(f"ASR 引擎: {engine.name}  ({engine.display_name})  [LAZY：按需加载，平时不占显存]")
+    if _IDLE_UNLOAD_SEC > 0:
+        print(f"模型: 首次转录时自动加载；空闲 {_IDLE_UNLOAD_SEC}s 自动卸载释放显存")
+    else:
+        print("模型: 首次转录时自动加载；空闲自动卸载已关闭")
+    print("手动卸载显存: POST /unload    手动关停服务: POST /shutdown")
+    print(f"网页版字幕生成器: http://127.0.0.1:{SERVER_PORT}")
+    print("=" * 60)
+
+# 启动空闲卸载看门狗（守护线程，随进程退出）
+threading.Thread(target=_idle_unload_watcher, name="asr-idle-unload", daemon=True).start()
 
 
 # ------------------------------------------------------------------ #
@@ -205,10 +329,61 @@ def next_infer_index():
 
 
 # ------------------------------------------------------------------ #
+# .mp3 音频缓存 TTL 清理（仅清大体积音频；.txt/.srt 体积小且命中可免加载，保留）
+# ------------------------------------------------------------------ #
+CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cache")
+_MP3_TTL_DAYS = float(os.getenv("ASR_MP3_TTL_DAYS", "7"))        # 0 = 不清理
+_MP3_CLEANUP_INTERVAL_SEC = int(os.getenv("ASR_MP3_CLEANUP_INTERVAL_SEC", "86400"))
+
+
+def cleanup_mp3_cache():
+    """删除 cache/ 下超过 TTL 的 .mp3 音频缓存文件。
+
+    .mp3 体积大、仅在重新转录同一视频时省一次下载/ffmpeg，价值有限，故按 TTL 回收；
+    .txt / .srt 体积小且命中即可免加载模型（不触显存），一律保留。返回删除数量。
+    """
+    if _MP3_TTL_DAYS <= 0:
+        return 0
+    if not os.path.isdir(CACHE_DIR):
+        return 0
+    cutoff = time.time() - _MP3_TTL_DAYS * 86400
+    removed = 0
+    try:
+        for name in os.listdir(CACHE_DIR):
+            if not name.lower().endswith(".mp3"):
+                continue
+            path = os.path.join(CACHE_DIR, name)
+            try:
+                if os.path.isfile(path) and os.path.getmtime(path) < cutoff:
+                    os.remove(path)
+                    removed += 1
+            except Exception:
+                pass
+    except Exception:
+        pass
+    if removed:
+        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] 清理过期 .mp3 音频缓存："
+              f"删除 {removed} 个（TTL={_MP3_TTL_DAYS} 天）。")
+    return removed
+
+
+def _mp3_cleanup_watcher():
+    """后台守护线程：周期性清理过期 .mp3 音频缓存。"""
+    while True:
+        time.sleep(_MP3_CLEANUP_INTERVAL_SEC)
+        cleanup_mp3_cache()
+
+
+# 启动时清理一次过期音频缓存，并启动周期清理守护线程（ASR_MP3_TTL_DAYS=0 关闭）
+cleanup_mp3_cache()
+threading.Thread(target=_mp3_cleanup_watcher, name="asr-mp3-cleanup", daemon=True).start()
+
+
+# ------------------------------------------------------------------ #
 # 缓存路径与音频获取（供普通 / 流式共用）
 # ------------------------------------------------------------------ #
 def _cache_paths(video_id):
-    cache_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cache")
+    cache_dir = CACHE_DIR
     safe_video_id = (
         "".join(c for c in video_id if c.isalnum() or c in "-_") if video_id else None
     )
@@ -298,8 +473,15 @@ def _log_infer_start(infer_idx, language_code, context):
 
 
 async def _run_engine(audio_path, language_code, context):
-    """在线程池中执行引擎转录（避免阻塞 uvicorn 单线程事件循环）。"""
-    return await asyncio.to_thread(engine.transcribe, audio_path, language_code, context)
+    """在线程池中执行引擎转录（避免阻塞 uvicorn 单线程事件循环）。
+
+    期间登记「推理进行中」，防止空闲看门狗在转录途中卸载模型。
+    """
+    _enter_inference()
+    try:
+        return await asyncio.to_thread(engine.transcribe, audio_path, language_code, context)
+    finally:
+        _exit_inference()
 
 
 # ------------------------------------------------------------------ #
@@ -352,11 +534,13 @@ async def do_transcribe(
             except Exception as e:
                 print(f"[{time.strftime('%H:%M:%S')}] 读取字幕文本缓存失败: {e}，将重新识别")
 
+    # 模型按需加载：缓存未命中且确实需要推理时，才把模型载入显存
     if not engine.is_loaded:
-        return JSONResponse(
-            status_code=503,
-            content={"error": "模型尚未加载或加载失败，请检查服务器日志"},
-        )
+        if not ensure_model_loaded():
+            return JSONResponse(
+                status_code=503,
+                content={"error": "模型加载失败，请检查服务器日志（首次加载约需 10-20s）"},
+            )
 
     try:
         logs = []
@@ -564,9 +748,12 @@ async def _transcribe_stream(
                     yield out(f"[{time.strftime('%H:%M:%S')}] 读取缓存失败: {e}，将重新识别")
 
             if not engine.is_loaded:
-                yield out("ERROR:" + json.dumps(
-                    {"error": "模型尚未加载或加载失败，请检查服务器日志"}, ensure_ascii=False))
-                return
+                yield out(f"[{time.strftime('%H:%M:%S')}] 模型未加载，正在按需加载（首次约 10-20s）...")
+                if not ensure_model_loaded():
+                    yield out("ERROR:" + json.dumps(
+                        {"error": "模型加载失败，请检查服务器日志"}, ensure_ascii=False))
+                    return
+                yield out(f"[{time.strftime('%H:%M:%S')}] 模型加载完成，开始识别。")
 
             # 2. 获取音频
             logs = []
@@ -684,10 +871,65 @@ async def list_models():
 # ------------------------------------------------------------------ #
 @app.get("/health")
 async def health():
+    with _MODEL_LOCK:
+        in_flight = _IN_FLIGHT
+        idle_for = int(time.time() - _LAST_ACTIVITY)
     return {
         "status": "ok" if engine.is_loaded else "model_not_loaded",
         "model_loaded": bool(engine.is_loaded),
+        "in_flight": in_flight,
+        "idle_seconds": idle_for,
+        "idle_unload_sec": _IDLE_UNLOAD_SEC,
+        "eager_load": _EAGER_LOAD,
         **engine.describe(),
+    }
+
+
+# ------------------------------------------------------------------ #
+# 接口 5：/unload  手动卸载模型、立即归还显存（服务进程继续运行，
+#               下次请求自动重载）。对应「平时不占显存」的核心动作。
+# ------------------------------------------------------------------ #
+@app.post("/unload")
+async def unload_endpoint():
+    freed = unload_model()
+    with _MODEL_LOCK:
+        loaded = engine.is_loaded
+        in_flight = _IN_FLIGHT
+    return {
+        "unloaded": freed,
+        "model_loaded": loaded,
+        "in_flight": in_flight,
+        "note": "模型已卸载，显存已归还；下次转录将自动重新加载。"
+                if freed else "无可卸载模型（未加载或正在推理中）。",
+    }
+
+
+# ------------------------------------------------------------------ #
+# 接口 6：/shutdown  手动关停整个 ASR 服务进程（彻底退出，显存与进程一并释放）。
+# ------------------------------------------------------------------ #
+@app.post("/shutdown")
+async def shutdown_endpoint():
+    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] 收到 POST /shutdown，服务进程即将退出。")
+
+    def _do_exit():
+        time.sleep(0.5)  # 让响应先发回客户端再退出
+        os._exit(0)
+
+    threading.Thread(target=_do_exit, name="asr-shutdown", daemon=True).start()
+    return {"shutting_down": True}
+
+
+# ------------------------------------------------------------------ #
+# 接口 7：/cache/cleanup  手动清理过期 .mp3 音频缓存（自动清理之外按需触发）。
+# ------------------------------------------------------------------ #
+@app.post("/cache/cleanup")
+async def cache_cleanup_endpoint():
+    removed = cleanup_mp3_cache()
+    return {
+        "removed": removed,
+        "ttl_days": _MP3_TTL_DAYS,
+        "note": f"已删除 {removed} 个过期 .mp3（TTL={_MP3_TTL_DAYS} 天）。"
+                if _MP3_TTL_DAYS > 0 else "TTL 已关闭（ASR_MP3_TTL_DAYS=0），未清理。",
     }
 
 
@@ -718,18 +960,21 @@ if __name__ == "__main__":
         if not os.path.exists(args.file_path):
             print(f"错误：文件不存在 {args.file_path}")
             sys.exit(1)
-        if not engine.is_loaded:
-            print("错误：引擎模型未加载成功，请检查上方日志。")
+        if not ensure_model_loaded():
+            print("错误：引擎模型加载失败，请检查上方日志。")
             sys.exit(1)
 
         language_code, context = _prepare_request(None, None)
         print(f"开始转录：{args.file_path}  (引擎: {engine.display_name})")
+        _enter_inference()
         try:
             res = engine.transcribe(args.file_path, language_code, context)
         except Exception as e:
             traceback.print_exc()
             print(f"转录失败：{e}")
             sys.exit(1)
+        finally:
+            _exit_inference()
 
         base = os.path.splitext(args.file_path)[0]
         txt_path = base + ".txt"
