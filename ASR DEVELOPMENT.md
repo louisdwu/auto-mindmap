@@ -103,8 +103,10 @@ D:\Green\卡卡字幕助手VideoCaptioner\AppData\models\
 start_asr_server.bat          :: 或 run_whisper.bat
 ```
 
-启动横幅会打印当前引擎、模型、Web UI 地址。**浏览器打开 `http://localhost:2233`**
+启动横幅会打印当前引擎、模型、Web UI 地址，并标注加载模式（默认 `[LAZY：按需加载，平时不占显存]`）。**浏览器打开 `http://localhost:2233`**
 即为网页版「视频语音识别 / SRT 字幕生成器」。
+
+> 默认启动后模型并不在显存里，首次识别某视频时才加载；用完空闲 15 分钟自动卸载（详见 3.6.1）。
 
 拖拽本地文件直接转录（同时导出 `.txt` + `.srt`）：
 
@@ -120,9 +122,34 @@ run_whisper.bat D:\Videos\a.mp4
 | `POST /transcribe` | 主接口，`stream=true` 返回流式日志 + `JSON:{text,srt}` |
 | `POST /v1/audio/transcriptions` | OpenAI 兼容，插件端在用 |
 | `GET /v1/models` | 模型列表（保留 `large-v2` / `whisper-1` 供扩展端探测） |
-| `GET /health` | 引擎、模型、设备、参数一览 |
+| `GET /health` | 引擎、模型、设备、参数一览；另含 `model_loaded` / `in_flight` / `idle_seconds` / `idle_unload_sec` |
+| `POST /unload` | 手动卸载模型、立即归还显存（服务进程继续运行，下次请求自动重载） |
+| `POST /shutdown` | 手动关停整个服务进程（显存与进程一起释放） |
+| `POST /cache/cleanup` | 手动清理过期的 `.mp3` 音频缓存（自动清理之外按需触发） |
 
 > 返回的 `text` 字段**保留行内 `[mm:ss]` 前缀**，兼容扩展端缓存校验与思维导图时间戳引用。
+
+### 3.6.1 惰性加载与显存（默认行为：平时不占显存）
+
+为避免模型常驻占满显存，服务默认采用**惰性加载 + 空闲自动卸载**：
+
+- **启动不加载模型**：HTTP 服务起来即可用，显存为空（仅占百来 MB 内存）。
+- **按需加载**：首次 `/transcribe`（缓存未命中时）才把模型载入显存，首次约 10–20s 预热；同进程后续推理即时返回。
+- **空闲自动卸载**：超过 `ASR_IDLE_UNLOAD_SEC`（默认 **900s / 15 分钟**）无推理请求，自动卸载模型、归还显存；设为 `0` 关闭自动卸载。
+- **缓存命中不触显存**：同一 `video_id` 命中 `cache/*.txt` 时在加载模型前直接返回，因此重复识别同一视频既秒回又不占显存。
+- **手动控制**：`POST /unload` 立即释放显存；`POST /shutdown` 关停进程。
+
+相关环境变量：
+
+| 变量 | 默认 | 作用 |
+|---|---|---|
+| `ASR_EAGER_LOAD` | `0` | 设 `1` 回到旧版「启动即加载模型」 |
+| `ASR_IDLE_UNLOAD_SEC` | `900` | 空闲多少秒后自动卸载；`0` = 不自动卸载 |
+| `ASR_IDLE_CHECK_SEC` | `30` | 看门狗检查间隔（最小 5s） |
+| `ASR_MP3_TTL_DAYS` | `7` | `.mp3` 音频缓存保留天数，过期自动删除；`0` = 不清理 |
+| `ASR_MP3_CLEANUP_INTERVAL_SEC` | `86400` | `.mp3` 周期清理间隔（默认每天） |
+
+> 缓存取舍：`cache/*.txt` 与 `*.srt` 体积小、命中即可免加载模型（不触显存），长期保留；`cache/*.mp3` 体积大、仅重新转录同一视频时省一次下载，故按 TTL 回收。
 
 ### 3.7 冒烟测试（不加载模型，不占 GPU）
 

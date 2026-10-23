@@ -52,6 +52,29 @@ class ASREngine(abc.ABC):
         """加载模型。默认实现直接标记为已加载（子类一般覆盖）。"""
         return True
 
+    def unload(self) -> None:
+        """卸载模型、归还显存。
+
+        默认实现把 ``self.model`` 置空并强制回收：CTranslate2 / PyTorch
+        对象被 GC 时即释放其占用的 GPU 显存。服务端的空闲看门狗与
+        ``POST /unload`` 调用本方法，从而实现「平时不占显存」。
+
+        子类若额外缓存了 processor / tokenizer / 对齐器等对象，可在覆盖
+        版里一并置空（再调用 ``super().unload()``）。
+        """
+        self.model = None
+        import gc
+        gc.collect()
+        # PyTorch 引擎（qwen3）会分配 CUDA 缓存块，empty_cache 归还之；
+        # faster-whisper（CTranslate2）模型析构时已自行归还显存，
+        # 这里仅作无副作用的兜底（torch 未安装时静默跳过）。
+        try:
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except Exception:
+            pass
+
     @abc.abstractmethod
     def transcribe(self, audio_path: str, language=None, context=None) -> dict:
         """同步转录。

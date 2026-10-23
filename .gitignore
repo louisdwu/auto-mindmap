@@ -47,3 +47,7 @@ __pycache__/
 
 # Local model backups (keep out of version control)
 scripts/*.bak
+
+# Research reference project (third-party code I cloned for reading only)
+# and any notes I write while studying it — never push these to GitHub.
+research/
