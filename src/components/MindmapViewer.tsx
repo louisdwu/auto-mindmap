@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { MindmapRenderer } from './MindmapRenderer';
 import { MindmapStyle } from '../types/mindmap';
 import { VideoUtils } from '../utils/videoUtils';
+import { MindmapViewStateService } from '../services/mindmapViewState';
 
 interface MindmapViewerProps {
   mindmapData: {
@@ -70,6 +71,13 @@ export const MindmapViewer: React.FC<MindmapViewerProps> = ({
   };
 
   const markdown = cleanMarkdown(rawMarkdown);
+
+  // 视图状态缓存键：同一份导图内容（同一 Markdown）复用同一份展开/视图状态，
+  // 使「点击时间戳跳转后重新打开」能回到之前的展开现场；内容变化即视为新导图
+  const viewStateKey = useMemo(
+    () => MindmapViewStateService.createKey(markdown),
+    [markdown]
+  );
 
   const handleCopy = async () => {
     try {
@@ -148,6 +156,7 @@ export const MindmapViewer: React.FC<MindmapViewerProps> = ({
                 <MindmapRenderer
                   markdown={markdown}
                   styleName={style}
+                  viewStateKey={viewStateKey}
                   onNodeClick={(node) => { console.log('Node clicked:', node); }}
                   onTimestampClick={(_timestamp, seconds) => {
                     VideoUtils.seekVideoTo(seconds);

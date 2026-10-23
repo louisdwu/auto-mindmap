@@ -1,11 +1,14 @@
-import { useState, useCallback, useEffect, RefObject } from 'react';
-import { INodeData, parseMarkdown } from '../utils/markdownParser';
+import { useState, useCallback, useEffect, useRef, RefObject } from 'react';
+import { INodeData, parseMarkdown, applyExpandedState, collectExpandedIds } from '../utils/markdownParser';
 import { calculateLayout, calculateLayoutBounds, NodePosition, LayoutOptions } from '../utils/layout';
+import { MindmapViewStateService } from '../services/mindmapViewState';
 
 interface UseMindmapLayoutProps {
   markdown: string;
   layoutOptions: LayoutOptions;
   containerRef: RefObject<HTMLDivElement>;
+  /** 视图状态缓存键；提供时自动恢复/保存展开状态与画布位置 */
+  viewStateKey?: string;
 }
 
 interface TreeNode extends INodeData {
@@ -19,7 +22,8 @@ interface TreeNode extends INodeData {
 export const useMindmapLayout = ({
   markdown,
   layoutOptions,
-  containerRef
+  containerRef,
+  viewStateKey
 }: UseMindmapLayoutProps) => {
   const [treeData, setTreeData] = useState<TreeNode | null>(null);
   const [positions, setPositions] = useState<Map<string, NodePosition>>(new Map());
@@ -39,15 +43,22 @@ export const useMindmapLayout = ({
     };
   }, []);
 
-  // 解析 Markdown
+  // 解析 Markdown（并还原上次保存的展开状态）
   useEffect(() => {
     if (!markdown) {
       setTreeData(null);
       return;
     }
-    const parsed = parseMarkdown(markdown);
+    const snapshot = MindmapViewStateService.get(viewStateKey);
+    const expandedIds = snapshot ? new Set(snapshot.expandedIds) : null;
+    const parsed = applyExpandedState(parseMarkdown(markdown), expandedIds);
     setTreeData(convertToTreeNode(parsed));
-  }, [markdown, convertToTreeNode]);
+  }, [markdown, viewStateKey, convertToTreeNode]);
+
+  // 切换导图时重新执行初始视图适配
+  useEffect(() => {
+    setIsInitialized(false);
+  }, [viewStateKey]);
 
   // 计算布局
   useEffect(() => {
@@ -56,8 +67,16 @@ export const useMindmapLayout = ({
     const layout = calculateLayout(treeData as unknown as INodeData, layoutOptions);
     setPositions(layout);
 
-    // 初始加载时的自动缩放和居中逻辑
+    // 初始加载时的视图定位：优先还原缓存，其次自动缩放并居中
     if (!isInitialized && containerRef.current) {
+      const snapshot = MindmapViewStateService.get(viewStateKey);
+      if (snapshot && typeof snapshot.scale === 'number' && snapshot.offset) {
+        setScale(snapshot.scale);
+        setOffset({ x: snapshot.offset.x, y: snapshot.offset.y });
+        setIsInitialized(true);
+        return;
+      }
+
       const bounds = calculateLayoutBounds(layout);
       const container = containerRef.current;
       const { clientHeight: ch } = container;
@@ -94,7 +113,35 @@ export const useMindmapLayout = ({
         setIsInitialized(true);
       }
     }
-  }, [treeData, layoutOptions, isInitialized, containerRef]);
+  }, [treeData, layoutOptions, isInitialized, containerRef, viewStateKey]);
+
+  // 保存视图状态：展开状态 + 画布位置，供下次挂载还原
+  useEffect(() => {
+    if (!viewStateKey || !isInitialized || !treeData) return;
+    MindmapViewStateService.save(viewStateKey, {
+      expandedIds: collectExpandedIds(treeData),
+      scale,
+      offset
+    });
+  }, [viewStateKey, isInitialized, treeData, scale, offset]);
+
+  // 卸载前兜底保存：避免「展开节点后立刻点时间戳关闭视图」时丢失最后一次变更
+  const latestStateRef = useRef({ viewStateKey, treeData, scale, offset, isInitialized });
+  useEffect(() => {
+    latestStateRef.current = { viewStateKey, treeData, scale, offset, isInitialized };
+  }, [viewStateKey, treeData, scale, offset, isInitialized]);
+
+  useEffect(() => {
+    return () => {
+      const latest = latestStateRef.current;
+      if (!latest.viewStateKey || !latest.isInitialized || !latest.treeData) return;
+      MindmapViewStateService.save(latest.viewStateKey, {
+        expandedIds: collectExpandedIds(latest.treeData),
+        scale: latest.scale,
+        offset: latest.offset
+      });
+    };
+  }, []);
 
   // 递归查找节点
   const findNode = useCallback((node: TreeNode, targetId: string): TreeNode | null => {
