@@ -22,6 +22,8 @@ interface MindmapRendererProps {
   layoutOptions?: Partial<LayoutOptions>;
   styleName?: MindmapStyle;
   viewerActions?: ViewerActions;
+  /** 视图状态缓存键；提供后重新挂载时还原展开状态与画布位置 */
+  viewStateKey?: string;
 }
 
 export const MindmapRenderer: React.FC<MindmapRendererProps> = ({
@@ -30,7 +32,8 @@ export const MindmapRenderer: React.FC<MindmapRendererProps> = ({
   onTimestampClick,
   layoutOptions: userLayoutOptions,
   styleName = 'modern',
-  viewerActions
+  viewerActions,
+  viewStateKey
 }) => {
   const [fontSizeBase, setFontSizeBase] = React.useState(1.0);
 
@@ -86,7 +89,7 @@ export const MindmapRenderer: React.FC<MindmapRendererProps> = ({
     expandingNodeId,
     setExpandingNodeId,
     findNode
-  } = useMindmapLayout({ markdown, layoutOptions, containerRef });
+  } = useMindmapLayout({ markdown, layoutOptions, containerRef, viewStateKey });
 
   const handleReset = useCallback(() => {
     if (!treeData || !containerRef.current) return;

@@ -216,6 +216,43 @@ export function getVisibleNodes(node: INodeData): INodeData[] {
   return nodes;
 }
 
+/** 中心主题节点 id，该节点始终展开，不参与展开状态持久化 */
+export const ROOT_NODE_ID = 'root';
+
+/**
+ * 收集处于展开状态的节点 id（不包含中心主题）
+ * 与 applyExpandedState 配对，用于保存/还原用户的展开现场
+ */
+export function collectExpandedIds(node: INodeData, acc: string[] = []): string[] {
+  if (node.id !== ROOT_NODE_ID && node.expanded) {
+    acc.push(node.id);
+  }
+  node.children.forEach(child => collectExpandedIds(child, acc));
+  return acc;
+}
+
+/**
+ * 按给定 id 集合还原展开状态，返回新的节点树（不改动入参）
+ * - expandedIds 为 null/undefined 时保留解析结果中的默认状态
+ * - 中心主题始终展开
+ */
+export function applyExpandedState(
+  node: INodeData,
+  expandedIds: Set<string> | null | undefined
+): INodeData {
+  const expanded = node.id === ROOT_NODE_ID
+    ? true
+    : expandedIds
+      ? expandedIds.has(node.id)
+      : node.expanded !== false;
+
+  return {
+    ...node,
+    expanded,
+    children: node.children.map(child => applyExpandedState(child, expandedIds))
+  };
+}
+
 /**
  * 提取纯净的 Markdown 导图文本
  * 同时清理头部（思考过程前缀）和尾部（自我检查后缀）的非导图内容
