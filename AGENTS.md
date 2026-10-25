@@ -259,3 +259,14 @@ scripts/                 # Python ASR 后端
 - Python 缓存（`__pycache__/`、`*.py[cod]`）
 - ASR 音频缓存（`scripts/cache/`）
 - 密钥文件（`src/types/secrets.ts`）
+
+---
+
+## 7. 远端与镜像
+
+主线在 **GitHub**（`origin` → `louisdwu/auto-mindmap`），NAS 上的 Gitea 只做**只读镜像**，每 8 小时自动从 GitHub 拉一次。
+
+- 只往 GitHub 推：`git push origin main`；改完照常 commit + push 就是备份
+- **不要**往 Gitea 推：镜像是单向的，两边会分叉
+- 本地不推 GitHub，Gitea 那份永远看不到
+- 镜像地址：<http://192.168.1.3:3000/louis/auto-mindmap>
