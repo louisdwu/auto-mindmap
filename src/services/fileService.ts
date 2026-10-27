@@ -19,8 +19,8 @@ export class FileService {
    * 检查是否设置了缓存目录
    */
   static hasCacheDirectory(config: PluginConfig): boolean {
-    return !!config.settings.cacheDirectory && 
-           config.settings.cacheDirectory.trim().length > 0;
+    // saveToLocalFile 是新字段；旧配置在 normalizeConfig 中已经迁移成布尔值。
+    return config.settings.saveToLocalFile === true;
   }
 
   /**

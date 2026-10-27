@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { PluginConfig, DEFAULT_CONFIG, LLMConfig, createDefaultLLMConfig } from '../types/config';
 import { StorageService } from '../services/storageService';
 
@@ -13,6 +13,7 @@ import { AsrSection } from './options/AsrSection';
 import { SystemSettingsSection } from './options/SystemSettingsSection';
 import { LogSection } from './options/LogSection';
 import { StatsSection } from './options/StatsSection';
+import { StorageSection } from './options/StorageSection';
 
 import './options/Options.css';
 
@@ -34,10 +35,16 @@ export default function Options() {
   const [isAddingNew, setIsAddingNew] = useState(false);
   const [saved, setSaved] = useState(false);
   const [importStatus, setImportStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const configLoadedRef = useRef(false);
+  const skipEditingSaveRef = useRef(true);
+  const pendingEditingSaveRef = useRef<{
+    config: LLMConfig;
+    timer: ReturnType<typeof setTimeout>;
+  } | null>(null);
 
   useEffect(() => {
-    loadConfig();
-    loadLLMConfigs();
+    void loadConfig();
+    void loadLLMConfigs();
   }, []);
 
   // === 数据加载 ===
@@ -46,6 +53,7 @@ export default function Options() {
     if (savedConfig) {
       setConfig(savedConfig);
     }
+    configLoadedRef.current = true;
   };
 
   const loadLLMConfigs = async () => {
@@ -56,41 +64,73 @@ export default function Options() {
     const pluginConfig = await StorageService.getConfig();
     const selectedId = pluginConfig?.selectedLLMConfigId || 'default';
     const selected = configs.find(c => c.id === selectedId) || configs[0];
-    if (selected) {
-      if (!editingConfigId) {
-        setEditingConfigId(selected.id);
-        setEditingConfig(selected);
-      }
+    if (selected && !editingConfigId) {
+      setEditingConfigId(selected.id);
+      setEditingConfig(selected);
+      // 初始填充不应触发一次无意义的自动保存
+      skipEditingSaveRef.current = true;
     }
+  };
+
+  const markSaved = () => {
+    setSaved(true);
+    setTimeout(() => setSaved(false), 1500);
   };
 
   // === 自动保存逻辑 ===
   // 1. 自动保存基础配置 (PluginConfig)
   useEffect(() => {
+    if (!configLoadedRef.current) return;
     const timer = setTimeout(async () => {
       const savedConfig = await StorageService.getConfig();
       // 深度对比，避免初始加载或无意义重复保存
       if (savedConfig && JSON.stringify(savedConfig) !== JSON.stringify(config)) {
         await StorageService.saveConfig(config);
-        setSaved(true);
-        setTimeout(() => setSaved(false), 1500);
+        markSaved();
       }
-    }, 800); // 800ms 抖动
+    }, 800);
     return () => clearTimeout(timer);
   }, [config]);
 
   // 2. 自动保存正在编辑的 LLM 配置
+  // 注意：切换配置时不能在 cleanup 里 clearTimeout，否则 800ms 内的编辑会丢；
+  // 由 flushEditingSave 在切换/删除/卸载前主动落盘。
   useEffect(() => {
     if (!editingConfig || isAddingNew) return;
-    const timer = setTimeout(async () => {
-      await StorageService.saveLLMConfig(editingConfig);
-      // 同步更新列表中的名称/提供商预览
-      setLLMConfigs(prev => prev.map(c => c.id === editingConfig.id ? editingConfig : c));
-      setSaved(true);
-      setTimeout(() => setSaved(false), 1500);
-    }, 800);
-    return () => clearTimeout(timer);
+    if (skipEditingSaveRef.current) {
+      skipEditingSaveRef.current = false;
+      return;
+    }
+
+    if (pendingEditingSaveRef.current) {
+      clearTimeout(pendingEditingSaveRef.current.timer);
+    }
+    const timer = setTimeout(() => {
+      pendingEditingSaveRef.current = null;
+      void StorageService.saveLLMConfig(editingConfig).then(() => {
+        setLLMConfigs(prev => prev.map(c => c.id === editingConfig.id ? editingConfig : c));
+        markSaved();
+      });
+    }, 700);
+    pendingEditingSaveRef.current = { config: editingConfig, timer };
   }, [editingConfig, isAddingNew]);
+
+  const flushEditingSave = useCallback(async () => {
+    const pending = pendingEditingSaveRef.current;
+    if (!pending) return;
+    clearTimeout(pending.timer);
+    pendingEditingSaveRef.current = null;
+    await StorageService.saveLLMConfig(pending.config);
+    setLLMConfigs(prev => prev.map(c => c.id === pending.config.id ? pending.config : c));
+    markSaved();
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      // 页面卸载前把未落盘的编辑写掉（fire-and-forget，浏览器通常仍会完成）
+      void flushEditingSave();
+    };
+  }, [flushEditingSave]);
 
   const reloadAll = async () => {
     await loadConfig();
@@ -98,7 +138,8 @@ export default function Options() {
   };
 
   // === LLM 配置操作 ===
-  const handleEditConfig = (id: string) => {
+  const handleEditConfig = async (id: string) => {
+    await flushEditingSave();
     setEditingConfigId(id);
     const selected = llmConfigs.find(c => c.id === id);
     if (selected) {
@@ -108,17 +149,19 @@ export default function Options() {
   };
 
   const handleAddNewConfig = async () => {
+    await flushEditingSave();
     const newConfig = createDefaultLLMConfig('custom');
     newConfig.name = `新配置 ${llmConfigs.length + 1}`;
-    
+
     // 立即保存到存储，实现“即刻生效”
     await StorageService.saveLLMConfig(newConfig);
     const configs = await StorageService.getLLMConfigs();
     setLLMConfigs(configs);
-    
+
     setEditingConfig(newConfig);
     setEditingConfigId(newConfig.id);
-    setIsAddingNew(false); // 不再需要“新增中”状态
+    setIsAddingNew(false);
+    skipEditingSaveRef.current = true;
   };
 
 
@@ -130,6 +173,7 @@ export default function Options() {
     }
     if (!confirm('确定要删除这个配置吗？')) return;
 
+    await flushEditingSave();
     const success = await StorageService.deleteLLMConfig(id);
     if (success) {
       await reloadAll();
@@ -153,6 +197,7 @@ export default function Options() {
 
   // === 全局操作 ===
   const handleSave = async () => {
+    await flushEditingSave();
     await StorageService.saveConfig(config);
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
@@ -246,7 +291,11 @@ export default function Options() {
               <div className="section-divider" />
               
               <CacheSection config={config} onConfigChange={setConfig} />
-              
+
+              <div className="section-divider" />
+
+              <StorageSection />
+
               <div className="section-divider" />
               
               <ImportExportSection

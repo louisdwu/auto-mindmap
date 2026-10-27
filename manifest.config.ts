@@ -16,6 +16,7 @@ export default defineManifest({
   manifest_version: 3,
   permissions: [
     'storage',
+    'unlimitedStorage',
     'activeTab',
     'scripting',
     'downloads'

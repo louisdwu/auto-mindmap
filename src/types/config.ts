@@ -100,7 +100,10 @@ export interface PluginConfig {
   };
   settings: {
     language: string;                 // 历史字段：保留用于配置导入/导出兼容，ASR 已改用 asrLanguage
+    /** @deprecated 旧版用非空字符串表示「启用本地文件保存」，现由 saveToLocalFile 取代 */
     cacheDirectory: string;
+    /** 是否把字幕 / 导图自动保存到 Chrome 下载目录 */
+    saveToLocalFile: boolean;
     enableCache: boolean;  // 是否启用思维导图缓存
     asrProvider: 'official' | 'local'; // 语音识别提供商
     asrLanguage: string;               // ASR 识别语言：'auto' = 自动检测（默认，原文转录）
@@ -111,6 +114,8 @@ export interface PluginConfig {
     concurrencyLimit: number;          // 并发任务数限制
     enableReflection: boolean;         // 是否启用反思模式
     reflectionLLMConfigId: string;     // 反思阶段使用的 LLM 配置 ID
+    /** 长字幕超出上下文时自动分段提炼，避免直接失败 */
+    enableChunking: boolean;
     clearLogsOnClose: boolean;         // 退出日志页面时是否清空记录
     enableSoundNotification: boolean;  // 生成完成后是否播放提示音
     soundNotificationVolume: number;   // 提示音音量 (0-1)
@@ -145,16 +150,21 @@ export function createDefaultLLMConfig(provider: LLMProvider = 'openai'): LLMCon
   };
 }
 
+/**
+ * 首次安装时的兜底配置。
+ *
+ * 这里刻意不内嵌任何 API Key：构建期注入的密钥会出现在 dist 产物里，
+ * 也会随仓库/打包分发泄露。新用户必须自己填写密钥或选择本地 Ollama。
+ */
 export const DEFAULT_LLM_CONFIG: LLMConfig = {
   id: 'default',
-  name: 'Ollama (默认)',
+  name: 'Ollama (本地默认)',
   provider: 'ollama',
-  apiUrl: 'https://ollama.com/api',
-  // @ts-ignore
-  apiKey: import.meta.env.VITE_DEFAULT_API_KEY || '', // 敏感信息已移至 .env 文件
-  model: 'gemini-3-flash-preview',
-  timeout: 60,
-  maxTokens: 40960,
+  apiUrl: 'http://localhost:11434/api',
+  apiKey: '',
+  model: 'llama3',
+  timeout: 120,
+  maxTokens: 8192,
   num_ctx: 32768,
   temperature: 0.5,
   createdAt: 0,
@@ -210,7 +220,8 @@ export const DEFAULT_CONFIG: PluginConfig = {
   },
   settings: {
     language: 'zh-CN',
-    cacheDirectory: 'enabled',
+    cacheDirectory: '',
+    saveToLocalFile: true,
     enableCache: true,
     asrProvider: 'local',
     asrLanguage: DEFAULT_ASR_LANGUAGE,
@@ -221,6 +232,7 @@ export const DEFAULT_CONFIG: PluginConfig = {
     concurrencyLimit: 3,
     enableReflection: true,
     reflectionLLMConfigId: 'default',
+    enableChunking: true,
     clearLogsOnClose: true,
     enableSoundNotification: true,
     soundNotificationVolume: 0.8

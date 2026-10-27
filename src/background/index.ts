@@ -38,7 +38,12 @@ async function togglePauseState() {
 // 初始化
 initConfig().then(async () => {
   console.log('[Background] Plugin initialized');
-  
+
+  // 缓存索引迁移 + 过期缓存清理（失败不阻塞主流程）
+  await StorageService.initializeStorage().catch((error) => {
+    console.warn('[Background] 初始化存储治理失败:', error);
+  });
+
   // 初始化任务管理器
   const taskManager = new TaskManager();
   
