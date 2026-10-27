@@ -550,10 +550,14 @@ export class TaskManager {
     // 普通流程也优先复用已有字幕：用户之前右键「仅获取字幕」或上次 ASR 已完成时，
     // 不必重新下载/重新识别一遍，直接进入导图生成。
     if (!subtitleOnly && videoId && task.data.force !== true && task.data.forceAsr !== true) {
-      const cachedSubtitle = await StorageService.getSubtitleCache(videoId);
+      const subtitleCache = await StorageService.getSubtitleCache(videoId);
+      const asrCache = subtitleCache
+        ? null
+        : await StorageService.getAsrCache(videoId, normalizeAsrLanguage(config?.settings.asrLanguage));
+      const cachedSubtitle = subtitleCache || asrCache;
       if (cachedSubtitle && /\[\d{1,2}:\d{2}/.test(cachedSubtitle)) {
         const videoTitle = task.data.videoTitle || '视频';
-        task.result = { videoUrl, videoTitle, subtitleText: cachedSubtitle, isAsr: false };
+        task.result = { videoUrl, videoTitle, subtitleText: cachedSubtitle, isAsr: asrCache !== null };
         this.reportProgress(task, '复用已缓存字幕，正在生成思维导图...');
         await this.createMindmapTask(videoUrl, cachedSubtitle, videoTitle, task.tabId);
         return;
