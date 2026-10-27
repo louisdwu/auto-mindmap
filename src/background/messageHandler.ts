@@ -174,7 +174,13 @@ export class MessageHandler {
       }
     }
     
-    const task = await this.taskManager.createMindmapTask(payload.videoUrl, payload.subtitleText, payload.videoTitle, tabId);
+    const task = await this.taskManager.createMindmapTask(
+      payload.videoUrl,
+      payload.subtitleText,
+      payload.videoTitle,
+      tabId,
+      payload.force === true
+    );
     return { taskId: task.id };
   }
 
