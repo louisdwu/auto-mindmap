@@ -86,8 +86,16 @@ set WHISPER_COMPUTE=float16
 set WHISPER_NUM_WORKERS=1
 set WHISPER_CPU_THREADS=4
 
-rem Skip language detection for a small speed gain
-set WHISPER_DEFAULT_LANGUAGE=zh
+rem Do NOT hard-code WHISPER_DEFAULT_LANGUAGE here.
+rem The server uses this value for every request that does not pass a language.
+rem Forcing zh makes Whisper decode English audio as Chinese: it then rewrites
+rem (translates) the speech into Chinese and mangles all English terms and
+rem numbers. Leave it empty so the spoken language is auto-detected - faithful
+rem transcription is what the LLM summarizer actually needs.
+rem Set it only when every video you transcribe is in one language:
+rem   set WHISPER_DEFAULT_LANGUAGE=zh
+rem   set WHISPER_DEFAULT_LANGUAGE=en
+set WHISPER_DEFAULT_LANGUAGE=
 set WHISPER_DEFAULT_INITIAL_PROMPT=
 set QWEN_ASR_HOTWORDS=
 

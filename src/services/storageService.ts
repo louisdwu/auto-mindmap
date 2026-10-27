@@ -1,4 +1,4 @@
-import { PluginConfig, LLMConfig, DEFAULT_LLM_CONFIG, ExtensionState, DEFAULT_EXTENSION_STATE } from '../types/config';
+import { PluginConfig, LLMConfig, DEFAULT_LLM_CONFIG, ExtensionState, DEFAULT_EXTENSION_STATE, DEFAULT_ASR_LANGUAGE, normalizeAsrLanguage } from '../types/config';
 import { MindmapData } from '../types/mindmap';
 import { StorageMigration } from './storage/migration';
 import { VideoUtils } from '../utils/videoUtils';
@@ -9,8 +9,12 @@ const STORAGE_KEYS = {
   MINDMAPS: 'mindmaps',
   LATEST_MINDMAP_ID: 'latest_mindmap_id',
   EXTENSION_STATE: 'extension_state',
-  ASR_CACHE_PREFIX: 'asr_cache_',
-  SUBTITLE_CACHE_PREFIX: 'subtitle_cache_'
+  // v2：早期版本把识别语言写死成中文，缓存里存的是英文视频的「中文译稿」，
+  // 升级后这些缓存必须全部作废（换前缀即天然失效），否则修复后仍会命中错内容。
+  ASR_CACHE_PREFIX: 'asr_cache_v2_',
+  // v2：ASR 结果也会写入字幕缓存，旧版本存的是「英文视频被强制识别成中文」的译稿，
+  // 且读取时优先于 ASR 缓存，不换前缀会让修复后仍然读到旧中文。官方字幕缓存丢掉可重下。
+  SUBTITLE_CACHE_PREFIX: 'subtitle_cache_v2_'
 };
 
 export class StorageService {
@@ -313,23 +317,36 @@ export class StorageService {
   }
 
   // ASR 缓存相关
-  static async getAsrCache(videoId: string): Promise<string | null> {
-    const key = STORAGE_KEYS.ASR_CACHE_PREFIX + videoId;
+  /**
+   * ASR 缓存键：同一视频在不同识别语言下是不同结果，必须分键存放，
+   * 否则用户从「自动检测」切到「中文」后会直接命中另一种语言的字幕。
+   */
+  private static asrCacheKey(videoId: string, language: string = DEFAULT_ASR_LANGUAGE): string {
+    return STORAGE_KEYS.ASR_CACHE_PREFIX + normalizeAsrLanguage(language) + '_' + videoId;
+  }
+
+  static async getAsrCache(videoId: string, language: string = DEFAULT_ASR_LANGUAGE): Promise<string | null> {
+    const key = this.asrCacheKey(videoId, language);
     const result = await chrome.storage.local.get(key);
     return result[key] || null;
   }
 
-  static async saveAsrCache(videoId: string, text: string): Promise<void> {
-    const key = STORAGE_KEYS.ASR_CACHE_PREFIX + videoId;
+  static async saveAsrCache(videoId: string, text: string, language: string = DEFAULT_ASR_LANGUAGE): Promise<void> {
+    const key = this.asrCacheKey(videoId, language);
     await chrome.storage.local.set({ [key]: text });
   }
 
   /**
-   * 删除 ASR 缓存
+   * 删除 ASR 缓存（该视频的所有语言版本一起删）
    */
   static async deleteAsrCache(videoId: string): Promise<void> {
-    const key = STORAGE_KEYS.ASR_CACHE_PREFIX + videoId;
-    await chrome.storage.local.remove(key);
+    const all = await chrome.storage.local.get(null);
+    const keys = Object.keys(all).filter(
+      key => key.startsWith(STORAGE_KEYS.ASR_CACHE_PREFIX) && key.endsWith('_' + videoId)
+    );
+    if (keys.length > 0) {
+      await chrome.storage.local.remove(keys);
+    }
   }
 
   // Phase 1 缓存相关

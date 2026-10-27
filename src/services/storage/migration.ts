@@ -1,4 +1,4 @@
-import { PluginConfig, LLMConfig, DEFAULT_CONFIG } from '../../types/config';
+import { PluginConfig, LLMConfig, DEFAULT_CONFIG, normalizeAsrLanguage } from '../../types/config';
 
 export class StorageMigration {
   /**
@@ -37,7 +37,10 @@ export class StorageMigration {
         ...DEFAULT_CONFIG.settings,
         ...config.settings,
         enableCache: config.settings?.enableCache !== undefined ? config.settings.enableCache : true,
-        soundNotificationVolume: config.settings?.soundNotificationVolume !== undefined ? config.settings.soundNotificationVolume : 0.8
+        soundNotificationVolume: config.settings?.soundNotificationVolume !== undefined ? config.settings.soundNotificationVolume : 0.8,
+        // 旧版本没有这个字段，且此前的实现是「写死中文」——统一迁移成自动检测，
+        // 否则老配置会继续把英文视频识别成中文译文。
+        asrLanguage: normalizeAsrLanguage(config.settings?.asrLanguage)
       },
       exclusionKeywords: config.exclusionKeywords || []
     };

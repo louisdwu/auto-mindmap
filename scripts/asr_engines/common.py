@@ -108,12 +108,23 @@ def load_wav_mono16k(path):
 _SENT_END = re.compile(r"[。！？!?；;…」』”\"']\s*$")
 
 
-def _join_text(a, b):
-    """拼接时间戳 token；相邻 ASCII 字母数字之间补空格。"""
+def _join_text(a, b, space_before=None):
+    """拼接时间戳 token。
+
+    空格来源优先级：
+      1. space_before —— 引擎原始 token 是否带前导空格（faster-whisper 的
+         word 字段本身带这个信息），最忠实；
+      2. 退化启发式 —— 相邻 ASCII 字母数字之间补空格。
+
+    早期版本一律走启发式，导致 M6 被拼成 "M 6"、899 被拼成 "8 99"，
+    英文/数字密集的内容（型号、价格、缩写）全被拆碎。
+    """
     if not a:
         return b
     if not b:
         return a
+    if space_before is not None:
+        return a + " " + b if space_before else a + b
     if a[-1].isascii() and a[-1].isalnum() and b[0].isascii() and b[0].isalnum():
         return a + " " + b
     return a + b
@@ -122,7 +133,10 @@ def _join_text(a, b):
 def build_cues(items, max_chars=42, max_dur=8.0, pause=0.8):
     """把词/字级时间戳聚合成字幕条。
 
-    items: [{'text': str, 'start': float, 'end': float}, ...]
+    items: [{'text': str, 'start': float, 'end': float, 'space_before': bool?}, ...]
+
+    space_before 可选：为 True/False 时按引擎给出的真实空格拼接，
+    缺省（None）则退化为启发式。
 
     断句依据（任一满足即断条）：
       1. 上一句以句末标点收尾；
@@ -154,7 +168,7 @@ def build_cues(items, max_chars=42, max_dur=8.0, pause=0.8):
             cues.append(cur)
             cur = {"start": st, "end": en, "text": text}
         else:
-            cur["text"] = _join_text(cur["text"], text)
+            cur["text"] = _join_text(cur["text"], text, it.get("space_before"))
             cur["end"] = en
 
     if cur:
@@ -207,12 +221,32 @@ LANGUAGE_CODES = {
 }
 
 
+# 表示「不限定语言、交给引擎自动检测」的取值。
+# 前端下拉框、环境变量、旧版本调用方都可能传这些，一律按自动检测处理。
+AUTO_LANGUAGE_SENTINELS = {"", "auto", "detect", "none", "null", "unknown", "自动"}
+
+
+def is_auto_language(value):
+    """判断取值是否表示「自动检测语言」（None/空/auto 等哨兵值）。"""
+    if value is None:
+        return True
+    return str(value).strip().lower() in AUTO_LANGUAGE_SENTINELS
+
+
+# 允许显式指定、但尚未列在 LANGUAGE_CODES 里的语言也照原样透传，
+# 由各引擎自行决定是否支持（Whisper 支持 99 种语言，不在这里穷举）。
 def normalize_language(value):
-    """把用户输入的语言别名规范化为统一代码；空值返回 None（表示自动检测）。"""
-    if not value:
+    """把用户输入的语言别名规范化为统一代码；空值或 auto 返回 None（自动检测）。
+
+    同时收敛地区子标签：zh-CN / zh_TW / en-US 一律取主语言代码。
+    """
+    if is_auto_language(value):
         return None
     v = str(value).strip().lower()
-    return LANGUAGE_CODES.get(v, v)
+    if v in LANGUAGE_CODES:
+        return LANGUAGE_CODES[v]
+    primary = v.replace("_", "-").split("-")[0]
+    return LANGUAGE_CODES.get(primary, primary)
 
 
 # ------------------------------------------------------------------ #

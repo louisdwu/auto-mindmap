@@ -25,10 +25,11 @@ export interface PluginConfig {
     reflectionPrompt: string;    // 反思优化 Prompt
   };
   settings: {
-    language: string;
+    language: string;                 // 历史字段：保留用于配置导入/导出兼容，ASR 已改用 asrLanguage
     cacheDirectory: string;
     enableCache: boolean;  // 是否启用思维导图缓存
     asrProvider: 'official' | 'local'; // 语音识别提供商
+    asrLanguage: string;               // ASR 识别语言：'auto' = 自动检测（默认，原文转录）
     localAsrUrl: string;               // 本地 ASR 服务地址
     asrBeamSize: number;               // ASR 束搜索宽度
     asrVadFilter: boolean;             // ASR 是否开启 VAD 过滤
@@ -127,6 +128,35 @@ export const DEFAULT_PROMPTS = {
   reflectionPrompt: reflectionPromptRaw.trim()
 };
 
+/**
+ * ASR 识别语言。
+ *
+ * 默认 'auto' —— 交给引擎自动检测源语言，输出「原语言原文」。
+ * 这一点很关键：强行指定 zh 去识别英文音频时，Whisper 会把英文
+ * 改写/翻译成中文（术语、型号、价格全错），字幕彻底失去参考价值。
+ * 只有确认视频是单一语言时，才建议手动指定。
+ */
+export const DEFAULT_ASR_LANGUAGE = 'auto';
+
+export const ASR_LANGUAGE_OPTIONS: { value: string; label: string }[] = [
+  { value: 'auto', label: '自动检测（推荐）' },
+  { value: 'zh', label: '中文（含中英混说）' },
+  { value: 'en', label: '英文' },
+  { value: 'ja', label: '日文' },
+  { value: 'ko', label: '韩文' },
+  { value: 'yue', label: '粤语' },
+];
+
+/** 归一化 ASR 语言取值：空值 / auto / detect 一律回落到自动检测。 */
+export function normalizeAsrLanguage(value?: string | null): string {
+  const v = (value || '').trim().toLowerCase();
+  if (!v || v === 'auto' || v === 'detect' || v === 'none') {
+    return DEFAULT_ASR_LANGUAGE;
+  }
+  // zh-CN / en-US 这类形态统一收敛成主语言代码
+  return v.split('-')[0];
+}
+
 export const DEFAULT_CONFIG: PluginConfig = {
   selectedLLMConfigId: 'default',
   prompt: {
@@ -139,6 +169,7 @@ export const DEFAULT_CONFIG: PluginConfig = {
     cacheDirectory: 'enabled',
     enableCache: true,
     asrProvider: 'local',
+    asrLanguage: DEFAULT_ASR_LANGUAGE,
     localAsrUrl: 'http://localhost:2233/transcribe',
     asrBeamSize: 5,
     asrVadFilter: true,

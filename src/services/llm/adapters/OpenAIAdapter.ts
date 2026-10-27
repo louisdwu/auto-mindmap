@@ -1,6 +1,24 @@
 import { ILLMAdapter, GenerateContext } from '../base';
 import { BaseAdapter } from '../BaseAdapter';
-import { LLMConfig, PluginConfig } from '../../../types/config';
+import { LLMConfig, PluginConfig, normalizeAsrLanguage } from '../../../types/config';
+
+/** 显式指定语言时的上下文偏置（只在用户主动选了对应语言时发送）。 */
+const ASR_INITIAL_PROMPTS: Record<string, string> = {
+  zh: '这是一段中文视频的音频，其中可能包含部分专业英文单词或短语。',
+};
+
+/** 进度日志里展示的语言说明。 */
+function describeAsrLanguage(code: string): string {
+  const names: Record<string, string> = {
+    auto: '自动检测',
+    zh: '中文',
+    en: '英文',
+    ja: '日文',
+    ko: '韩文',
+    yue: '粤语',
+  };
+  return names[code] ? names[code] + '（' + code + '）' : code;
+}
 
 export class OpenAIAdapter extends BaseAdapter implements ILLMAdapter {
   /**
@@ -136,20 +154,18 @@ export class OpenAIAdapter extends BaseAdapter implements ILLMAdapter {
     formData.append('model', isLocal ? 'large-v2' : 'whisper-1');
     formData.append('response_format', 'json');
     
-    // 强制指定识别语言（解决短音频识别为 cy 的问题）
-    const langMap: Record<string, string> = {
-      'zh-CN': 'zh',
-      'zh-TW': 'zh',
-      'en-US': 'en',
-      'ja-JP': 'ja'
-    };
-    const whisperLang = langMap[config.settings.language] || config.settings.language?.split('-')[0];
-    if (whisperLang) {
-      formData.append('language', whisperLang);
-      
-      // 如果是中文，添加初始提示词以优化中英混说识别
-      if (whisperLang === 'zh') {
-        formData.append('initial_prompt', '这是一段中文视频的音频，其中可能包含部分专业英文单词或短语。');
+    // 识别语言：默认 'auto'，把语言判定交给引擎。
+    // 绝不能为了「解决短音频误判为 cy」就写死 zh —— 对英文音频来说这是灾难：
+    // Whisper 会把语音改写成中文译文，专业术语/型号/数字全部失真。
+    const asrLanguage = normalizeAsrLanguage(config.settings.asrLanguage);
+    onProgress?.('识别语言：' + describeAsrLanguage(asrLanguage));
+    if (asrLanguage !== 'auto') {
+      formData.append('language', asrLanguage);
+
+      // 显式选了中文时才加中文偏置提示（中英混说场景收益最大）；
+      // 自动检测下不加任何提示，避免把输出语言「带偏」。
+      if (asrLanguage === 'zh') {
+        formData.append('initial_prompt', ASR_INITIAL_PROMPTS.zh);
       }
     }
     

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { PluginConfig } from '../../types/config';
+import { ASR_LANGUAGE_OPTIONS, PluginConfig, normalizeAsrLanguage } from '../../types/config';
 
 interface AsrSectionProps {
   config: PluginConfig;
@@ -197,6 +197,27 @@ export const AsrSection: React.FC<AsrSectionProps> = ({ config, onConfigChange }
               />
               <p className="form-hint">
                 请确保后端服务 <code>scripts/whisper_server.py</code> 已启动。
+              </p>
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">识别语言</label>
+              <select
+                className="form-select"
+                value={normalizeAsrLanguage(config.settings.asrLanguage)}
+                onChange={(e) => onConfigChange({
+                  ...config,
+                  settings: { ...config.settings, asrLanguage: e.target.value }
+                })}
+              >
+                {ASR_LANGUAGE_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+              <p className="form-hint">
+                保持「自动检测」即可：按视频原语言逐字转录，英文视频输出英文原文，最适合交给 LLM 总结。
+                只有确认视频是单一语言时才手动指定——用中文去识别英文音频，Whisper 会把语音
+                <strong>改写成中文译文</strong>，型号、价格、术语全部失真。
               </p>
             </div>
 
