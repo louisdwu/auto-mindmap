@@ -84,18 +84,14 @@ export class TaskManager {
    * 判断两个视频 URL 是否指向同一视频
    */
   private isSameVideo(urlA?: string, urlB?: string): boolean {
-    if (!urlA || !urlB) return false;
-    const idA = VideoUtils.extractVideoId(urlA);
-    const idB = VideoUtils.extractVideoId(urlB);
-    if (idA && idB) return idA === idB;
-    return urlA === urlB;
+    return VideoUtils.isSameVideo(urlA, urlB);
   }
 
   /**
    * 记录「该视频本次只看字幕」的用户意图，供自动流程查询
    */
   async markSubtitleOnlyMode(videoUrl: string): Promise<void> {
-    const videoId = VideoUtils.extractVideoId(videoUrl);
+    const videoId = VideoUtils.getCacheId(videoUrl);
     if (!videoId) return;
 
     const result = await chrome.storage.local.get(SUBTITLE_ONLY_MODE_KEY);
@@ -114,7 +110,7 @@ export class TaskManager {
    * 查询该视频是否处于用户指定的「仅获取字幕」模式
    */
   async isSubtitleOnlyMode(videoUrl: string): Promise<boolean> {
-    const videoId = VideoUtils.extractVideoId(videoUrl);
+    const videoId = VideoUtils.getCacheId(videoUrl);
     if (!videoId) return false;
 
     const result = await chrome.storage.local.get(SUBTITLE_ONLY_MODE_KEY);
@@ -127,7 +123,7 @@ export class TaskManager {
    * 用户显式要求生成导图时，解除「仅获取字幕」模式
    */
   async clearSubtitleOnlyMode(videoUrl: string): Promise<void> {
-    const videoId = VideoUtils.extractVideoId(videoUrl);
+    const videoId = VideoUtils.getCacheId(videoUrl);
     if (!videoId) return;
 
     const result = await chrome.storage.local.get(SUBTITLE_ONLY_MODE_KEY);
@@ -266,7 +262,7 @@ export class TaskManager {
     await this.saveTasks();
 
     // 异步缓存原始字幕，保障即使 LLM 调用失败也能通过视频 ID 检索到字幕原文本
-    const videoId = VideoUtils.extractVideoId(videoUrl);
+    const videoId = VideoUtils.getCacheId(videoUrl);
     if (videoId && subtitleText) {
       StorageService.saveSubtitleCache(videoId, subtitleText).catch(err => {
         console.warn('[TaskManager] Failed to save subtitle cache:', err);
@@ -337,7 +333,7 @@ export class TaskManager {
       // 记录失败统计
       if (task.type === 'generate_mindmap') {
         const videoUrl = task.data.videoUrl;
-        const videoId = VideoUtils.extractVideoId(videoUrl);
+        const videoId = VideoUtils.getCacheId(videoUrl);
         const config = await StorageService.getConfig();
         const selectedId = config?.selectedLLMConfigId || 'default';
         await StatsService.recordGeneration({
@@ -391,7 +387,7 @@ export class TaskManager {
    */
   private async executeDownloadTask(task: Task) {
     const { videoUrl, subtitleOnly } = task.data;
-    const videoId = VideoUtils.extractVideoId(videoUrl);
+    const videoId = VideoUtils.getCacheId(videoUrl);
     const config = await StorageService.getConfig();
 
     // 仅字幕模式优先复用已有字幕缓存，避免重复下载/重复 ASR
@@ -470,7 +466,7 @@ export class TaskManager {
       throw new Error('YouTube 字幕获取失败：缺少标签页上下文。请刷新视频页面后再次点击悬浮球。');
     }
 
-    const videoId = VideoUtils.extractVideoId(videoUrl);
+    const videoId = VideoUtils.getCacheId(videoUrl);
     let videoTitle = 'YouTube 视频';
     let subtitleText: string | null = null;
     let isAsr = false;
@@ -582,7 +578,7 @@ export class TaskManager {
     }
   ): Promise<void> {
     const { videoUrl, videoTitle, subtitleText, isAsr, fromCache } = result;
-    const videoId = VideoUtils.extractVideoId(videoUrl);
+    const videoId = VideoUtils.getCacheId(videoUrl);
 
     if (videoId) {
       StorageService.saveSubtitleCache(videoId, subtitleText).catch(err => {
@@ -662,7 +658,7 @@ export class TaskManager {
    */
   private async executeMindmapTask(task: Task) {
     const { videoUrl, subtitleText, videoTitle, force } = task.data;
-    const videoId = VideoUtils.extractVideoId(videoUrl);
+    const videoId = VideoUtils.getCacheId(videoUrl);
 
     if (videoId && force) {
       await StorageService.deletePhase1Cache(videoId);
@@ -869,8 +865,8 @@ export class TaskManager {
         if (!taskUrl) return false;
         
         // 尝试提取 ID 匹配
-        const id1 = VideoUtils.extractVideoId(videoUrl);
-        const id2 = VideoUtils.extractVideoId(taskUrl);
+        const id1 = VideoUtils.getCacheId(videoUrl);
+        const id2 = VideoUtils.getCacheId(taskUrl);
         if (id1 && id2) return id1 === id2;
         
         // 否则 fallback 到字符串包含判断（处理一些非标准 URL）
