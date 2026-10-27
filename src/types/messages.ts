@@ -1,5 +1,8 @@
 import { MindmapData, Task } from './mindmap';
 
+/** 请求来源：auto = 页面自动流程，user = 用户主动操作 */
+export type RequestOrigin = 'auto' | 'user';
+
 // Content -> Background
 export interface DownloadSubtitleMessage {
   type: 'DOWNLOAD_SUBTITLE';
@@ -11,6 +14,8 @@ export interface DownloadSubtitleMessage {
     force?: boolean;
     /** true = 仅获取字幕，不生成思维导图 */
     subtitleOnly?: boolean;
+    /** 缺省按 user 处理，auto 会被「仅字幕模式」抑制 */
+    origin?: RequestOrigin;
   };
 }
 
@@ -42,11 +47,25 @@ export interface GenerateMindmapDirectMessage {
     videoUrl: string;
     subtitleText: string;
     videoTitle: string;
+    /** 缺省按 user 处理，auto 会被「仅字幕模式」抑制 */
+    origin?: RequestOrigin;
+    force?: boolean;
   };
 }
 
 export interface GetSubtitleCacheMessage {
   type: 'GET_SUBTITLE_CACHE';
+  payload: {
+    videoUrl: string;
+  };
+}
+
+/**
+ * 用户明确表示该视频「只要字幕」：记录意图、取消排队中的自动导图任务，
+ * 并把正在下载的字幕任务切换为仅字幕模式。
+ */
+export interface SetSubtitleOnlyModeMessage {
+  type: 'SET_SUBTITLE_ONLY_MODE';
   payload: {
     videoUrl: string;
   };
@@ -97,7 +116,8 @@ export type ExtensionMessage =
   | GetCurrentTaskMessage
   | ClearMindmapsMessage
   | GenerateMindmapDirectMessage
-  | GetSubtitleCacheMessage;
+  | GetSubtitleCacheMessage
+  | SetSubtitleOnlyModeMessage;
 
 export type ContentMessage =
   | SubtitleDownloadedMessage

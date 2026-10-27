@@ -9,6 +9,9 @@ import { VideoUtils } from '../utils/videoUtils';
 import { StatsService } from '../services/statsService';
 
 const TASKS_STORAGE_KEY = 'active_tasks';
+// 用户主动选择「仅获取字幕」后，短时间内抑制同一视频的自动导图流程
+const SUBTITLE_ONLY_MODE_KEY = 'subtitle_only_mode';
+const SUBTITLE_ONLY_MODE_TTL = 10 * 60 * 1000;
 
 export class TaskManager {
   private tasks: Map<string, Task> = new Map();
@@ -88,6 +91,72 @@ export class TaskManager {
   }
 
   /**
+   * 记录「该视频本次只看字幕」的用户意图，供自动流程查询
+   */
+  async markSubtitleOnlyMode(videoUrl: string): Promise<void> {
+    const videoId = VideoUtils.extractVideoId(videoUrl);
+    if (!videoId) return;
+
+    const result = await chrome.storage.local.get(SUBTITLE_ONLY_MODE_KEY);
+    const modes: Record<string, number> = result[SUBTITLE_ONLY_MODE_KEY] || {};
+    const now = Date.now();
+
+    // 顺手清理过期项，避免无限增长
+    for (const [key, expiresAt] of Object.entries(modes)) {
+      if (!expiresAt || expiresAt <= now) delete modes[key];
+    }
+    modes[videoId] = now + SUBTITLE_ONLY_MODE_TTL;
+    await chrome.storage.local.set({ [SUBTITLE_ONLY_MODE_KEY]: modes });
+  }
+
+  /**
+   * 查询该视频是否处于用户指定的「仅获取字幕」模式
+   */
+  async isSubtitleOnlyMode(videoUrl: string): Promise<boolean> {
+    const videoId = VideoUtils.extractVideoId(videoUrl);
+    if (!videoId) return false;
+
+    const result = await chrome.storage.local.get(SUBTITLE_ONLY_MODE_KEY);
+    const modes: Record<string, number> = result[SUBTITLE_ONLY_MODE_KEY] || {};
+    const expiresAt = modes[videoId];
+    return typeof expiresAt === 'number' && expiresAt > Date.now();
+  }
+
+  /**
+   * 用户显式要求生成导图时，解除「仅获取字幕」模式
+   */
+  async clearSubtitleOnlyMode(videoUrl: string): Promise<void> {
+    const videoId = VideoUtils.extractVideoId(videoUrl);
+    if (!videoId) return;
+
+    const result = await chrome.storage.local.get(SUBTITLE_ONLY_MODE_KEY);
+    const modes: Record<string, number> = result[SUBTITLE_ONLY_MODE_KEY] || {};
+    if (!(videoId in modes)) return;
+
+    delete modes[videoId];
+    await chrome.storage.local.set({ [SUBTITLE_ONLY_MODE_KEY]: modes });
+  }
+
+  /**
+   * 取消同一视频排队中的导图任务（尚未开始执行，可安全移除）
+   */
+  async cancelPendingMindmapTasks(videoUrl: string): Promise<number> {
+    const pending = Array.from(this.tasks.values()).filter(t =>
+      t.type === 'generate_mindmap' &&
+      t.status === 'pending' &&
+      this.isSameVideo(t.data?.videoUrl, videoUrl)
+    );
+    if (pending.length === 0) return 0;
+
+    for (const task of pending) {
+      this.tasks.delete(task.id);
+    }
+    await this.saveTasks();
+    console.log('[TaskManager] 已取消排队中的导图任务:', pending.map(t => t.id));
+    return pending.length;
+  }
+
+  /**
    * 将正在排队/执行的普通字幕任务切换为「仅获取字幕」。
    *
    * 典型场景：打开视频后自动流程已在下载字幕，用户此时右键悬浮球表示
@@ -112,11 +181,10 @@ export class TaskManager {
   /**
    * 查找同类正在排队/执行中的任务，避免重复点击时重复下载字幕或重复 ASR
    */
-  private findActiveTask(videoUrl: string, type: Task['type'], subtitleOnly: boolean): Task | undefined {
+  private findActiveTask(videoUrl: string, type: Task['type']): Task | undefined {
     return Array.from(this.tasks.values()).find(task => {
       if (task.type !== type) return false;
       if (task.status !== 'pending' && task.status !== 'running') return false;
-      if ((task.data?.subtitleOnly === true) !== subtitleOnly) return false;
       return this.isSameVideo(task.data?.videoUrl, videoUrl);
     });
   }
@@ -132,9 +200,19 @@ export class TaskManager {
     subtitleOnly: boolean = false,
     videoTitle?: string
   ): Promise<Task> {
-    const runningTask = this.findActiveTask(videoUrl, 'download_subtitle', subtitleOnly);
+    // 不区分模式地复用进行中的字幕任务：
+    // 用户已选择仅字幕时，自动流程的普通请求不能另起一个会生成导图的任务。
+    const runningTask = force ? undefined : this.findActiveTask(videoUrl, 'download_subtitle');
     if (runningTask) {
-      console.log('[TaskManager] 复用进行中的字幕任务:', runningTask.id);
+      // 并发情况下自动流程可能刚创建了一个普通任务：用户已选仅字幕时同步切换
+      if (subtitleOnly && runningTask.data?.subtitleOnly !== true) {
+        runningTask.data = { ...runningTask.data, subtitleOnly: true };
+        runningTask.updatedAt = Date.now();
+        await this.saveTasks();
+        console.log('[TaskManager] 复用并切换进行中的字幕任务为仅字幕:', runningTask.id);
+      } else {
+        console.log('[TaskManager] 复用进行中的字幕任务:', runningTask.id);
+      }
       return runningTask;
     }
 

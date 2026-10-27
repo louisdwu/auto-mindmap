@@ -295,7 +295,8 @@ export function useFloatingBallState() {
       payload: {
         videoUrl: window.location.href,
         subtitleText,
-        videoTitle: videoTitle || getPageVideoTitle()
+        videoTitle: videoTitle || getPageVideoTitle(),
+        origin: 'user'
       }
     });
     showToast('正在生成思维导图...');
@@ -354,7 +355,7 @@ export function useFloatingBallState() {
       // 完全没有字幕：走完整流程（获取字幕 → 生成导图）
       await RuntimeUtils.sendMessage({
         type: 'DOWNLOAD_SUBTITLE',
-        payload: { videoUrl: window.location.href, videoTitle: getPageVideoTitle() }
+        payload: { videoUrl: window.location.href, videoTitle: getPageVideoTitle(), origin: 'user' }
       });
       showToast('正在获取字幕并生成思维导图...');
       fetchCurrentTask();
@@ -382,6 +383,20 @@ export function useFloatingBallState() {
     // 当前任务里已经有字幕文本时直接展示：
     // 例如导图正在生成（字幕已就绪）或导图失败，右键都不应打断任务
     if (currentTask?.subtitleText) {
+      // 字幕已就绪也要明确告知后台「只要字幕」：
+      // 取消仍在排队中的自动导图任务，避免右键后导图流程继续启动
+      try {
+        const resp = await RuntimeUtils.sendMessage({
+          type: 'SET_SUBTITLE_ONLY_MODE',
+          payload: { videoUrl: window.location.href }
+        });
+        if (resp?.cancelled > 0) {
+          showToast('已取消自动生成导图，仅保留字幕', 4000);
+        }
+      } catch (e) {
+        // 模式通知失败不影响字幕展示
+      }
+
       openSubtitleResult({
         videoUrl: window.location.href,
         videoTitle: currentTask.videoTitle,
@@ -401,7 +416,8 @@ export function useFloatingBallState() {
             payload: {
               videoUrl: window.location.href,
               videoTitle: getPageVideoTitle(),
-              subtitleOnly: true
+              subtitleOnly: true,
+              origin: 'user'
             }
           });
           showToast(
@@ -426,7 +442,8 @@ export function useFloatingBallState() {
         payload: {
           videoUrl: window.location.href,
           videoTitle: getPageVideoTitle(),
-          subtitleOnly: true
+          subtitleOnly: true,
+          origin: 'user'
         }
       });
       showToast('📝 正在获取字幕（不生成思维导图）...', 3000);
@@ -453,7 +470,7 @@ export function useFloatingBallState() {
     try {
       await RuntimeUtils.sendMessage({
         type: 'DOWNLOAD_SUBTITLE',
-        payload: { videoUrl: window.location.href, force: true }
+        payload: { videoUrl: window.location.href, force: true, origin: 'user' }
       });
       showToast('正在重新生成思维导图...');
     } catch (err) {
@@ -471,7 +488,7 @@ export function useFloatingBallState() {
     try {
       await RuntimeUtils.sendMessage({
         type: 'DOWNLOAD_SUBTITLE',
-        payload: { videoUrl: window.location.href, force: true }
+        payload: { videoUrl: window.location.href, force: true, origin: 'user' }
       });
       showToast('正在强制重新生成...');
     } catch (err) {
