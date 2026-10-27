@@ -286,6 +286,22 @@ export function useFloatingBallState() {
     };
   }, [fetchCurrentTask, normalizeUrl, openSubtitleResult, showToast]);
 
+  /**
+   * 已有字幕文本时直接进入思维导图生成，避免重复下载字幕 / 重复 ASR
+   */
+  const startMindmapFromSubtitle = async (subtitleText: string, videoTitle?: string) => {
+    await RuntimeUtils.sendMessage({
+      type: 'GENERATE_MINDMAP_DIRECT',
+      payload: {
+        videoUrl: window.location.href,
+        subtitleText,
+        videoTitle: videoTitle || getPageVideoTitle()
+      }
+    });
+    showToast('正在生成思维导图...');
+    fetchCurrentTask();
+  };
+
   const handleBallClick = async () => {
     if (!isContextValid.current || !chrome.runtime?.id) {
       showToast('⚠️ 扩展已更新，请刷新页面后继续使用', 5000);
@@ -293,34 +309,20 @@ export function useFloatingBallState() {
     }
     setShowNotification(false);
 
-    if (currentTask?.status === 'completed') {
-      // 仅字幕任务只打开字幕面板，绝不进入思维导图查看器
-      if (currentTask.subtitleOnly) {
-        if (currentTask.subtitleText) {
-          openSubtitleResult({
-            videoUrl: window.location.href,
-            videoTitle: currentTask.videoTitle,
-            subtitleText: currentTask.subtitleText,
-            isAsr: currentTask.isAsr,
-            savedToFile: currentTask.savedToFile
-          });
-        } else {
-          showToast('字幕结果已过期，请右键悬浮球重新获取');
-        }
-        return;
-      }
-      if (currentTask.result) {
-        setMindmapData(currentTask.result);
-        setShowViewer(true);
-        return;
-      }
-    }
-
-    if (currentTask?.status === 'running' || currentTask?.status === 'processing') {
+    if (currentTask?.status === 'running' || currentTask?.status === 'pending') {
       showToast('任务正在进行中，请稍候...');
       return;
     }
+
+    // 已完成的普通导图任务：直接打开查看器
+    if (currentTask?.status === 'completed' && !currentTask.subtitleOnly && currentTask.result) {
+      setMindmapData(currentTask.result);
+      setShowViewer(true);
+      return;
+    }
+
     try {
+      // 优先复用已有导图（含仅字幕任务完成后的再次左键）
       const response = await RuntimeUtils.sendMessage({
         type: 'GET_LATEST_MINDMAP_BY_URL',
         payload: { videoUrl: window.location.href }
@@ -328,24 +330,41 @@ export function useFloatingBallState() {
       if (response && response.mindmap) {
         setMindmapData(response.mindmap);
         setShowViewer(true);
-      } else {
-        try {
-          await RuntimeUtils.sendMessage({
-            type: 'DOWNLOAD_SUBTITLE',
-            payload: { videoUrl: window.location.href, videoTitle: getPageVideoTitle() }
-          });
-          showToast('正在开始生成思维导图...');
-          fetchCurrentTask();
-        } catch (err) {
-          showToast('启动生成任务失败，请稍后重试');
-        }
+        return;
       }
+
+      // 没有导图，但字幕已经就绪：直接基于现有字幕生成，跳过字幕下载 / ASR
+      if (currentTask?.subtitleText) {
+        await startMindmapFromSubtitle(currentTask.subtitleText, currentTask.videoTitle);
+        return;
+      }
+
+      const cachedSubtitle = await RuntimeUtils.sendMessage({
+        type: 'GET_SUBTITLE_CACHE',
+        payload: { videoUrl: window.location.href }
+      });
+      if (cachedSubtitle?.subtitleText) {
+        await startMindmapFromSubtitle(
+          cachedSubtitle.subtitleText,
+          currentTask?.videoTitle || getPageVideoTitle()
+        );
+        return;
+      }
+
+      // 完全没有字幕：走完整流程（获取字幕 → 生成导图）
+      await RuntimeUtils.sendMessage({
+        type: 'DOWNLOAD_SUBTITLE',
+        payload: { videoUrl: window.location.href, videoTitle: getPageVideoTitle() }
+      });
+      showToast('正在获取字幕并生成思维导图...');
+      fetchCurrentTask();
     } catch (error: any) {
       const errMsg = String(error?.message || error);
       if (errMsg.includes('context invalidated')) {
           // 已经在 RuntimeUtils 处理
       } else {
-          console.error('[FloatingBall] 获取思维导图失败:', error);
+          console.error('[FloatingBall] 生成思维导图失败:', error);
+          showToast('启动生成任务失败，请稍后重试');
       }
     }
   };

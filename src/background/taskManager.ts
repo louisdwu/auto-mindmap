@@ -159,6 +159,19 @@ export class TaskManager {
    * 创建生成思维导图任务
    */
   async createMindmapTask(videoUrl: string, subtitleText: string, videoTitle: string, tabId?: number, force?: boolean): Promise<Task> {
+    // 同一视频已有排队/执行中的导图任务时直接复用，避免连点或自动/手动流程叠加
+    if (force !== true) {
+      const activeTask = Array.from(this.tasks.values()).find(t =>
+        t.type === 'generate_mindmap' &&
+        (t.status === 'pending' || t.status === 'running') &&
+        this.isSameVideo(t.data?.videoUrl, videoUrl)
+      );
+      if (activeTask) {
+        console.log('[TaskManager] 复用进行中的导图任务:', activeTask.id);
+        return activeTask;
+      }
+    }
+
     const task: Task = {
       id: uuidv4(),
       type: 'generate_mindmap',
