@@ -65,7 +65,7 @@ export class GeneratorService {
   static async requestSubtitleDownload(videoUrl: string): Promise<any> {
     return RuntimeUtils.sendMessage({
       type: 'DOWNLOAD_SUBTITLE',
-      payload: { videoUrl }
+      payload: { videoUrl, origin: 'auto' }
     });
   }
 
@@ -79,7 +79,7 @@ export class GeneratorService {
   }): Promise<any> {
     return RuntimeUtils.sendMessage({
       type: 'GENERATE_MINDMAP_DIRECT',
-      payload
+      payload: { ...payload, origin: 'auto' }
     });
   }
 

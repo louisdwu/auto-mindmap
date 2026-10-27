@@ -1,7 +1,7 @@
 import { TaskManager } from './taskManager';
 import { StorageService } from '../services/storageService';
 import { VideoUtils } from '../utils/videoUtils';
-import { ExtensionMessage } from '../types/messages';
+import { ExtensionMessage, RequestOrigin } from '../types/messages';
 
 export class MessageHandler {
   constructor(private taskManager: TaskManager) {
@@ -48,7 +48,10 @@ export class MessageHandler {
       
       case 'GET_SUBTITLE_CACHE':
         return await this.handleGetSubtitleCache(message.payload);
-      
+
+      case 'SET_SUBTITLE_ONLY_MODE':
+        return await this.handleSetSubtitleOnlyMode(message.payload);
+
       default:
         // 处理未知消息类型
         return { error: 'Unknown message type' };
@@ -56,14 +59,32 @@ export class MessageHandler {
   }
 
   private async handleDownloadSubtitle(
-    payload: { videoUrl: string; videoTitle?: string; force?: boolean; subtitleOnly?: boolean },
+    payload: { videoUrl: string; videoTitle?: string; force?: boolean; subtitleOnly?: boolean; origin?: RequestOrigin },
     tabId?: number
   ) {
     const isForce = payload.force === true;
     const isSubtitleOnly = payload.subtitleOnly === true;
+    const isAutoRequest = payload.origin === 'auto';
 
     const config = await StorageService.getConfig();
     const videoId = VideoUtils.extractVideoId(payload.videoUrl);
+
+    // 用户主动选择仅字幕：记录意图，并取消尚未开始的自动导图任务
+    if (isSubtitleOnly && !isAutoRequest) {
+      await this.taskManager.markSubtitleOnlyMode(payload.videoUrl);
+      await this.taskManager.cancelPendingMindmapTasks(payload.videoUrl);
+    }
+
+    // 用户已选择仅字幕时，自动流程不再发起导图生成
+    if (!isSubtitleOnly && isAutoRequest && await this.taskManager.isSubtitleOnlyMode(payload.videoUrl)) {
+      console.log('[MessageHandler] 用户已选择仅字幕，跳过自动导图流程:', payload.videoUrl);
+      return { skipped: true, reason: 'subtitle-only' };
+    }
+
+    // 用户主动要求生成导图：解除仅字幕模式
+    if (!isSubtitleOnly && !isAutoRequest) {
+      await this.taskManager.clearSubtitleOnlyMode(payload.videoUrl);
+    }
 
     // 已有一个自动流程发起的字幕下载任务：直接切换为仅字幕模式，避免重复下载
     if (isSubtitleOnly && !isForce) {
@@ -119,6 +140,17 @@ export class MessageHandler {
     return { taskId: task.id };
   }
 
+  /**
+   * 用户右键明确「只要字幕」时调用：记录意图并取消排队中的导图任务。
+   * 若自动流程正在下载字幕，则直接切换该任务，避免重复下载。
+   */
+  private async handleSetSubtitleOnlyMode(payload: { videoUrl: string }) {
+    await this.taskManager.markSubtitleOnlyMode(payload.videoUrl);
+    const cancelled = await this.taskManager.cancelPendingMindmapTasks(payload.videoUrl);
+    const promoted = await this.taskManager.promoteToSubtitleOnly(payload.videoUrl);
+    return { success: true, cancelled, promoted: !!promoted };
+  }
+
   private async handleGetLatestMindmap() {
     console.log('[MessageHandler] GET_LATEST_MINDMAP 请求');
     
@@ -163,7 +195,23 @@ export class MessageHandler {
     return { task };
   }
 
-  private async handleGenerateMindmapDirect(payload: { videoUrl: string, subtitleText: string, videoTitle: string, force?: boolean }, tabId?: number) {
+  private async handleGenerateMindmapDirect(
+    payload: { videoUrl: string; subtitleText: string; videoTitle: string; force?: boolean; origin?: RequestOrigin },
+    tabId?: number
+  ) {
+    const isAutoRequest = payload.origin === 'auto';
+
+    // 用户已选择仅字幕时，页面自动流程不得再生成导图
+    if (isAutoRequest && await this.taskManager.isSubtitleOnlyMode(payload.videoUrl)) {
+      console.log('[MessageHandler] 用户已选择仅字幕，跳过自动导图生成:', payload.videoUrl);
+      return { skipped: true, reason: 'subtitle-only' };
+    }
+
+    // 用户主动要求生成导图：解除仅字幕模式
+    if (!isAutoRequest) {
+      await this.taskManager.clearSubtitleOnlyMode(payload.videoUrl);
+    }
+
     // 双重保险：在后台也检查缓存
     const config = await StorageService.getConfig();
     if (payload.force !== true && config?.settings.enableCache) {
