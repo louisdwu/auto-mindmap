@@ -14,82 +14,181 @@ const TASKS_STORAGE_KEY = 'active_tasks';
 const SUBTITLE_ONLY_MODE_KEY = 'subtitle_only_mode';
 const SUBTITLE_ONLY_MODE_TTL = 10 * 60 * 1000;
 
+/** 任务结束多久后仍允许 UI 看到结果 */
+const RECENT_COMPLETED_MS = 30 * 1000;
+const RECENT_FAILED_MS = 60 * 60 * 1000;
+const TASK_RETENTION_MS = 24 * 60 * 60 * 1000;
+
+/** 服务端长任务期间保活：Chrome 会在 SW 空闲 ~30s 后回收，扩展 API 调用可重置计时 */
+const HEARTBEAT_INTERVAL_MS = 20 * 1000;
+
+interface TaskInput {
+  subtitleText: string;
+  videoTitle?: string;
+}
+
+/**
+ * 任务管理器（v2）
+ *
+ * 设计原则：
+ * 1. 内存里保存完整任务（含字幕/导图），持久化时剥离大字段，避免每次进度更新
+ *    都把整篇字幕写进 chrome.storage.local，造成写放大与配额风险。
+ * 2. 调度与执行分离：processQueue 同步「认领」任务并置为 running，再异步执行，
+ *    避免并发窗口内重复启动同一任务或突破并发上限。
+ * 3. 状态变更才是持久化时机；进度只广播给 UI，不落盘。
+ * 4. 任务的身份统一使用 utils/media.ts 的 cacheId，B 站分 P 不会互相命中。
+ */
 export class TaskManager {
   private tasks: Map<string, Task> = new Map();
-  private isScheduling: boolean = false;
+  /** 直接生成任务的字幕原文只放在内存/字幕缓存，不写进 active_tasks */
+  private taskInputs: Map<string, TaskInput> = new Map();
+  private runningTaskIds: Set<string> = new Set();
+  private isScheduling = false;
+  private scheduleAgain = false;
+  private concurrencyLimit = 3;
+
+  private persistTimer: ReturnType<typeof setTimeout> | null = null;
+  private persistChain: Promise<void> = Promise.resolve();
+  private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  /** 初始化（配置读取 + 任务恢复）完成信号；创建任务必须等它就绪 */
+  private readonly ready: Promise<void>;
 
   constructor() {
-    // 从 storage 恢复任务状态，并在恢复完成后继续处理队列
-    this.restoreTasks().then(() => {
-      this.processQueue();
-    });
+    this.ready = this.init();
   }
 
+  private async init(): Promise<void> {
+    try {
+      const config = await StorageService.getConfig();
+      this.concurrencyLimit = this.clampConcurrency(config?.settings?.concurrencyLimit);
+    } catch {
+      this.concurrencyLimit = 3;
+    }
+
+    await this.restoreTasks();
+    this.updateHeartbeat();
+    this.schedule();
+  }
+
+  private clampConcurrency(value?: number): number {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return 3;
+    return Math.min(20, Math.max(1, Math.floor(n)));
+  }
+
+  // ------------------------------------------------------------------ //
+  // 持久化
+  // ------------------------------------------------------------------ //
+
   /**
-   * 从 storage 恢复任务状态
+   * 从 storage 恢复任务状态。
+   * running 状态说明上一次 Service Worker 被浏览器回收，无法安全续跑，标记失败；
+   * pending 任务可以继续排队；completed 不恢复（UI 通过导图缓存读取）。
    */
-  private async restoreTasks() {
+  private async restoreTasks(): Promise<void> {
     try {
       const result = await chrome.storage.local.get(TASKS_STORAGE_KEY);
-      const storedTasks = result[TASKS_STORAGE_KEY] || [];
+      const storedTasks: Task[] = Array.isArray(result[TASKS_STORAGE_KEY])
+        ? result[TASKS_STORAGE_KEY]
+        : [];
 
       for (const task of storedTasks) {
-        // 恢复未完成的任务
+        if (!task?.id || !task.data?.videoUrl) continue;
+
         if (task.status === 'pending') {
           this.tasks.set(task.id, task);
-        } else if (task.status === 'running') {
-          // 如果重启时发现任务处于 running 状态，说明上次由于 Service Worker 被强制关闭而中断
-          // 我们将其设为 failed 状态，并提示用户重试，避免由于自动重启进入死循环（特别是 LLM 响应极慢导致 SW 频繁关闭时）
+          continue;
+        }
+
+        if (task.status === 'running') {
           task.status = 'failed';
           task.error = '任务由于浏览器后台服务中断而停止，建议调大超时时间并重试。';
           task.updatedAt = Date.now();
+          if (this.shouldKeepFailedTask(task)) this.tasks.set(task.id, task);
+          continue;
+        }
+
+        if (task.status === 'failed' && this.shouldKeepFailedTask(task)) {
           this.tasks.set(task.id, task);
-        } else if (task.status === 'failed') {
-          // 保留 generate_mindmap 失败任务（其字幕可供用户复制/查看报错）
-          // 以及用户主动触发的「仅获取字幕」失败任务（用户需要看到失败原因）
-          // 普通 download_subtitle 失败任务无字幕价值，字幕获取逻辑已多次迭代，
-          // 保留旧失败任务会误导用户以为新代码仍有问题，故 Service Worker 重启时丢弃
-          const isRecentFailure = Date.now() - (task.updatedAt || task.createdAt || 0) < 3600000;
-          const shouldKeep = isRecentFailure && (
-            task.type === 'generate_mindmap' ||
-            (task.type === 'download_subtitle' && task.data?.subtitleOnly === true)
-          );
-          if (shouldKeep) {
-            this.tasks.set(task.id, task);
-          }
         }
       }
 
       console.log('[TaskManager] Restored tasks:', this.tasks.size);
+      await this.flushPersist();
     } catch (error) {
       console.error('[TaskManager] Failed to restore tasks:', error);
     }
   }
 
-  /**
-   * 保存任务到 storage
-   */
-  private async saveTasks() {
-    try {
-      const tasksArray = Array.from(this.tasks.values());
-      await chrome.storage.local.set({
-        [TASKS_STORAGE_KEY]: tasksArray
-      });
-    } catch (error) {
-      console.error('[TaskManager] Failed to save tasks:', error);
-    }
+  private shouldKeepFailedTask(task: Task): boolean {
+    const isRecent = Date.now() - (task.updatedAt || task.createdAt || 0) < RECENT_FAILED_MS;
+    if (!isRecent) return false;
+    return task.type === 'generate_mindmap'
+      || (task.type === 'download_subtitle' && task.data?.subtitleOnly === true);
   }
 
   /**
-   * 判断两个视频 URL 是否指向同一视频
+   * 剥离字幕与导图大字段后再落盘。
+   * 这些内容已经分别保存在字幕缓存 / 导图存储中，任务表只保留状态与定位信息。
    */
+  private serializeTask(task: Task): Task {
+    const serialized: Task = {
+      ...task,
+      data: { ...task.data },
+      result: task.result ? { ...task.result } : undefined
+    };
+
+    if (serialized.result) {
+      delete serialized.result.subtitleText;
+      delete serialized.result.mindmapMarkdown;
+      delete serialized.result.initialMindmapMarkdown;
+      if (serialized.result.mindmapData) {
+        const { mindmapMarkdown, subtitleText, initialMindmapMarkdown, ...rest } = serialized.result.mindmapData;
+        void mindmapMarkdown;
+        void subtitleText;
+        void initialMindmapMarkdown;
+        serialized.result.mindmapData = rest;
+      }
+    }
+
+    return serialized;
+  }
+
+  /** 合并短时间内的多次落盘请求，并按调用顺序串行执行，避免旧快照覆盖新快照 */
+  private persistSoon(): void {
+    if (this.persistTimer) return;
+    this.persistTimer = setTimeout(() => {
+      this.persistTimer = null;
+      void this.flushPersist();
+    }, 250);
+  }
+
+  private async flushPersist(): Promise<void> {
+    if (this.persistTimer) {
+      clearTimeout(this.persistTimer);
+      this.persistTimer = null;
+    }
+
+    const snapshot = Array.from(this.tasks.values()).map(task => this.serializeTask(task));
+    this.persistChain = this.persistChain.then(async () => {
+      try {
+        await chrome.storage.local.set({ [TASKS_STORAGE_KEY]: snapshot });
+      } catch (error) {
+        console.error('[TaskManager] Failed to save tasks:', error);
+      }
+    });
+
+    await this.persistChain;
+  }
+
+  // ------------------------------------------------------------------ //
+  // 视频身份与意图
+  // ------------------------------------------------------------------ //
+
   private isSameVideo(urlA?: string, urlB?: string): boolean {
     return VideoUtils.isSameVideo(urlA, urlB);
   }
 
-  /**
-   * 记录「该视频本次只看字幕」的用户意图，供自动流程查询
-   */
   async markSubtitleOnlyMode(videoUrl: string): Promise<void> {
     const videoId = VideoUtils.getCacheId(videoUrl);
     if (!videoId) return;
@@ -98,7 +197,6 @@ export class TaskManager {
     const modes: Record<string, number> = result[SUBTITLE_ONLY_MODE_KEY] || {};
     const now = Date.now();
 
-    // 顺手清理过期项，避免无限增长
     for (const [key, expiresAt] of Object.entries(modes)) {
       if (!expiresAt || expiresAt <= now) delete modes[key];
     }
@@ -106,9 +204,6 @@ export class TaskManager {
     await chrome.storage.local.set({ [SUBTITLE_ONLY_MODE_KEY]: modes });
   }
 
-  /**
-   * 查询该视频是否处于用户指定的「仅获取字幕」模式
-   */
   async isSubtitleOnlyMode(videoUrl: string): Promise<boolean> {
     const videoId = VideoUtils.getCacheId(videoUrl);
     if (!videoId) return false;
@@ -119,9 +214,6 @@ export class TaskManager {
     return typeof expiresAt === 'number' && expiresAt > Date.now();
   }
 
-  /**
-   * 用户显式要求生成导图时，解除「仅获取字幕」模式
-   */
   async clearSubtitleOnlyMode(videoUrl: string): Promise<void> {
     const videoId = VideoUtils.getCacheId(videoUrl);
     if (!videoId) return;
@@ -134,10 +226,8 @@ export class TaskManager {
     await chrome.storage.local.set({ [SUBTITLE_ONLY_MODE_KEY]: modes });
   }
 
-  /**
-   * 取消同一视频排队中的导图任务（尚未开始执行，可安全移除）
-   */
   async cancelPendingMindmapTasks(videoUrl: string): Promise<number> {
+    await this.ready;
     const pending = Array.from(this.tasks.values()).filter(t =>
       t.type === 'generate_mindmap' &&
       t.status === 'pending' &&
@@ -147,19 +237,20 @@ export class TaskManager {
 
     for (const task of pending) {
       this.tasks.delete(task.id);
+      this.taskInputs.delete(task.id);
+      this.broadcastTaskUpdate(task);
     }
-    await this.saveTasks();
+    await this.flushPersist();
     console.log('[TaskManager] 已取消排队中的导图任务:', pending.map(t => t.id));
     return pending.length;
   }
 
   /**
    * 将正在排队/执行的普通字幕任务切换为「仅获取字幕」。
-   *
-   * 典型场景：打开视频后自动流程已在下载字幕，用户此时右键悬浮球表示
-   * 只想要字幕。复用该任务可避免重复下载/重复 ASR，同时保证后续不再生成导图。
+   * 复用该任务可避免重复下载/重复 ASR。
    */
   async promoteToSubtitleOnly(videoUrl: string): Promise<Task | undefined> {
+    await this.ready;
     const task = Array.from(this.tasks.values()).find(t =>
       t.type === 'download_subtitle' &&
       (t.status === 'pending' || t.status === 'running') &&
@@ -170,14 +261,12 @@ export class TaskManager {
 
     task.data = { ...task.data, subtitleOnly: true };
     task.updatedAt = Date.now();
-    await this.saveTasks();
+    await this.flushPersist();
+    this.broadcastTaskUpdate(task);
     console.log('[TaskManager] 进行中的下载任务已切换为仅字幕模式:', task.id);
     return task;
   }
 
-  /**
-   * 查找同类正在排队/执行中的任务，避免重复点击时重复下载字幕或重复 ASR
-   */
   private findActiveTask(videoUrl: string, type: Task['type']): Task | undefined {
     return Array.from(this.tasks.values()).find(task => {
       if (task.type !== type) return false;
@@ -186,10 +275,10 @@ export class TaskManager {
     });
   }
 
-  /**
-   * 创建下载字幕任务
-   * @param subtitleOnly true = 仅获取字幕，不生成思维导图
-   */
+  // ------------------------------------------------------------------ //
+  // 创建任务
+  // ------------------------------------------------------------------ //
+
   async createDownloadTask(
     videoUrl: string,
     tabId?: number,
@@ -198,15 +287,14 @@ export class TaskManager {
     videoTitle?: string,
     forceAsr: boolean = false
   ): Promise<Task> {
-    // 不区分模式地复用进行中的字幕任务：
-    // 用户已选择仅字幕时，自动流程的普通请求不能另起一个会生成导图的任务。
+    await this.ready;
     const runningTask = force ? undefined : this.findActiveTask(videoUrl, 'download_subtitle');
     if (runningTask) {
-      // 并发情况下自动流程可能刚创建了一个普通任务：用户已选仅字幕时同步切换
       if (subtitleOnly && runningTask.data?.subtitleOnly !== true) {
         runningTask.data = { ...runningTask.data, subtitleOnly: true };
         runningTask.updatedAt = Date.now();
-        await this.saveTasks();
+        await this.flushPersist();
+        this.broadcastTaskUpdate(runningTask);
         console.log('[TaskManager] 复用并切换进行中的字幕任务为仅字幕:', runningTask.id);
       } else {
         console.log('[TaskManager] 复用进行中的字幕任务:', runningTask.id);
@@ -225,23 +313,29 @@ export class TaskManager {
     };
 
     this.tasks.set(task.id, task);
-    await this.saveTasks();
-    this.processQueue();
-
+    await this.flushPersist();
+    this.broadcastTaskUpdate(task);
+    this.schedule();
     return task;
   }
 
-  /**
-   * 创建生成思维导图任务
-   */
-  async createMindmapTask(videoUrl: string, subtitleText: string, videoTitle: string, tabId?: number, force?: boolean): Promise<Task> {
-    // 同一视频已有排队/执行中的导图任务时直接复用，避免连点或自动/手动流程叠加
+  async createMindmapTask(
+    videoUrl: string,
+    subtitleText: string,
+    videoTitle: string,
+    tabId?: number,
+    force?: boolean
+  ): Promise<Task> {
+    await this.ready;
+    const cacheId = VideoUtils.getCacheId(videoUrl);
+    if (cacheId && subtitleText) {
+      await StorageService.saveSubtitleCache(cacheId, subtitleText).catch(err => {
+        console.warn('[TaskManager] Failed to save subtitle cache:', err);
+      });
+    }
+
     if (force !== true) {
-      const activeTask = Array.from(this.tasks.values()).find(t =>
-        t.type === 'generate_mindmap' &&
-        (t.status === 'pending' || t.status === 'running') &&
-        this.isSameVideo(t.data?.videoUrl, videoUrl)
-      );
+      const activeTask = this.findActiveTask(videoUrl, 'generate_mindmap');
       if (activeTask) {
         console.log('[TaskManager] 复用进行中的导图任务:', activeTask.id);
         return activeTask;
@@ -252,88 +346,130 @@ export class TaskManager {
       id: uuidv4(),
       type: 'generate_mindmap',
       status: 'pending',
-      data: { videoUrl, subtitleText, videoTitle, force },
+      data: { videoUrl, videoTitle, force },
       createdAt: Date.now(),
       updatedAt: Date.now(),
       tabId
     };
 
+    // 直接生成时字幕来自页面，先落字幕缓存：任务表不保存原文，
+    // 但 SW 重启或 LLM 失败后仍能通过 GET_SUBTITLE_CACHE 找回。
+    this.taskInputs.set(task.id, { subtitleText, videoTitle });
+
     this.tasks.set(task.id, task);
-    await this.saveTasks();
-
-    // 异步缓存原始字幕，保障即使 LLM 调用失败也能通过视频 ID 检索到字幕原文本
-    const videoId = VideoUtils.getCacheId(videoUrl);
-    if (videoId && subtitleText) {
-      StorageService.saveSubtitleCache(videoId, subtitleText).catch(err => {
-        console.warn('[TaskManager] Failed to save subtitle cache:', err);
-      });
-    }
-
-    this.processQueue();
-
+    await this.flushPersist();
+    this.broadcastTaskUpdate(task);
+    this.schedule();
     return task;
   }
 
+  // ------------------------------------------------------------------ //
+  // 调度与执行
+  // ------------------------------------------------------------------ //
+
   /**
-   * 处理任务队列 (核心调度逻辑)
+   * 调度队列：先同步认领空位（置 running），再异步执行。
+   * 这样即使 executeTask 内部有 await，也不会被下一次 schedule 重复启动。
    */
-  private async processQueue() {
-    if (this.isScheduling) return;
+  private schedule(): void {
+    if (this.isScheduling) {
+      this.scheduleAgain = true;
+      return;
+    }
     this.isScheduling = true;
 
-    try {
-      const config = await StorageService.getConfig();
-      const concurrencyLimit = config?.settings?.concurrencyLimit || 3;
+    void (async () => {
+      try {
+        const config = await StorageService.getConfig();
+        this.concurrencyLimit = this.clampConcurrency(config?.settings?.concurrencyLimit);
 
-      const allTasks = Array.from(this.tasks.values());
-      const runningTasks = allTasks.filter(t => t.status === 'running');
-      const pendingTasks = allTasks
-        .filter(t => t.status === 'pending')
-        .sort((a, b) => a.createdAt - b.createdAt);
+        // 以内存状态为准重建运行集合，防止异常路径遗漏
+        this.runningTaskIds = new Set(
+          Array.from(this.tasks.values())
+            .filter(t => t.status === 'running')
+            .map(t => t.id)
+        );
 
-      if (runningTasks.length >= concurrencyLimit || pendingTasks.length === 0) {
-        return;
+        const availableSlots = this.concurrencyLimit - this.runningTaskIds.size;
+        if (availableSlots <= 0) return;
+
+        const pendingTasks = Array.from(this.tasks.values())
+          .filter(t => t.status === 'pending')
+          .sort((a, b) => a.createdAt - b.createdAt)
+          .slice(0, availableSlots);
+
+        for (const task of pendingTasks) {
+          task.status = 'running';
+          task.updatedAt = Date.now();
+          this.runningTaskIds.add(task.id);
+          this.broadcastTaskUpdate(task);
+          void this.runTask(task);
+        }
+
+        if (pendingTasks.length > 0) {
+          console.log(`[TaskManager] Started ${pendingTasks.length} tasks. Running: ${this.runningTaskIds.size}/${this.concurrencyLimit}`);
+          this.updateHeartbeat();
+          this.persistSoon();
+        }
+      } catch (error) {
+        console.error('[TaskManager] Scheduling loop failed:', error);
+      } finally {
+        this.isScheduling = false;
+        if (this.scheduleAgain) {
+          this.scheduleAgain = false;
+          this.schedule();
+        }
       }
-
-      const availableSlots = concurrencyLimit - runningTasks.length;
-      const tasksToStart = pendingTasks.slice(0, availableSlots);
-
-      console.log(`[TaskManager] Starting ${tasksToStart.length} tasks. Total running: ${runningTasks.length}/${concurrencyLimit}`);
-
-      for (const task of tasksToStart) {
-        // 非阻塞启动任务线程
-        this.runTask(task);
-      }
-    } catch (error) {
-      console.error('[TaskManager] Scheduling loop failed:', error);
-    } finally {
-      this.isScheduling = false;
-    }
+    })();
   }
 
   /**
-   * 线程化执行任务，确保单个任务失败不影响调度
+   * 长任务期间保活：定时调用扩展 API 重置 Service Worker 空闲计时。
+   * 没有运行中任务时必须停掉，避免无意义唤醒。
    */
-  private async runTask(task: Task) {
-    // 开启心跳，防止 Service Worker 在长耗时任务（如长视频 LLM 生成）中被 Chrome 杀死
-    const heartbeatId = setInterval(() => {
-      chrome.storage.local.get(['last_heartbeat']);
-    }, 10000);
+  private updateHeartbeat(): void {
+    if (this.runningTaskIds.size > 0) {
+      if (this.heartbeatTimer) return;
+      this.heartbeatTimer = setInterval(() => {
+        chrome.runtime.getPlatformInfo().catch(() => {
+          // 扩展上下文失效时静默
+        });
+      }, HEARTBEAT_INTERVAL_MS);
+      return;
+    }
 
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
+    }
+  }
+
+  private broadcastTaskUpdate(task: Task): void {
+    const payload = { task: this.serializeTask(task) };
+    if (task.tabId) {
+      chrome.tabs.sendMessage(task.tabId, { type: 'TASK_UPDATE', payload }).catch(() => {
+        // 标签页关闭或 content script 未注入时忽略
+      });
+      return;
+    }
+    chrome.runtime.sendMessage({ type: 'TASK_UPDATE', payload }).catch(() => {
+      // 没有接收者时忽略
+    });
+  }
+
+  private async runTask(task: Task): Promise<void> {
     try {
       await this.executeTask(task);
-    } catch (error) {
-      console.error(`[TaskManager] Task ${task.id} failed:`, error);
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      task.status = 'failed';
-      task.error = errorMessage;
+      task.status = 'completed';
       task.updatedAt = Date.now();
-      await this.saveTasks();
+    } catch (error: any) {
+      console.error(`[TaskManager] Task ${task.id} failed:`, error);
+      task.status = 'failed';
+      task.error = error instanceof Error ? error.message : 'Unknown error';
+      task.updatedAt = Date.now();
 
-      // 记录失败统计
       if (task.type === 'generate_mindmap') {
-        const videoUrl = task.data.videoUrl;
-        const videoId = VideoUtils.getCacheId(videoUrl);
+        const videoId = VideoUtils.getCacheId(task.data.videoUrl);
         const config = await StorageService.getConfig();
         const selectedId = config?.selectedLLMConfigId || 'default';
         await StatsService.recordGeneration({
@@ -343,24 +479,24 @@ export class TaskManager {
           isSuccess: false
         });
       }
-      
-      // 必须通过 LoggerService 记录，否则用户的日志面板里看不到报错信息
+
       await LoggerService.error('TaskManager', `任务执行失败 (${task.type})`, error, task.id);
     } finally {
-      clearInterval(heartbeatId);
-      // 任务结束，尝试启动后续排队任务
-      this.processQueue();
+      this.runningTaskIds.delete(task.id);
+      if (task.status === 'failed') {
+        this.taskInputs.delete(task.id);
+      }
+      this.updateHeartbeat();
+      this.broadcastTaskUpdate(task);
+      await this.flushPersist();
+      this.schedule();
     }
   }
 
-  /**
-   * 执行单个任务
-   */
-  private async executeTask(task: Task) {
-    task.status = 'running';
+  private async executeTask(task: Task): Promise<void> {
+    task.statusMessage = '开始执行...';
     task.updatedAt = Date.now();
-    await this.saveTasks();
-
+    this.broadcastTaskUpdate(task);
     await LoggerService.info('TaskManager', `开始执行任务: ${task.type}`, { taskId: task.id }, task.id);
 
     switch (task.type) {
@@ -374,27 +510,23 @@ export class TaskManager {
         throw new Error(`Unknown task type: ${task.type}`);
     }
 
-    task.status = 'completed';
     task.updatedAt = Date.now();
-    await this.saveTasks();
   }
 
-  /**
-   * 执行下载字幕任务
-   *
-   * 常规模式：获取字幕后自动创建思维导图任务；
-   * 仅字幕模式（subtitleOnly）：只缓存并交付字幕，绝不触发 LLM。
-   */
-  private async executeDownloadTask(task: Task) {
+  private reportProgress(task: Task, message: string): void {
+    task.statusMessage = message;
+    task.updatedAt = Date.now();
+    // 进度只广播，不落盘：任务表落盘只发生在状态迁移时。
+    this.broadcastTaskUpdate(task);
+  }
+
+  private async executeDownloadTask(task: Task): Promise<void> {
     const { videoUrl, subtitleOnly } = task.data;
     const videoId = VideoUtils.getCacheId(videoUrl);
     const config = await StorageService.getConfig();
 
-    // 仅字幕模式优先复用已有字幕缓存，避免重复下载/重复 ASR
     if (subtitleOnly && videoId && task.data.force !== true) {
-      task.statusMessage = '正在检索已缓存的字幕...';
-      task.updatedAt = Date.now();
-      await this.saveTasks();
+      this.reportProgress(task, '正在检索已缓存的字幕...');
 
       const subtitleCache = await StorageService.getSubtitleCache(videoId);
       const asrCache = subtitleCache
@@ -414,7 +546,6 @@ export class TaskManager {
       }
     }
 
-    // YouTube 视频：Service Worker 中无法直接拿到字幕，需通过 content script 代理获取
     if (videoUrl.includes('youtube.com') || videoUrl.includes('youtu.be')) {
       console.log('[TaskManager] YouTube video detected, delegating to content script for subtitle.');
       await this.executeYouTubeDownloadTask(task, videoUrl);
@@ -424,61 +555,43 @@ export class TaskManager {
     if (!config) throw new Error('配置未初始化');
 
     const result = await SubtitleService.downloadChineseSubtitle(
-      videoUrl, 
+      videoUrl,
       config,
-      async (msg) => {
-        task.statusMessage = msg;
-        task.updatedAt = Date.now();
-        await this.saveTasks();
-      },
+      (msg) => this.reportProgress(task, msg),
       task.data.force === true,
       task.tabId,
       task.data.forceAsr === true
     );
 
-    // 读取任务数据而不是启动时的快照：右键可能已把进行中的普通下载任务切换为仅字幕模式
+    // 读取最新 data：右键可能已把进行中的普通下载任务切换为仅字幕模式
     if (task.data.subtitleOnly === true) {
       await this.finishSubtitleOnlyTask(task, { ...result, fromCache: false });
       return;
     }
 
     task.result = result;
-    task.statusMessage = '字幕获取成功，即将开始生成思维导图';
+    this.reportProgress(task, '字幕获取成功，正在生成思维导图...');
 
-    // 下载完成后，自动创建生成思维导图任务
     await this.createMindmapTask(videoUrl, result.subtitleText, result.videoTitle, task.tabId);
   }
 
   /**
-   * 执行 YouTube 字幕获取任务（通过 content script 代理）
-   * YouTube 字幕只能在页面上下文中读取，故由 background 向对应标签页发送
-   * FETCH_YOUTUBE_SUBTITLE 消息，content script 利用已缓存的字幕轨道/拦截到的
-   * 字幕请求主动获取并解析，返回带时间戳的纯文本后再走标准思维导图生成流程。
-   *
-   * 若该视频没有可用字幕（无 CC 字幕），则回退到 ASR 语音识别流程：
-   *   1. 通过 FETCH_YOUTUBE_AUDIO_URL 获取音频流地址
-   *   2. 调用 SubtitleService.runAsrFlow 下载并识别
-   * 这与 B 站“无字幕 → 下载音频 → ASR”的流程保持一致。
+   * YouTube 字幕获取：content script 代理 → 无 CC 时回退 ASR。
    */
-  private async executeYouTubeDownloadTask(task: Task, videoUrl: string) {
+  private async executeYouTubeDownloadTask(task: Task, videoUrl: string): Promise<void> {
     const tabId = task.tabId;
     if (!tabId) {
       throw new Error('YouTube 字幕获取失败：缺少标签页上下文。请刷新视频页面后再次点击悬浮球。');
     }
 
-    const videoId = VideoUtils.getCacheId(videoUrl);
+    const cacheId = VideoUtils.getCacheId(videoUrl);
     let videoTitle = 'YouTube 视频';
     let subtitleText: string | null = null;
     let isAsr = false;
-
     const forceAsr = task.data.forceAsr === true;
 
-    // === 阶段 1：尝试获取 CC 字幕（「重新语音识别」时跳过）===
     if (!forceAsr) {
-      task.statusMessage = '正在通过页面上下文获取 YouTube 字幕...';
-      task.updatedAt = Date.now();
-      await this.saveTasks();
-
+      this.reportProgress(task, '正在通过页面上下文获取 YouTube 字幕...');
       try {
         const resp = await chrome.tabs.sendMessage(tabId, { type: 'FETCH_YOUTUBE_SUBTITLE' });
         if (resp?.subtitleText && String(resp.subtitleText).trim()) {
@@ -490,18 +603,14 @@ export class TaskManager {
       }
     }
 
-    // === 阶段 2：无 CC 字幕（或用户要求重新语音识别），进入 ASR ===
     if (!subtitleText) {
       const config = await StorageService.getConfig();
       if (!config) throw new Error('配置未初始化');
 
-      task.statusMessage = forceAsr
+      this.reportProgress(task, forceAsr
         ? '正在重新语音识别（跳过官方字幕与缓存）...'
-        : '未检测到 YouTube 字幕，准备下载音频进行语音识别...';
-      task.updatedAt = Date.now();
-      await this.saveTasks();
+        : '未检测到 YouTube 字幕，准备下载音频进行语音识别...');
 
-      // 2.1 获取音频流地址
       let audioUrl: string | null = null;
       try {
         const audioResp = await chrome.tabs.sendMessage(tabId, { type: 'FETCH_YOUTUBE_AUDIO_URL' });
@@ -514,18 +623,13 @@ export class TaskManager {
         throw new Error('无法从页面提取 YouTube 音频流地址（可能是受签名保护的内容），暂不支持语音识别。');
       }
 
-      // 2.2 调用通用 ASR 流程（复用 B 站的锁、缓存、transcribe 逻辑）
       const asrResult = await SubtitleService.runAsrFlow({
         audioUrl,
-        videoId: videoId || videoUrl,
+        videoId: cacheId || videoUrl,
         videoTitle,
         videoUrl,
         config,
-        onProgress: async (msg) => {
-          task.statusMessage = msg;
-          task.updatedAt = Date.now();
-          await this.saveTasks();
-        },
+        onProgress: (msg) => this.reportProgress(task, msg),
         forceMode: task.data.force === true,
         tabId
       });
@@ -538,34 +642,23 @@ export class TaskManager {
     }
 
     if (task.data.subtitleOnly === true) {
-      await this.finishSubtitleOnlyTask(task, {
-        videoUrl,
-        videoTitle,
-        subtitleText,
-        isAsr,
-        fromCache: false
-      });
+      await this.finishSubtitleOnlyTask(task, { videoUrl, videoTitle, subtitleText, isAsr, fromCache: false });
       return;
     }
 
-    // 缓存字幕，保障 LLM 失败后也能通过 GET_SUBTITLE_CACHE 取回字幕原文本
-    if (videoId) {
-      StorageService.saveSubtitleCache(videoId, subtitleText).catch(err => {
+    if (cacheId) {
+      StorageService.saveSubtitleCache(cacheId, subtitleText).catch(err => {
         console.warn('[TaskManager] Failed to save YouTube subtitle cache:', err);
       });
     }
 
     task.result = { videoUrl, videoTitle, subtitleText, isAsr };
-    task.statusMessage = '字幕获取成功，即将开始生成思维导图';
-    await this.saveTasks();
-
-    // 与 B 站流程保持一致：获取到字幕后自动创建生成思维导图任务
+    this.reportProgress(task, '字幕获取成功，正在生成思维导图...');
     await this.createMindmapTask(videoUrl, subtitleText, videoTitle, task.tabId);
   }
 
   /**
    * 收尾「仅获取字幕」任务：缓存字幕、按需落盘、通知 content script。
-   * 该流程不创建 generate_mindmap 任务，因此不会消耗任何 LLM 调用。
    */
   private async finishSubtitleOnlyTask(
     task: Task,
@@ -586,8 +679,6 @@ export class TaskManager {
       });
     }
 
-    // 用户开启了「本地文件缓存」时，仅字幕模式也直接把 .txt 落到下载目录。
-    // 缓存命中的场景不重复落盘，避免反复右键产生重复文件。
     let savedToFile = false;
     try {
       const config = await StorageService.getConfig();
@@ -614,14 +705,10 @@ export class TaskManager {
     };
     task.statusMessage = fromCache ? '已复用缓存字幕' : '字幕获取完成';
     task.updatedAt = Date.now();
-    await this.saveTasks();
-
+    this.broadcastTaskUpdate(task);
     await this.notifySubtitleReady(task);
   }
 
-  /**
-   * 通知发起任务的标签页：仅字幕结果已就绪
-   */
   private async notifySubtitleReady(task: Task): Promise<void> {
     const tabId = task.tabId;
     const result = task.result;
@@ -653,67 +740,67 @@ export class TaskManager {
     }
   }
 
-  /**
-   * 执行生成思维导图任务
-   */
-  private async executeMindmapTask(task: Task) {
-    const { videoUrl, subtitleText, videoTitle, force } = task.data;
+  private async resolveSubtitleText(task: Task): Promise<string | null> {
+    const input = this.taskInputs.get(task.id);
+    if (input?.subtitleText) return input.subtitleText;
+
+    const videoId = VideoUtils.getCacheId(task.data.videoUrl);
+    if (!videoId) return null;
+
+    const subtitle = await StorageService.getSubtitleCache(videoId);
+    if (subtitle) return subtitle;
+
+    const config = await StorageService.getConfig();
+    return StorageService.getAsrCache(videoId, normalizeAsrLanguage(config?.settings.asrLanguage));
+  }
+
+  private async executeMindmapTask(task: Task): Promise<void> {
+    const { videoUrl, videoTitle, force } = task.data;
     const videoId = VideoUtils.getCacheId(videoUrl);
+
+    const subtitleText = await this.resolveSubtitleText(task);
+    if (!subtitleText) {
+      throw new Error('字幕已失效，请重新获取字幕后重试。');
+    }
 
     if (videoId && force) {
       await StorageService.deletePhase1Cache(videoId);
     }
 
-    // 获取配置
     const config = await StorageService.getConfig();
-    if (!config) {
-      throw new Error('配置未初始化');
-    }
+    if (!config) throw new Error('配置未初始化');
 
-    // 验证配置
     const llmConfigs = await StorageService.getLLMConfigs();
     const selectedId = config.selectedLLMConfigId || 'default';
     const llmConfig = llmConfigs.find(c => c.id === selectedId) || llmConfigs[0];
-    
     if (!llmConfig) throw new Error('未找到有效的 LLM 配置');
 
     const validation = LLMService.validateConfig(llmConfig, config);
-    if (!validation.valid) {
-      throw new Error(validation.error);
-    }
+    if (!validation.valid) throw new Error(validation.error);
 
-    // 尝试加载 Phase 1 缓存
-    let cachedInitialMindmap: string | undefined = undefined;
+    let cachedInitialMindmap: string | undefined;
     if (videoId && config.settings.enableReflection) {
       const cache = await StorageService.getPhase1Cache(videoId);
       if (cache) {
         cachedInitialMindmap = cache;
-        await LoggerService.info('TaskManager', `检测到阶段 1 缓存 (从浏览器存储读取)，跳过初版生成。`, undefined, task.id);
-      } else {
-        await LoggerService.debug('TaskManager', `未检测到阶段 1 缓存，准备开始全新生成。`, undefined, task.id);
+        await LoggerService.info('TaskManager', '检测到阶段 1 缓存 (从浏览器存储读取)，跳过初版生成。', undefined, task.id);
       }
     }
 
-    // 调用大模型生成思维导图
     const { result: mindmapMarkdown, initialResult: initialMindmapMarkdown, reflectionSuccess } = await LLMService.generateMindmap(
-      config, 
+      config,
       subtitleText,
-      async (msg) => {
-        task.statusMessage = msg;
-        task.updatedAt = Date.now();
-        await this.saveTasks();
-      },
+      (msg) => this.reportProgress(task, msg),
       async (initialMindmap) => {
         if (videoId) {
           await StorageService.savePhase1Cache(videoId, initialMindmap);
-          await LoggerService.debug('TaskManager', `阶段 1 初稿已存入浏览器内置存储 (用于断点续传)`, undefined, task.id);
+          await LoggerService.debug('TaskManager', '阶段 1 初稿已存入浏览器内置存储 (用于断点续传)', undefined, task.id);
         }
       },
       cachedInitialMindmap,
       task.id
     );
 
-    // 记录成功统计
     await StatsService.recordGeneration({
       videoId,
       modelId: selectedId,
@@ -722,12 +809,10 @@ export class TaskManager {
       isSuccess: true
     });
 
-    // 成功完成全部生成，清除 Phase 1 缓存，以免下次影响全新生成
     if (videoId) {
       await StorageService.deletePhase1Cache(videoId);
     }
 
-    // 保存思维导图到内存/存储
     const mindmapData = {
       id: uuidv4(),
       videoUrl,
@@ -740,45 +825,38 @@ export class TaskManager {
 
     await LoggerService.info('TaskManager', '思维导图生成成功，正在保存并通知 UI', undefined, task.id);
     await StorageService.saveMindmap(mindmapData);
+    this.taskInputs.delete(task.id);
 
-    // 如果用户指定了缓存目录，保存最终文件到本地（注意阶段1如果已经保存，这里只保存最终版即可，但为了完整性，这里调用原方法覆盖或者跳过，我们这里修改 saveFilesToCacheDirectory 使其不再重复保存字幕）
     if (FileService.hasCacheDirectory(config)) {
       await this.saveFilesToCacheDirectory(mindmapData, initialMindmapMarkdown, config.settings.cacheDirectory);
     }
 
     task.result = mindmapData;
-
-    // 通知content script，传递任务的 tabId
     this.notifyContentScript(mindmapData, task.tabId);
   }
 
-  /**
-   * 保存文件到用户指定的缓存目录 (这里保存最终结果)
-   */
-  private async saveFilesToCacheDirectory(mindmapData: any, initialMindmapMarkdown: string | undefined, cacheDirectory: string): Promise<void> {
+  private async saveFilesToCacheDirectory(
+    mindmapData: any,
+    initialMindmapMarkdown: string | undefined,
+    cacheDirectory: string
+  ): Promise<void> {
     try {
-      // 字幕和初始总结可能在 Phase 1 已经保存过，但为了非反思模式或补充保存，这里也保存
-      const subtitleFileName = FileService.generateSubtitleFileName(mindmapData.videoTitle);
       await FileService.saveSubtitleFile(
         mindmapData.subtitleText,
-        subtitleFileName,
+        FileService.generateSubtitleFileName(mindmapData.videoTitle),
         cacheDirectory
       );
 
-      // 保存思维导图文件
-      const mindmapFileName = FileService.generateMindmapFileName(mindmapData.videoTitle);
       await FileService.saveMindmapFile(
         mindmapData.mindmapMarkdown,
-        mindmapFileName,
+        FileService.generateMindmapFileName(mindmapData.videoTitle),
         cacheDirectory
       );
 
-      // 保存初步总结文件（仅在开启反思模式时有值）
       if (initialMindmapMarkdown) {
-        const initialMindmapFileName = FileService.generateInitialMindmapFileName(mindmapData.videoTitle);
         await FileService.saveMindmapFile(
           initialMindmapMarkdown,
-          initialMindmapFileName,
+          FileService.generateInitialMindmapFileName(mindmapData.videoTitle),
           cacheDirectory
         );
       }
@@ -786,28 +864,19 @@ export class TaskManager {
       console.log(`[TaskManager] 文件已保存到: ${cacheDirectory}`);
     } catch (error) {
       console.error('[TaskManager] 保存文件到缓存目录失败:', error);
-      // 保存文件失败不应该影响主流程，只记录日志
     }
   }
 
-  /**
-   * 通知content script有新的思维导图
-   */
-  private async notifyContentScript(mindmapData: any, tabId?: number) {
-    // 如果有 tabId，直接发送到该标签页
+  private async notifyContentScript(mindmapData: any, tabId?: number): Promise<void> {
     if (tabId) {
       try {
         await chrome.tabs.sendMessage(tabId, {
           type: 'MINDMAP_GENERATED',
-          payload: {
-            mindmapId: mindmapData.id,
-            mindmapData
-          }
+          payload: { mindmapId: mindmapData.id, mindmapData }
         });
         console.log('[TaskManager] 已通知 content script 思维导图生成完成 (tabId:', tabId, ')');
         return;
       } catch (error: any) {
-        // 如果目标标签页不存在或已关闭，忽略错误
         if (error?.message?.includes('Receiving end does not exist') ||
             error?.message?.includes('No tab with id')) {
           console.log('[TaskManager] 目标标签页不可用，思维导图已保存到存储中');
@@ -818,124 +887,94 @@ export class TaskManager {
       }
     }
 
-    // 如果没有 tabId（兼容旧任务），回退到查找匹配 URL 的标签页
     const videoUrl = mindmapData.videoUrl;
-    if (videoUrl) {
-      try {
-        const tabs = await chrome.tabs.query({});
-        for (const tab of tabs) {
-          if (tab.id && tab.url && tab.url.includes(videoUrl.split('?')[0])) {
-            try {
-              await chrome.tabs.sendMessage(tab.id, {
-                type: 'MINDMAP_GENERATED',
-                payload: {
-                  mindmapId: mindmapData.id,
-                  mindmapData
-                }
-              });
-              console.log('[TaskManager] 已通知匹配URL的标签页 (tabId:', tab.id, ')');
-              return;
-            } catch {
-              // 继续尝试其他标签页
-            }
+    if (!videoUrl) return;
+
+    try {
+      const tabs = await chrome.tabs.query({});
+      for (const tab of tabs) {
+        if (tab.id && tab.url && VideoUtils.isSameVideo(tab.url, videoUrl)) {
+          try {
+            await chrome.tabs.sendMessage(tab.id, {
+              type: 'MINDMAP_GENERATED',
+              payload: { mindmapId: mindmapData.id, mindmapData }
+            });
+            console.log('[TaskManager] 已通知匹配URL的标签页 (tabId:', tab.id, ')');
+            return;
+          } catch {
+            // 继续尝试其他标签页
           }
         }
-      } catch (error) {
-        console.error('[TaskManager] 查找匹配标签页失败:', error);
       }
+    } catch (error) {
+      console.error('[TaskManager] 查找匹配标签页失败:', error);
     }
 
     console.log('[TaskManager] 未找到可通知的标签页，思维导图已保存到存储中');
   }
 
-  /**
-   * 获取任务状态
-   */
+  // ------------------------------------------------------------------ //
+  // 查询与清理
+  // ------------------------------------------------------------------ //
+
   getTask(taskId: string): Task | undefined {
     return this.tasks.get(taskId);
   }
 
   getCurrentTask(videoUrl?: string): Task | undefined {
     const allTasks = Array.from(this.tasks.values());
-    
-    // 1. 如果指定了 videoUrl，优先返回与该 URL 匹配的任务
-    if (videoUrl) {
-      const matchUrl = (t: Task) => {
-        const taskUrl = t.data?.videoUrl;
-        if (!taskUrl) return false;
-        
-        // 尝试提取 ID 匹配
-        const id1 = VideoUtils.getCacheId(videoUrl);
-        const id2 = VideoUtils.getCacheId(taskUrl);
-        if (id1 && id2) return id1 === id2;
-        
-        // 否则 fallback 到字符串包含判断（处理一些非标准 URL）
-        return videoUrl.includes(taskUrl) || taskUrl.includes(videoUrl);
-      };
 
-      // 优先返回匹配的正在运行的任务
-      const runningTask = allTasks.find(t => t.status === 'running' && matchUrl(t));
+    if (videoUrl) {
+      const matching = allTasks.filter(t => this.isSameVideo(t.data?.videoUrl, videoUrl));
+
+      const runningTask = matching.find(t => t.status === 'running');
       if (runningTask) return runningTask;
 
-      // 否则返回匹配的等待中的任务
-      const pendingTask = allTasks
-        .filter(t => t.status === 'pending' && matchUrl(t))
+      const pendingTask = matching
+        .filter(t => t.status === 'pending')
         .sort((a, b) => a.createdAt - b.createdAt)[0];
       if (pendingTask) return pendingTask;
 
-      // 最后返回匹配的最近完成任务或失败任务
       const now = Date.now();
-      const recentTask = allTasks
+      return matching
         .filter(t => {
-          if (!matchUrl(t)) return false;
           const timeDiff = now - (t.updatedAt || 0);
-          if (t.status === 'completed') return timeDiff < 30000;
-          if (t.status === 'failed') return timeDiff < 3600000; // 失败任务保留 1 小时，确保用户能复制已提取的字幕
+          if (t.status === 'completed') return timeDiff < RECENT_COMPLETED_MS;
+          if (t.status === 'failed') return timeDiff < RECENT_FAILED_MS;
           return false;
         })
         .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))[0];
-      if (recentTask) return recentTask;
     }
 
-    // 2. 如果没提供 videoUrl 或没找到匹配，回退到全局逻辑
-    
-    // 优先返回正在运行的任务
     const runningTask = allTasks.find(t => t.status === 'running');
     if (runningTask) return runningTask;
 
-    // 否则返回最早等待的任务
-    const pendingTasks = allTasks
+    const pendingTask = allTasks
       .filter(t => t.status === 'pending')
-      .sort((a, b) => a.createdAt - b.createdAt);
+      .sort((a, b) => a.createdAt - b.createdAt)[0];
+    if (pendingTask) return pendingTask;
 
-    if (pendingTasks.length > 0) return pendingTasks[0];
-
-    // 最后返回最近完成或失败的任务
     const now = Date.now();
-    const recentCompletedTask = allTasks
+    return allTasks
       .filter(t => {
         const timeDiff = now - (t.updatedAt || 0);
-        if (t.status === 'completed') return timeDiff < 30000;
-        if (t.status === 'failed') return timeDiff < 3600000;
+        if (t.status === 'completed') return timeDiff < RECENT_COMPLETED_MS;
+        if (t.status === 'failed') return timeDiff < RECENT_FAILED_MS;
         return false;
       })
       .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))[0];
-
-    return recentCompletedTask;
   }
-  /**
-   * 清理过期任务
-   */
-  async cleanupExpiredTasks() {
+
+  async cleanupExpiredTasks(): Promise<void> {
     const now = Date.now();
-    const expireTime = 24 * 60 * 60 * 1000; // 24小时
 
     for (const [id, task] of this.tasks) {
-      if (now - task.createdAt > expireTime) {
+      if (now - task.createdAt > TASK_RETENTION_MS) {
         this.tasks.delete(id);
+        this.taskInputs.delete(id);
       }
     }
 
-    await this.saveTasks();
+    await this.flushPersist();
   }
 }
