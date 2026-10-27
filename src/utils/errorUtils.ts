@@ -29,7 +29,7 @@ export class ErrorUtils {
     }
 
     if (/HTTP 404|not[_ ]?found|model route not found|model not found|does not exist/i.test(errorMessage)) {
-      return `模型路由不存在（HTTP 404）：上游没有找到这个模型的调用路径，通常是「API 地址」或「模型名称」与服务商文档不一致。请检查：① API 地址是否为文档给出的基址（商汤 SenseNova 为 https://token.sensenova.cn/v1，漏掉 /v1 就会 404）；② 模型标识是否与文档一字不差（如 sensenova-6.8-flash-lite）；③ 该模型是否已在当前账户/套餐中开通。可在「大模型配置」点击「测试连接」快速验证。原始错误：${errorMessage}`;
+      return `模型路由不存在（HTTP 404）：上游没有找到这个模型的调用路径。密钥本身是通的（否则会返回 401），所以问题在「地址 / 模型标识 / 上游是否还提供该模型」。请检查：① API 地址是否为文档给出的基址（商汤内地 https://token.sensenova.cn/v1、海外 https://token.sensenova.ai/v1，漏掉 /v1 就会 404）；② 模型标识是否与文档一字不差（如 sensenova-6.8-flash-lite）；③ 上游是否已把该模型改名或下线（预览版常见，本地配置没改也会突然 404）。在「大模型配置」点「测试连接」，失败时会列出该密钥当前可用的模型。原始错误：${errorMessage}`;
     }
 
     return errorMessage;

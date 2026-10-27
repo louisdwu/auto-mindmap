@@ -53,6 +53,43 @@ export class OpenAIAdapter extends BaseAdapter implements ILLMAdapter {
   }
 
   /**
+   * 由 chat/completions 地址推出 models 列表地址（OpenAI 兼容协议的通用约定）
+   */
+  getModelsUrl(llmConfig: LLMConfig): string {
+    return `${this.getFullUrl(llmConfig).replace(/\/chat\/completions$/, '')}/models`;
+  }
+
+  /**
+   * 拉取该密钥可见的模型列表，用于定位「模型路由不存在」这类错误
+   */
+  async listModels(llmConfig: LLMConfig, timeout: number): Promise<string[]> {
+    const url = this.getModelsUrl(llmConfig);
+    const headers: Record<string, string> = { Accept: 'application/json' };
+    if (llmConfig.apiKey && llmConfig.apiKey.trim()) {
+      headers['Authorization'] = `Bearer ${llmConfig.apiKey.trim()}`;
+    }
+
+    const response = await this.fetchWithRetry(url, { method: 'GET', headers }, timeout);
+    const responseText = await response.text();
+    if (!response.ok) {
+      throw new Error(`获取模型列表失败 (HTTP ${response.status}): ${responseText.slice(0, 200)}`);
+    }
+
+    let data: any;
+    try {
+      data = responseText ? JSON.parse(responseText) : {};
+    } catch {
+      throw new Error('模型列表响应不是合法 JSON');
+    }
+
+    // 三种常见结构：{data:[{id}]}、{models:[{id|name}]}、{models:["id"]}
+    const rawList = Array.isArray(data?.data) ? data.data : Array.isArray(data?.models) ? data.models : [];
+    return rawList
+      .map((item: any) => (typeof item === 'string' ? item : item?.id || item?.name))
+      .filter((id: unknown): id is string => typeof id === 'string' && id.length > 0);
+  }
+
+  /**
    * 针对不同提供商预处理 Prompt
    */
   override preprocessPrompt(prompt: string): string {
