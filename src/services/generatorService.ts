@@ -17,10 +17,11 @@ export class GeneratorService {
    * 检查视频是否符合自动处理条件
    */
   static async checkEligibility(url: string, title?: string): Promise<CheckResult> {
-    const videoId = VideoUtils.extractVideoId(url);
-    if (!videoId) {
-      return { shouldProcess: false, reason: '无法提取视频ID' };
+    const media = VideoUtils.parseMediaRef(url);
+    if (!media) {
+      return { shouldProcess: false, reason: '无法识别视频页面' };
     }
+    const videoId = media.cacheId;
 
     // 1. 检查暂停状态
     if (await StorageService.isPaused()) {

@@ -159,10 +159,10 @@ export class StorageService {
   static async getLatestMindmapByUrl(videoUrl: string): Promise<MindmapData | null> {
     const mindmaps = await this.getMindmaps();
     
-    const currentVideoId = VideoUtils.extractVideoId(videoUrl);
+    const currentVideoId = VideoUtils.getCacheId(videoUrl);
     const matching = mindmaps.filter(m => {
       if (!currentVideoId) return m.videoUrl === videoUrl;
-      const storedVideoId = VideoUtils.extractVideoId(m.videoUrl);
+      const storedVideoId = VideoUtils.getCacheId(m.videoUrl);
       return storedVideoId === currentVideoId;
     });
     
@@ -174,10 +174,10 @@ export class StorageService {
    */
   static async deleteMindmapByUrl(videoUrl: string): Promise<void> {
     const mindmaps = await this.getMindmaps();
-    const targetVideoId = VideoUtils.extractVideoId(videoUrl);
+    const targetVideoId = VideoUtils.getCacheId(videoUrl);
     const filtered = mindmaps.filter(m => {
       if (!targetVideoId) return m.videoUrl !== videoUrl;
-      const storedVideoId = VideoUtils.extractVideoId(m.videoUrl);
+      const storedVideoId = VideoUtils.getCacheId(m.videoUrl);
       return storedVideoId !== targetVideoId;
     });
     await chrome.storage.local.set({ [STORAGE_KEYS.MINDMAPS]: filtered });

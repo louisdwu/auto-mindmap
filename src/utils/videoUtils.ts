@@ -1,66 +1,33 @@
+import { MediaRef, getCacheId, isSameMedia, parseMediaRef } from './media';
+
 /**
  * 视频相关通用工具函数
+ *
+ * 视频身份判定统一委托给 utils/media.ts：它同时处理 B 站分 P、av/BV 与
+ * YouTube 各种链接形态。本文件只保留「时间戳 / 跳转」等播放器相关工具。
  */
 export const VideoUtils = {
   /**
-   * 从视频 URL 中提取唯一标识符 (Video ID)
-   * 支持平台：
-   * - Bilibili (BV号, av号)
-   * - YouTube (标准参数, 短链接, 嵌入式链接)
+   * 从视频 URL 中提取平台原生 Video ID（不含分 P 信息）。
+   * 需要区分分 P 时请使用 getCacheId 或 parseMediaRef。
    */
   extractVideoId(url: string | undefined | null): string | null {
-    if (!url) return null;
-    
-    try {
-      // 确保是合法的 URL
-      let urlStr = url.trim();
-      if (!urlStr.startsWith('http')) {
-        urlStr = 'https://' + urlStr;
-      }
-      
-      const urlObj = new URL(urlStr);
-      const hostname = urlObj.hostname.toLowerCase();
-      const pathname = urlObj.pathname;
+    return parseMediaRef(url)?.videoId ?? null;
+  },
 
-      // 1. Bilibili 逻辑
-      if (hostname.includes('bilibili.com')) {
-        // 匹配 /video/BV... 或 /video/av...
-        const biliMatch = pathname.match(/\/video\/(BV[\w]+|av\d+)/i);
-        if (biliMatch) return biliMatch[1];
-        
-        // 匹配单视频参数 (bvid)
-        const bvid = urlObj.searchParams.get('bvid');
-        if (bvid) return bvid;
-        const aid = urlObj.searchParams.get('aid');
-        if (aid) return aid.startsWith('av') ? aid : 'av' + aid;
-      }
+  /** 解析完整媒体标识（含平台、分 P、缓存键） */
+  parseMediaRef(url: string | undefined | null): MediaRef | null {
+    return parseMediaRef(url);
+  },
 
-      // 2. YouTube 逻辑
-      if (hostname.includes('youtube.com') || hostname.includes('youtu.be')) {
-        // 标准 URL: youtube.com/watch?v=VIDEO_ID
-        const v = urlObj.searchParams.get('v');
-        if (v) return v;
+  /** 缓存 / 任务使用的稳定标识（B 站 P2 为 BV..._p2） */
+  getCacheId(url: string | undefined | null): string | null {
+    return getCacheId(url);
+  },
 
-        const pathParts = pathname.split('/').filter(Boolean);
-        
-        // 短链接: youtu.be/VIDEO_ID
-        if (hostname === 'youtu.be') return pathParts[0];
-        
-        // 嵌入链接: youtube.com/embed/VIDEO_ID
-        if (pathParts[0] === 'embed') return pathParts[1];
-        
-        // 旧版链接: youtube.com/v/VIDEO_ID
-        if (pathParts[0] === 'v') return pathParts[1];
-        
-        // Shorts 链接: youtube.com/shorts/VIDEO_ID
-        if (pathParts[0] === 'shorts') return pathParts[1];
-      }
-
-      return null;
-    } catch (e) {
-      console.warn('[VideoUtils] Failed to extract video ID from:', url, e);
-      return null;
-    }
+  /** 两个 URL 是否指向同一视频的同一分 P */
+  isSameVideo(urlA: string | undefined | null, urlB: string | undefined | null): boolean {
+    return isSameMedia(urlA, urlB);
   },
 
   /**

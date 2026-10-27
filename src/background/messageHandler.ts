@@ -70,7 +70,7 @@ export class MessageHandler {
     const isAutoRequest = payload.origin === 'auto';
 
     const config = await StorageService.getConfig();
-    const videoId = VideoUtils.extractVideoId(payload.videoUrl);
+    const videoId = VideoUtils.getCacheId(payload.videoUrl);
 
     // 用户主动选择仅字幕：记录意图，并取消尚未开始的自动导图任务
     if (isSubtitleOnly && !isAutoRequest) {
@@ -244,7 +244,7 @@ export class MessageHandler {
       return { subtitleText: null };
     }
     const { videoUrl } = payload;
-    const videoId = VideoUtils.extractVideoId(videoUrl);
+    const videoId = VideoUtils.getCacheId(videoUrl);
 
     // 1. 检查当前或最近任务中的 subtitleText
     const task = this.taskManager.getCurrentTask(videoUrl);

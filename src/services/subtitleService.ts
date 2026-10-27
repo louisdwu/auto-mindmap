@@ -15,12 +15,13 @@ export class SubtitleService {
   /**
    * 获取视频信息
    */
-  static async getVideoInfo(videoId: string): Promise<{
+  static async getVideoInfo(videoId: string, page: number = 1): Promise<{
     aid: number;
     bvid: string;
     cid: number;
     title: string;
     author: string;
+    page: number;
     isPaid?: boolean;
     payMessage?: string;
   }> {
@@ -39,13 +40,26 @@ export class SubtitleService {
 
     const isPaid = data.data?.is_upower_exclusive || data.data?.is_ugc_pay_preview || false;
     const payMessage = data.data?.preview_toast || '该视频为付费/充电专属内容，请先获取观看权限。';
+
+    // 分 P 视频：cid 与标题都必须取当前 P，否则会拿 P1 的字幕/音频生成 P2 的导图。
+    // pages 缺失（旧接口/特殊稿件）时回退到顶层 cid，保持原有单 P 行为。
+    const pages = Array.isArray(data.data?.pages) ? data.data.pages : [];
+    const safePage = Math.min(Math.max(1, page), Math.max(1, pages.length));
+    const pageInfo = pages[safePage - 1];
+    const cid = pageInfo?.cid ?? data.data.cid;
+    const baseTitle = data.data.title || '';
+    const pageTitle = pageInfo?.part ? String(pageInfo.part).trim() : '';
+    const title = pages.length > 1 && pageTitle
+      ? `${baseTitle} - P${safePage} ${pageTitle}`
+      : baseTitle;
     
     return {
       aid: data.data.aid,
       bvid: data.data.bvid,
-      cid: data.data.cid,
-      title: data.data.title,
+      cid,
+      title,
       author: data.data.owner.name,
+      page: safePage,
       isPaid,
       payMessage
     };
@@ -173,15 +187,19 @@ export class SubtitleService {
       throw new Error('YouTube 字幕请等待视频播放自动获取');
     }
 
-    const videoId = VideoUtils.extractVideoId(videoUrl);
+    const media = VideoUtils.parseMediaRef(videoUrl);
+    const videoId = media?.videoId || VideoUtils.extractVideoId(videoUrl);
     if (!videoId) throw new Error('无法从URL中提取视频ID');
+    // cacheId 区分 B 站分 P：P1 仍是裸 BV 号，旧缓存继续有效；P2+ 使用 BV..._p2。
+    const cacheId = media?.cacheId || videoId;
+    const page = media?.page || 1;
 
     console.log('[SubtitleService] ===== 开始字幕获取流程 =====');
     console.log('[SubtitleService] videoUrl:', videoUrl);
-    console.log('[SubtitleService] videoId:', videoId);
+    console.log('[SubtitleService] videoId:', videoId, 'page:', page, 'cacheId:', cacheId);
 
-    onProgress?.('正在获取视频信息...');
-    const videoInfo = await this.getVideoInfo(videoId);
+    onProgress?.(page > 1 ? `正在获取视频信息（P${page}）...` : '正在获取视频信息...');
+    const videoInfo = await this.getVideoInfo(videoId, page);
     console.log('[SubtitleService] videoInfo:', JSON.stringify(videoInfo));
 
     // 用户点了「重新语音识别」：官方字幕一律不用（哪怕存在），
@@ -189,7 +207,7 @@ export class SubtitleService {
     if (forceAsr) {
       console.log('[SubtitleService] forceAsr=true，跳过官方字幕策略，直接语音识别');
       onProgress?.('已选择「重新语音识别」，跳过官方字幕，直接进行语音识别...');
-      return this.handleAsrFlow(videoInfo, config, onProgress, true, videoUrl, tabId);
+      return this.handleAsrFlow(videoInfo, config, onProgress, true, videoUrl, tabId, cacheId);
     }
 
     // 优先尝试官方字幕
@@ -216,7 +234,7 @@ export class SubtitleService {
       
       if (subtitleText?.trim()) {
         console.log('[SubtitleService] ===== 字幕获取成功（官方字幕）=====');
-        await StorageService.saveSubtitleCache(videoInfo.bvid, subtitleText);
+        await StorageService.saveSubtitleCache(cacheId, subtitleText);
         return { videoUrl, videoTitle: videoInfo.title, subtitleText, isAsr: false };
       }
     }
@@ -240,7 +258,7 @@ export class SubtitleService {
           const subtitleText = this.extractPlainText(subtitleData);
           if (subtitleText?.trim()) {
             console.log('[SubtitleService] ===== 字幕获取成功（content script 代理）=====');
-            await StorageService.saveSubtitleCache(videoInfo.bvid, subtitleText);
+            await StorageService.saveSubtitleCache(cacheId, subtitleText);
             return { videoUrl, videoTitle: videoInfo.title, subtitleText, isAsr: false };
           }
         }
@@ -258,7 +276,7 @@ export class SubtitleService {
 
     // 回退到 ASR (只有在完全没有任何字幕时才执行)
     onProgress?.('未检测到任何官方字幕，尝试进行语音识别...');
-    return this.handleAsrFlow(videoInfo, config, onProgress, forceMode, videoUrl, tabId);
+    return this.handleAsrFlow(videoInfo, config, onProgress, forceMode, videoUrl, tabId, cacheId);
   }
 
   private static asrLock: Promise<void> = Promise.resolve();
@@ -295,14 +313,15 @@ export class SubtitleService {
     onProgress: any,
     forceMode: boolean,
     videoUrl: string,
-    tabId?: number
+    tabId: number | undefined,
+    cacheId: string
   ): Promise<any> {
     const getTime = () => `[${new Date().toLocaleTimeString('zh-CN', { hour12: false })}]`;
     onProgress?.(`${getTime()} 正在获取音频流地址...`);
     const audioUrl = await AudioService.getAudioUrl(videoInfo.bvid, videoInfo.cid);
     return this.runAsrFlow({
       audioUrl,
-      videoId: videoInfo.bvid,
+      videoId: cacheId,
       videoTitle: videoInfo.title,
       videoUrl,
       config,

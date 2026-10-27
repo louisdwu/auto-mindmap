@@ -56,11 +56,11 @@ export function useFloatingBallState() {
   }, []);
 
   const normalizeUrl = useCallback((url: string) => {
+    // 视频身份统一交给 media.ts：B 站分 P 必须参与比较，否则 P2 会命中 P1 的任务/导图。
+    const ref = VideoUtils.parseMediaRef(url);
+    if (ref) return ref.key;
     try {
       const u = new URL(url);
-      if (u.hostname.includes('bilibili.com')) {
-        return u.pathname;
-      }
       return u.origin + u.pathname;
     } catch {
       return url;
@@ -97,9 +97,8 @@ export function useFloatingBallState() {
           const currentUrl = window.location.href;
           
           // 使用更健壮的 VideoUtils 匹配
-          const id1 = VideoUtils.extractVideoId(currentUrl);
-          const id2 = VideoUtils.extractVideoId(taskUrl);
-          const isMatch = (id1 && id1 === id2) || normalizeUrl(currentUrl) === normalizeUrl(taskUrl);
+          const isMatch = VideoUtils.isSameVideo(currentUrl, taskUrl)
+            || normalizeUrl(currentUrl) === normalizeUrl(taskUrl);
 
           if (isMatch) {
             const subtitleOnly = task.data?.subtitleOnly === true || task.result?.subtitleOnly === true;
