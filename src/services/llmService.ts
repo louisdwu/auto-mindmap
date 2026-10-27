@@ -307,11 +307,31 @@ export class LLMService {
         detail: `模型返回：${reply.trim().slice(0, 120)}`
       };
     } catch (error: any) {
+      let detail = error?.message || String(error);
+
+      // 「模型路由不存在」时顺手问服务端要一份可用模型清单：
+      // 上游改名/下线模型时，用户的配置一个字没改也会突然 404，
+      // 直接把当前 key 能用的模型列出来，比让用户逐个猜要快。
+      const looksLikeMissingModel = /404|not.?found|route|模型/i.test(detail);
+      if (looksLikeMissingModel) {
+        try {
+          const adapter = this.getAdapter(llmConfig.provider);
+          if (adapter.listModels) {
+            const models = await adapter.listModels(probeConfig, 15000);
+            detail += models.length > 0
+              ? `\n\n当前密钥可用模型（${models.length} 个）：${models.slice(0, 40).join('、')}${models.length > 40 ? ' …' : ''}`
+              : '\n\n模型列表为空：该密钥可能还没有被授权任何模型，或该服务商不提供 /models 接口。';
+          }
+        } catch (listError: any) {
+          detail += `\n\n（尝试获取可用模型列表失败：${listError?.message || listError}）`;
+        }
+      }
+
       return {
         ok: false,
         url,
         latencyMs: Date.now() - startedAt,
-        detail: error?.message || String(error)
+        detail
       };
     }
   }

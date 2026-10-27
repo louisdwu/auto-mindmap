@@ -190,9 +190,9 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
             {editingConfig.provider === 'sensenova' && (
               <div className="alert--info">
                 <strong>商汤 SenseNova 提示：</strong>
-                基址填 <code>https://token.sensenova.cn/v1</code>，模型标识按官方文档填写（6.8 预览版为{' '}
-                <code>sensenova-6.8-flash-lite</code>，6.7 版为 <code>sensenova-6.7-flash-lite</code>）。
-                基址漏写 <code>/v1</code> 或模型名写错，网关都会返回 <code>HTTP 404: model route not found</code>。
+                内地基址 <code>https://token.sensenova.cn/v1</code>，海外基址 <code>https://token.sensenova.ai/v1</code>（两边 key 不通用）。
+                模型标识按官方文档填写（6.8 预览版为 <code>sensenova-6.8-flash-lite</code>，6.7 版为 <code>sensenova-6.7-flash-lite</code>）。
+                基址漏写 <code>/v1</code>、模型被上游改名/下线，网关都会返回 <code>HTTP 404: model route not found</code>。
               </div>
             )}
 

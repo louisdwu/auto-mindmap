@@ -56,14 +56,14 @@ npm run build
 | --- | --- | --- |
 | OpenAI | `https://api.openai.com/v1` | `gpt-4o-mini` |
 | Google Gemini | `https://generativelanguage.googleapis.com/v1beta` | `gemini-1.5-flash` |
-| 商汤 SenseNova | `https://token.sensenova.cn/v1` | `sensenova-6.8-flash-lite` |
+| 商汤 SenseNova | 内地 `https://token.sensenova.cn/v1` / 海外 `https://token.sensenova.ai/v1` | `sensenova-6.8-flash-lite` |
 | Ollama | `http://localhost:11434/api` / `https://ollama.com/api` | `llama3` |
 | LM Studio | `http://localhost:1234/v1` | 本地已加载模型名 |
 | 自定义 | 任意 OpenAI 兼容基址 | 以服务商文档为准 |
 
-> ⚠️ 报错 `HTTP 404: model route not found` 表示**上游找不到这个模型的调用路径**，几乎都是「API 地址」或「模型名称」与服务商文档不一致导致的：
-> 商汤的基址必须带 `/v1`（漏写即 404），模型标识必须与文档一字不差（如 `sensenova-6.8-flash-lite`）。
-> 改完点「连接测试」即可当场验证，成功后再回视频页生成导图。
+> ⚠️ 报错 `HTTP 404: model route not found` 表示**上游找不到这个模型的调用路径**（密钥本身是通的，否则会是 401）：
+> 常见原因有三种 —— ① 基址漏了 `/v1` 或填错地区域名；② 模型标识与服务商文档不一致；③ **上游把该模型改名/下线了**（预览版尤其容易发生，本地配置一个字没改也会突然 404）。
+> 在配置页点「连接测试」：失败时会一并列出**该密钥当前可用的模型**，直接对照就能确认是不是第 ③ 种情况。
 
 ## 开发者相关
 
