@@ -17,6 +17,7 @@ Chrome 浏览器插件，自动从 **Bilibili** 和 **YouTube** 视频字幕生�
 - 后端桥接（ASR）：Python FastAPI + Faster-Whisper（CUDA GPU 加速）
 
 详细配置文档见 [`README.md`](README.md) 和 [`ASR DEVELOPMENT.md`](ASR%20DEVELOPMENT.md)。
+完整审计与路线图见 [`IMPROVEMENT_PLAN.md`](IMPROVEMENT_PLAN.md)。
 
 ---
 
@@ -62,12 +63,12 @@ src/
 ├── background/          # Service Worker：消息路由、任务调度
 │   ├── index.ts         #   入口，监听 chrome.runtime.onMessage
 │   ├── messageHandler.ts #  消息分发与处理
-│   └── taskManager.ts   #  任务队列、并发控制、ASR 串行化
+│   └── taskManager.ts   #  任务状态机、并发控制、持久化剥离、ASR 串行化
 │
 ├── content/             # Content Scripts（注入视频页面）
 │   ├── index.ts         #   入口
 │   ├── eventListener.ts #   全局事件监听
-│   ├── floatingBall.tsx #   悬浮球 DOM 挂载
+│   ├── floatingBall.tsx #   悬浮球 DOM 挂载（仅视频页挂载）
 │   ├── observers/       #   平台适配器（策略模式）
 │   │   ├── BaseObserver.ts   #  抽象基类
 │   │   ├── BilibiliObserver.ts
@@ -92,6 +93,7 @@ src/
 │       ├── LLMConfigSection.tsx   #  LLM 配置管理
 │       ├── PromptSection.tsx      #  Prompt 编辑器
 │       ├── CacheSection.tsx       #  缓存设置
+│       ├── StorageSection.tsx     #  存储用量与清理
 │       ├── ExclusionSection.tsx   #  排除关键词
 │       ├── ImportExportSection.tsx #  导入/导出
 │       ├── LogSection.tsx         #  日志查看
@@ -106,13 +108,14 @@ src/
 │   ├── generatorService.ts #  导图生成流程编排
 │   ├── llmService.ts      #  LLM 调用入口
 │   ├── llm/               #  LLM 适配器
-│   │   ├── base.ts            #  适配器基类
+│   │   ├── base.ts            #  适配器接口
 │   │   ├── BaseAdapter.ts
+│   │   ├── tokenBudget.ts     #  长视频 token 估算与字幕切分
 │   │   └── adapters/
 │   │       ├── OpenAIAdapter.ts
 │   │       ├── GeminiAdapter.ts
 │   │       └── OllamaAdapter.ts
-│   ├── storageService.ts  #  配置持久化
+│   ├── storageService.ts  #  配置/缓存持久化、缓存索引、TTL、配额治理
 │   ├── storage/migration.ts #  配置版本迁移
 │   ├── fileService.ts     #  文件导入/导出
 │   ├── loggerService.ts   #  日志管理
@@ -136,6 +139,7 @@ src/
 │   └── stats.ts         #  统计类型
 │
 └── utils/               # 工具函数
+    ├── media.ts           #  统一视频身份（平台/ID/分 P/缓存键）
     ├── markdownParser.ts  #  Markdown → 导图节点树
     ├── layout.ts          #  布局算法
     ├── exportMindmap.ts   #  导图导出
@@ -183,9 +187,23 @@ scripts/                 # Python ASR 后端
 
 - **修复 Bug 后，必须对相关模块进行重构，提高鲁棒性和可维护性，严禁简单的「打补丁」。**
 
-### 强制构建
+### 视频身份与缓存
+
+- 任何涉及视频去重、缓存键、任务匹配、消息过滤的代码，必须使用 `utils/media.ts` 的
+  `parseMediaRef / getCacheId / isSameVideo`，不要直接用 BV 号或 URL 字符串。
+- B 站 P1 的 `cacheId` 是裸视频 ID（兼容旧缓存），P2+ 是 `BV..._pN`。
+
+### 存储
+
+- 配置与 LLM 配置（含密钥）存 `chrome.storage.local`，不要写回 `storage.sync`。
+- 大文本缓存统一走 `StorageService` 的字幕 / ASR / 阶段 1 缓存 API，自动带 TTL 与索引；
+  新增缓存类型时必须同时更新 `CACHE_POLICY` 与 `kindOfKey`。
+- 任务表 `active_tasks` 只存状态与定位信息，不要塞入字幕或导图正文。
+
+### 强制构建与测试
 
 - **每次修改代码后必须运行 `npm run build`。**
+- 修改核心逻辑（任务/存储/解析/LLM 适配器）时，同时运行 `npm test`。
 
 ### ASR 依赖管理
 
@@ -226,4 +244,3 @@ scripts/                 # Python ASR 后端
 - 使用 Vitest（`vitest.config.ts`）
 - 测试文件命名为 `*.test.ts` / `*.test.tsx`，与源文件同目录
 - 运行：`npm run test`
-
