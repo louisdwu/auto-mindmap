@@ -510,6 +510,7 @@ async def do_transcribe(
     vad_filter: str = None,     # 兼容旧接口参数；实际取值由引擎预设/环境变量决定
     language: str = None,
     initial_prompt: str = None,
+    no_cache: bool = False,
 ):
     start_time = time.time()
     tmp_path = None
@@ -523,7 +524,9 @@ async def do_transcribe(
     )
 
     # 1. 字幕文本缓存命中（瞬发）
-    if safe_video_id:
+    # no_cache=True 时跳过（用户点了「重新语音识别」，必须重新推理而不是回放旧文本）；
+    # 新结果仍会写回缓存，随后的普通请求照常瞬发。
+    if safe_video_id and not no_cache:
         os.makedirs(cache_dir, exist_ok=True)
         if os.path.exists(txt_cache_path) and os.path.getsize(txt_cache_path) > 0:
             print(f"[{time.strftime('%H:%M:%S')}] 命中字幕文本缓存: {safe_video_id}, 瞬发返回!")
@@ -582,6 +585,7 @@ async def do_transcribe(
         # 写入字幕文本缓存
         if video_id and result_text and txt_cache_path:
             try:
+                os.makedirs(cache_dir, exist_ok=True)
                 with open(txt_cache_path, "w", encoding="utf-8") as f:
                     f.write(result_text)
                 print(f"[{time.strftime('%H:%M:%S')}] 成功保存字幕文本缓存: {txt_cache_path}")
@@ -591,6 +595,7 @@ async def do_transcribe(
         # 写入 SRT 字幕文件
         if video_id and srt_text and srt_cache_path:
             try:
+                os.makedirs(cache_dir, exist_ok=True)
                 with open(srt_cache_path, "w", encoding="utf-8") as f:
                     f.write(srt_text)
                 print(f"[{time.strftime('%H:%M:%S')}] 成功保存 SRT 字幕: {srt_cache_path}")
@@ -653,18 +658,23 @@ async def transcribe(
     language: str = Form(None),
     initial_prompt: str = Form(None),
     stream: bool = Form(False),
+    no_cache: bool = Form(False),
 ):
-    """统一转录入口。stream=True 时改为流式返回日志。"""
+    """统一转录入口。stream=True 时改为流式返回日志。
+
+    no_cache=True 表示「重新语音识别」：跳过字幕文本缓存，强制重新推理。
+    """
     if stream:
         return await _transcribe_stream(
             file, audio_url=audio_url, video_id=video_id, file_path=file_path,
             model_name=model_name, beam_size=beam_size, vad_filter=vad_filter,
             language=language, initial_prompt=initial_prompt, response_format="json",
+            no_cache=no_cache,
         )
     result = await do_transcribe(
         file=file, audio_url=audio_url, video_id=video_id, file_path=file_path,
         model_name=model_name, beam_size=beam_size, vad_filter=vad_filter,
-        language=language, initial_prompt=initial_prompt,
+        language=language, initial_prompt=initial_prompt, no_cache=no_cache,
     )
     if isinstance(result, JSONResponse):
         return result
@@ -687,19 +697,24 @@ async def openai_transcribe(
     file_path: str = Form(None),
     initial_prompt: str = Form(None),
     stream: bool = Form(False),
+    no_cache: bool = Form(False),
 ):
-    """OpenAI 兼容接口。stream=True 时返回流式日志 + JSON 结果行。"""
+    """OpenAI 兼容接口。stream=True 时返回流式日志 + JSON 结果行。
+
+    no_cache=True 表示「重新语音识别」：跳过字幕文本缓存，强制重新推理。
+    """
     if stream:
         return await _transcribe_stream(
             file, audio_url=audio_url, video_id=video_id, file_path=file_path,
             model_name=model_name, beam_size=beam_size, vad_filter=vad_filter,
             language=language, initial_prompt=initial_prompt, response_format=response_format,
+            no_cache=no_cache,
         )
 
     result = await do_transcribe(
         file=file, audio_url=audio_url, video_id=video_id, file_path=file_path,
         model_name=model_name, beam_size=beam_size, vad_filter=vad_filter,
-        language=language, initial_prompt=initial_prompt,
+        language=language, initial_prompt=initial_prompt, no_cache=no_cache,
     )
     if isinstance(result, JSONResponse):
         return result
@@ -723,6 +738,7 @@ async def _transcribe_stream(
     language: str = None,
     initial_prompt: str = None,
     response_format: str = "json",
+    no_cache: bool = False,
 ):
     async def generator():
         def out(text):
@@ -742,8 +758,9 @@ async def _transcribe_stream(
             yield out(f"[{time.strftime('%H:%M:%S')}] 开始转录任务 "
                       f"(引擎: {engine.display_name}, model={model_name})...")
 
-            # 1. 字幕文本缓存命中（瞬发）
-            if safe_video_id and os.path.exists(txt_cache_path) and os.path.getsize(txt_cache_path) > 0:
+            # 1. 字幕文本缓存命中（瞬发；no_cache=True 时跳过，强制重新推理）
+            if (safe_video_id and not no_cache
+                    and os.path.exists(txt_cache_path) and os.path.getsize(txt_cache_path) > 0):
                 try:
                     with open(txt_cache_path, "r", encoding="utf-8") as f:
                         cached_text = f.read()

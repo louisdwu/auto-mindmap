@@ -1,4 +1,5 @@
 import { LLMConfig, PluginConfig } from '../../types/config';
+import { AsrRequestOptions } from '../../types/subtitle';
 
 export interface LLMResponse {
   content: string;
@@ -35,7 +36,7 @@ export interface ILLMAdapter {
     llmConfig: LLMConfig,
     audioData: Blob | string,
     timeout: number,
-    options?: { videoId?: string },
+    options?: AsrRequestOptions,
     onProgress?: (msg: string) => void
   ): Promise<string>;
 

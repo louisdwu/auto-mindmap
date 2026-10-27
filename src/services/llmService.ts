@@ -7,6 +7,7 @@ import { OllamaAdapter } from './llm/adapters/OllamaAdapter';
 import { LoggerService } from './loggerService';
 import { extractMarkdown } from '../utils/markdownParser';
 import { ErrorUtils } from '../utils/errorUtils';
+import { AsrRequestOptions } from '../types/subtitle';
 
 export class LLMService {
   private static adapters: Record<string, ILLMAdapter> = {
@@ -219,7 +220,7 @@ export class LLMService {
   static async transcribeAudio(
     config: PluginConfig,
     audioData: Blob | string,
-    options?: { videoId?: string },
+    options?: AsrRequestOptions,
     onProgress?: (msg: string) => void
   ): Promise<string> {
     const llmConfig = await StorageService.getSelectedLLMConfig();

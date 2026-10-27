@@ -1,6 +1,7 @@
 import { ILLMAdapter, GenerateContext } from '../base';
 import { BaseAdapter } from '../BaseAdapter';
 import { LLMConfig, PluginConfig, normalizeAsrLanguage } from '../../../types/config';
+import { AsrRequestOptions } from '../../../types/subtitle';
 
 /** 显式指定语言时的上下文偏置（只在用户主动选了对应语言时发送）。 */
 const ASR_INITIAL_PROMPTS: Record<string, string> = {
@@ -131,7 +132,7 @@ export class OpenAIAdapter extends BaseAdapter implements ILLMAdapter {
     llmConfig: LLMConfig,
     audioData: Blob | string,
     timeout: number,
-    options?: { videoId?: string },
+    options?: AsrRequestOptions,
     onProgress?: (msg: string) => void
   ): Promise<string> {
     const isLocal = config.settings.asrProvider === 'local';
@@ -172,6 +173,10 @@ export class OpenAIAdapter extends BaseAdapter implements ILLMAdapter {
     if (isLocal) {
       if (options?.videoId) {
         formData.append('video_id', options.videoId);
+      }
+      // 重新语音识别：跳过服务端字幕文本缓存，强制重新推理
+      if (options?.noCache) {
+        formData.append('no_cache', 'true');
       }
       if (config.settings.asrBeamSize) formData.append('beam_size', config.settings.asrBeamSize.toString());
       if (config.settings.asrVadFilter !== undefined) formData.append('vad_filter', config.settings.asrVadFilter.toString());

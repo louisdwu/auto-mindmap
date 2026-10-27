@@ -9,6 +9,8 @@ import {
 interface SubtitleModalProps {
   data: SubtitleResultData;
   onClose: () => void;
+  /** 重新语音识别（跳过官方字幕与缓存，重跑 ASR） */
+  onReTranscribe?: () => void;
   onToast?: (message: string, duration?: number) => void;
 }
 
@@ -18,7 +20,7 @@ interface SubtitleModalProps {
  * 只展示字幕原文本，提供「复制全文」与「下载 .txt」两个出口，
  * 不进入思维导图查看器，避免用户被迫等待 LLM 生成。
  */
-export const SubtitleModal: React.FC<SubtitleModalProps> = ({ data, onClose, onToast }) => {
+export const SubtitleModal: React.FC<SubtitleModalProps> = ({ data, onClose, onReTranscribe, onToast }) => {
   const [isCopied, setIsCopied] = useState(false);
 
   const { subtitleText, videoTitle, isAsr } = data;
@@ -181,6 +183,28 @@ export const SubtitleModal: React.FC<SubtitleModalProps> = ({ data, onClose, onT
             background: 'white'
           }}
         >
+          {onReTranscribe && (
+            <button
+              onClick={onReTranscribe}
+              title="跳过官方字幕与缓存，重新对音频做语音识别"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                marginRight: 'auto',
+                padding: '9px 16px',
+                border: '1px solid #c7d2fe',
+                borderRadius: '8px',
+                background: '#eef2ff',
+                color: '#3730a3',
+                fontSize: '13px',
+                fontWeight: 500,
+                cursor: 'pointer'
+              }}
+            >
+              🎙️ 重新语音识别
+            </button>
+          )}
           <button
             onClick={handleCopy}
             style={{

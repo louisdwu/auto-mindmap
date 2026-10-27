@@ -161,7 +161,8 @@ export class SubtitleService {
     config: PluginConfig,
     onProgress?: (task: string) => void,
     forceMode: boolean = false,
-    tabId?: number
+    tabId?: number,
+    forceAsr: boolean = false
   ): Promise<{
     videoUrl: string;
     videoTitle: string;
@@ -182,6 +183,14 @@ export class SubtitleService {
     onProgress?.('正在获取视频信息...');
     const videoInfo = await this.getVideoInfo(videoId);
     console.log('[SubtitleService] videoInfo:', JSON.stringify(videoInfo));
+
+    // 用户点了「重新语音识别」：官方字幕一律不用（哪怕存在），
+    // 直接对音频重新做 ASR —— 这正是「字幕不准想换一份」的场景。
+    if (forceAsr) {
+      console.log('[SubtitleService] forceAsr=true，跳过官方字幕策略，直接语音识别');
+      onProgress?.('已选择「重新语音识别」，跳过官方字幕，直接进行语音识别...');
+      return this.handleAsrFlow(videoInfo, config, onProgress, true, videoUrl, tabId);
+    }
 
     // 优先尝试官方字幕
     onProgress?.('正在检查官方字幕...');
@@ -323,6 +332,8 @@ export class SubtitleService {
     // 识别语言：'auto' 表示让引擎自动检测源语言（输出原语言原文）。
     // 缓存也按语言分档，切换语言不会命中另一种语言的旧结果。
     const asrLanguage = normalizeAsrLanguage(config.settings.asrLanguage);
+    // 强制模式（重新语音识别）必须让服务端跳过字幕文本缓存，否则同一视频会瞬发旧文本
+    const asrOptions = { videoId, noCache: forceMode === true };
     const unlock = await this.acquireAsrLock(onProgress);
 
     try {
@@ -349,7 +360,7 @@ export class SubtitleService {
       if (isLocal) {
         onProgress?.(`${getTime()} 准备通过本地服务器识别... ${paramsDesc}`);
         try {
-          text = await LLMService.transcribeAudio(config, audioUrl, { videoId }, (msg) => {
+          text = await LLMService.transcribeAudio(config, audioUrl, asrOptions, (msg) => {
              onProgress?.(msg);
           });
         } catch (e: any) {
@@ -360,7 +371,7 @@ export class SubtitleService {
           });
           const sizeMB = (audioBlob.size / 1024 / 1024).toFixed(2);
           onProgress?.(`${getTime()} 音频准备完成，大小: ${sizeMB} MB`);
-          text = await LLMService.transcribeAudio(config, audioBlob, { videoId }, (msg) => {
+          text = await LLMService.transcribeAudio(config, audioBlob, asrOptions, (msg) => {
             onProgress?.(msg);
           });
         }
@@ -371,7 +382,7 @@ export class SubtitleService {
         });
         const sizeMB = (audioBlob.size / 1024 / 1024).toFixed(2);
         onProgress?.(`${getTime()} 音频下载完成 (${sizeMB} MB)，正在调用远程识别...`);
-        text = await LLMService.transcribeAudio(config, audioBlob, { videoId }, (msg) => {
+        text = await LLMService.transcribeAudio(config, audioBlob, asrOptions, (msg) => {
           onProgress?.(msg);
         });
       }

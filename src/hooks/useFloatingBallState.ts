@@ -371,7 +371,7 @@ export function useFloatingBallState() {
   };
 
   /**
-   * 右键悬浮球：仅获取字幕，不生成思维导图
+   * 悬浮球右键菜单 →「获取字幕」：仅获取字幕，不生成思维导图
    */
   const handleBallRightClick = async () => {
     if (!isContextValid.current || !chrome.runtime?.id) {
@@ -483,16 +483,57 @@ export function useFloatingBallState() {
       showToast('⚠️ 扩展已更新，请刷新页面', 5000);
       return;
     }
-    if (!confirm('清除缓存重新生成？可能需要重新识别语音。')) return;
+    if (!confirm('重新语音识别？将跳过官方字幕与缓存，重新识别后再生成导图。')) return;
     setShowViewer(false);
     try {
       await RuntimeUtils.sendMessage({
         type: 'DOWNLOAD_SUBTITLE',
-        payload: { videoUrl: window.location.href, force: true, origin: 'user' }
+        payload: {
+          videoUrl: window.location.href,
+          videoTitle: getPageVideoTitle(),
+          forceAsr: true,
+          origin: 'user'
+        }
       });
-      showToast('正在强制重新生成...');
+      showToast('🎙️ 正在重新语音识别（跳过官方字幕）...', 4000);
+      fetchCurrentTask();
     } catch (err) {
       showToast('操作失败，请稍后重试');
+    }
+  };
+
+  /**
+   * 重新语音识别（仅字幕）：跳过官方字幕与缓存，重跑 ASR 后直接展示新字幕。
+   * 由悬浮球右键菜单与字幕面板调用，不消耗 LLM 调用。
+   */
+  const handleForceAsrSubtitles = async () => {
+    if (!isContextValid.current || !chrome.runtime?.id) {
+      showToast('⚠️ 扩展已更新，请刷新页面后继续使用', 5000);
+      return;
+    }
+    if (!confirm('重新语音识别？将跳过官方字幕，并清除该视频的字幕 / 导图缓存。')) return;
+
+    setShowSubtitle(false);
+    setShowNotification(false);
+    try {
+      await RuntimeUtils.sendMessage({
+        type: 'DOWNLOAD_SUBTITLE',
+        payload: {
+          videoUrl: window.location.href,
+          videoTitle: getPageVideoTitle(),
+          subtitleOnly: true,
+          forceAsr: true,
+          origin: 'user'
+        }
+      });
+      showToast('🎙️ 正在重新语音识别（跳过官方字幕）...', 4000);
+      fetchCurrentTask();
+    } catch (err: any) {
+      const errMsg = String(err?.message || err);
+      if (!errMsg.includes('context invalidated')) {
+        console.error('[FloatingBall] 重新语音识别启动失败:', err);
+      }
+      showToast('启动重新识别失败，请刷新页面后重试');
     }
   };
 
@@ -511,6 +552,7 @@ export function useFloatingBallState() {
     handleCloseSubtitle,
     handleRetry,
     handleReTranscribe,
+    handleForceAsrSubtitles,
     showToast
   };
 }

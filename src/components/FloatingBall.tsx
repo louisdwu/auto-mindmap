@@ -17,21 +17,62 @@ interface FloatingBallProps {
     subtitleOnly?: boolean;
   };
   onClick: () => void;
-  /** 右键：仅获取字幕，不生成思维导图 */
+  /** 菜单：仅获取字幕，不生成思维导图 */
   onRightClick?: () => void;
+  /** 菜单：重新语音识别（跳过官方字幕与缓存） */
+  onReTranscribeAsr?: () => void;
   isFullscreen: boolean;
   onToast?: (message: string, duration?: number) => void;
 }
+
+interface MenuActionProps {
+  icon: string;
+  label: string;
+  hint: string;
+  onClick: () => void;
+}
+
+/** 右键菜单里的一行操作 */
+const MenuAction: React.FC<MenuActionProps> = ({ icon, label, hint, onClick }) => {
+  const [hovered, setHovered] = useState(false);
+  return (
+    <button
+      onClick={onClick}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        display: 'flex',
+        alignItems: 'flex-start',
+        gap: '8px',
+        width: '100%',
+        padding: '8px 10px',
+        border: 'none',
+        borderRadius: '8px',
+        background: hovered ? '#f1f5f9' : 'transparent',
+        cursor: 'pointer',
+        textAlign: 'left'
+      }}
+    >
+      <span style={{ fontSize: '15px', lineHeight: '18px' }}>{icon}</span>
+      <span style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+        <span style={{ fontSize: '13px', fontWeight: 600, color: '#0f172a' }}>{label}</span>
+        <span style={{ fontSize: '11px', color: '#64748b' }}>{hint}</span>
+      </span>
+    </button>
+  );
+};
 
 export const FloatingBall: React.FC<FloatingBallProps> = ({
   showNotification,
   currentTask,
   onClick,
   onRightClick,
+  onReTranscribeAsr,
   isFullscreen,
   onToast
 }) => {
   const [showTooltip, setShowTooltip] = useState(false);
+  const [showMenu, setShowMenu] = useState(false);
   const [showErrorModal, setShowErrorModal] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
 
@@ -118,12 +159,13 @@ export const FloatingBall: React.FC<FloatingBallProps> = ({
           }
         }}
         onContextMenu={(e) => {
-          // 右键：仅获取字幕，不进入 LLM 生成流程
+          // 右键：弹出操作菜单（仅获取字幕 / 重新语音识别）
           e.preventDefault();
           e.stopPropagation();
-          onRightClick?.();
+          setShowMenu(true);
+          setShowTooltip(false);
         }}
-        title="左键：生成思维导图 · 右键：仅获取字幕"
+        title="左键：生成思维导图 · 右键：获取字幕 / 重新语音识别"
         onMouseEnter={(e) => {
           setShowTooltip(true);
           e.currentTarget.style.transform = 'scale(1.1)';
@@ -214,6 +256,56 @@ export const FloatingBall: React.FC<FloatingBallProps> = ({
         `}</style>
       </div>
 
+      {/* 右键操作菜单 */}
+      {showMenu && !isFullscreen && (
+        <>
+          <div
+            style={{ position: 'fixed', inset: 0, zIndex: 999999, background: 'transparent' }}
+            onClick={() => setShowMenu(false)}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              setShowMenu(false);
+            }}
+          />
+          <div
+            style={{
+              position: 'fixed',
+              bottom: '100px',
+              left: '30px',
+              zIndex: 1000000,
+              minWidth: '228px',
+              padding: '6px',
+              background: 'white',
+              border: '1px solid #e5e7eb',
+              borderRadius: '10px',
+              boxShadow: '0 10px 30px rgba(0, 0, 0, 0.22)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '2px'
+            }}
+          >
+            <MenuAction
+              icon="📝"
+              label="获取字幕"
+              hint="只提取字幕，不生成导图"
+              onClick={() => {
+                setShowMenu(false);
+                onRightClick?.();
+              }}
+            />
+            <MenuAction
+              icon="🎙️"
+              label="重新语音识别"
+              hint="跳过官方字幕与缓存，重跑 ASR"
+              onClick={() => {
+                setShowMenu(false);
+                onReTranscribeAsr?.();
+              }}
+            />
+          </div>
+        </>
+      )}
+
       {/* 悬浮提示 */}
       {showTooltip && !isFullscreen && (
         <div
@@ -247,7 +339,7 @@ export const FloatingBall: React.FC<FloatingBallProps> = ({
                 lineHeight: '1.6'
               }}
             >
-              左键：生成思维导图 · 右键：仅获取字幕
+              左键：生成思维导图 · 右键：获取字幕 / 重新语音识别
             </div>
           )}
           <style>{`
