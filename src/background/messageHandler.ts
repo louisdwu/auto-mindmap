@@ -55,14 +55,27 @@ export class MessageHandler {
     }
   }
 
-  private async handleDownloadSubtitle(payload: { videoUrl: string, force?: boolean }, tabId?: number) {
+  private async handleDownloadSubtitle(
+    payload: { videoUrl: string; videoTitle?: string; force?: boolean; subtitleOnly?: boolean },
+    tabId?: number
+  ) {
     const isForce = payload.force === true;
+    const isSubtitleOnly = payload.subtitleOnly === true;
 
-    // 如果不是强制模式且启用了缓存，检查已有的思维导图
     const config = await StorageService.getConfig();
     const videoId = VideoUtils.extractVideoId(payload.videoUrl);
 
-    if (!isForce && config?.settings.enableCache) {
+    // 已有一个自动流程发起的字幕下载任务：直接切换为仅字幕模式，避免重复下载
+    if (isSubtitleOnly && !isForce) {
+      const promoted = await this.taskManager.promoteToSubtitleOnly(payload.videoUrl);
+      if (promoted) {
+        return { taskId: promoted.id, promoted: true };
+      }
+    }
+
+    // 「仅获取字幕」模式不消费思维导图缓存，直接进入字幕获取流程
+    // 如果不是强制模式且启用了缓存，检查已有的思维导图
+    if (!isSubtitleOnly && !isForce && config?.settings.enableCache) {
       const cachedMindmap = await StorageService.getLatestMindmapByUrl(payload.videoUrl);
       if (cachedMindmap) {
         const hasTimestamps = /\[\d{1,2}:\d{2}/.test(cachedMindmap.subtitleText || '');
@@ -81,18 +94,28 @@ export class MessageHandler {
       }
     }
     
-    // 如果是强制模式，彻底清除该视频的所有相关缓存
+    // 如果是强制模式，清除该视频的相关缓存（仅字幕模式保留已生成的思维导图）
     if (isForce) {
-      console.log('[MessageHandler] 强制模式：正在彻底清除该视频所有缓存, ID:', videoId);
-      await StorageService.deleteMindmapByUrl(payload.videoUrl);
+      console.log('[MessageHandler] 强制模式：正在清除该视频缓存, ID:', videoId, '仅字幕:', isSubtitleOnly);
+      if (!isSubtitleOnly) {
+        await StorageService.deleteMindmapByUrl(payload.videoUrl);
+      }
       if (videoId) {
         await StorageService.deleteAsrCache(videoId);
         await StorageService.deleteSubtitleCache(videoId);
-        await StorageService.deletePhase1Cache(videoId);
+        if (!isSubtitleOnly) {
+          await StorageService.deletePhase1Cache(videoId);
+        }
       }
     }
 
-    const task = await this.taskManager.createDownloadTask(payload.videoUrl, tabId, isForce);
+    const task = await this.taskManager.createDownloadTask(
+      payload.videoUrl,
+      tabId,
+      isForce,
+      isSubtitleOnly,
+      payload.videoTitle
+    );
     return { taskId: task.id };
   }
 

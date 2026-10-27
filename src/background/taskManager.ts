@@ -41,10 +41,16 @@ export class TaskManager {
           task.updatedAt = Date.now();
           this.tasks.set(task.id, task);
         } else if (task.status === 'failed') {
-          // 只恢复 generate_mindmap 类型的失败任务（保留其字幕供用户复制/查看报错）
-          // download_subtitle 失败任务无字幕价值，且字幕获取逻辑已多次迭代，
+          // 保留 generate_mindmap 失败任务（其字幕可供用户复制/查看报错）
+          // 以及用户主动触发的「仅获取字幕」失败任务（用户需要看到失败原因）
+          // 普通 download_subtitle 失败任务无字幕价值，字幕获取逻辑已多次迭代，
           // 保留旧失败任务会误导用户以为新代码仍有问题，故 Service Worker 重启时丢弃
-          if (task.type === 'generate_mindmap' && Date.now() - (task.updatedAt || task.createdAt || 0) < 3600000) {
+          const isRecentFailure = Date.now() - (task.updatedAt || task.createdAt || 0) < 3600000;
+          const shouldKeep = isRecentFailure && (
+            task.type === 'generate_mindmap' ||
+            (task.type === 'download_subtitle' && task.data?.subtitleOnly === true)
+          );
+          if (shouldKeep) {
             this.tasks.set(task.id, task);
           }
         }
@@ -71,14 +77,72 @@ export class TaskManager {
   }
 
   /**
-   * 创建下载字幕任务
+   * 判断两个视频 URL 是否指向同一视频
    */
-  async createDownloadTask(videoUrl: string, tabId?: number, force: boolean = false): Promise<Task> {
+  private isSameVideo(urlA?: string, urlB?: string): boolean {
+    if (!urlA || !urlB) return false;
+    const idA = VideoUtils.extractVideoId(urlA);
+    const idB = VideoUtils.extractVideoId(urlB);
+    if (idA && idB) return idA === idB;
+    return urlA === urlB;
+  }
+
+  /**
+   * 将正在排队/执行的普通字幕任务切换为「仅获取字幕」。
+   *
+   * 典型场景：打开视频后自动流程已在下载字幕，用户此时右键悬浮球表示
+   * 只想要字幕。复用该任务可避免重复下载/重复 ASR，同时保证后续不再生成导图。
+   */
+  async promoteToSubtitleOnly(videoUrl: string): Promise<Task | undefined> {
+    const task = Array.from(this.tasks.values()).find(t =>
+      t.type === 'download_subtitle' &&
+      (t.status === 'pending' || t.status === 'running') &&
+      t.data?.subtitleOnly !== true &&
+      this.isSameVideo(t.data?.videoUrl, videoUrl)
+    );
+    if (!task) return undefined;
+
+    task.data = { ...task.data, subtitleOnly: true };
+    task.updatedAt = Date.now();
+    await this.saveTasks();
+    console.log('[TaskManager] 进行中的下载任务已切换为仅字幕模式:', task.id);
+    return task;
+  }
+
+  /**
+   * 查找同类正在排队/执行中的任务，避免重复点击时重复下载字幕或重复 ASR
+   */
+  private findActiveTask(videoUrl: string, type: Task['type'], subtitleOnly: boolean): Task | undefined {
+    return Array.from(this.tasks.values()).find(task => {
+      if (task.type !== type) return false;
+      if (task.status !== 'pending' && task.status !== 'running') return false;
+      if ((task.data?.subtitleOnly === true) !== subtitleOnly) return false;
+      return this.isSameVideo(task.data?.videoUrl, videoUrl);
+    });
+  }
+
+  /**
+   * 创建下载字幕任务
+   * @param subtitleOnly true = 仅获取字幕，不生成思维导图
+   */
+  async createDownloadTask(
+    videoUrl: string,
+    tabId?: number,
+    force: boolean = false,
+    subtitleOnly: boolean = false,
+    videoTitle?: string
+  ): Promise<Task> {
+    const runningTask = this.findActiveTask(videoUrl, 'download_subtitle', subtitleOnly);
+    if (runningTask) {
+      console.log('[TaskManager] 复用进行中的字幕任务:', runningTask.id);
+      return runningTask;
+    }
+
     const task: Task = {
       id: uuidv4(),
       type: 'download_subtitle',
       status: 'pending',
-      data: { videoUrl, force },
+      data: { videoUrl, force, subtitleOnly, videoTitle },
       createdAt: Date.now(),
       updatedAt: Date.now(),
       tabId
@@ -228,9 +292,35 @@ export class TaskManager {
 
   /**
    * 执行下载字幕任务
+   *
+   * 常规模式：获取字幕后自动创建思维导图任务；
+   * 仅字幕模式（subtitleOnly）：只缓存并交付字幕，绝不触发 LLM。
    */
   private async executeDownloadTask(task: Task) {
-    const { videoUrl } = task.data;
+    const { videoUrl, subtitleOnly } = task.data;
+    const videoId = VideoUtils.extractVideoId(videoUrl);
+
+    // 仅字幕模式优先复用已有字幕缓存，避免重复下载/重复 ASR
+    if (subtitleOnly && videoId && task.data.force !== true) {
+      task.statusMessage = '正在检索已缓存的字幕...';
+      task.updatedAt = Date.now();
+      await this.saveTasks();
+
+      const subtitleCache = await StorageService.getSubtitleCache(videoId);
+      const asrCache = subtitleCache ? null : await StorageService.getAsrCache(videoId);
+      const cachedText = subtitleCache || asrCache;
+      if (cachedText && /\[\d{1,2}:\d{2}/.test(cachedText)) {
+        console.log('[TaskManager] 命中字幕缓存，直接返回（仅字幕模式）:', videoId);
+        await this.finishSubtitleOnlyTask(task, {
+          videoUrl,
+          videoTitle: task.data.videoTitle || '视频字幕',
+          subtitleText: cachedText,
+          isAsr: asrCache !== null,
+          fromCache: true
+        });
+        return;
+      }
+    }
 
     // YouTube 视频：Service Worker 中无法直接拿到字幕，需通过 content script 代理获取
     if (videoUrl.includes('youtube.com') || videoUrl.includes('youtu.be')) {
@@ -253,6 +343,12 @@ export class TaskManager {
       task.data.force === true,
       task.tabId
     );
+
+    // 读取任务数据而不是启动时的快照：右键可能已把进行中的普通下载任务切换为仅字幕模式
+    if (task.data.subtitleOnly === true) {
+      await this.finishSubtitleOnlyTask(task, { ...result, fromCache: false });
+      return;
+    }
 
     task.result = result;
     task.statusMessage = '字幕获取成功，即将开始生成思维导图';
@@ -343,6 +439,17 @@ export class TaskManager {
       throw new Error('YouTube 字幕与语音识别均未能获取到文本，请稍后重试。');
     }
 
+    if (task.data.subtitleOnly === true) {
+      await this.finishSubtitleOnlyTask(task, {
+        videoUrl,
+        videoTitle,
+        subtitleText,
+        isAsr,
+        fromCache: false
+      });
+      return;
+    }
+
     // 缓存字幕，保障 LLM 失败后也能通过 GET_SUBTITLE_CACHE 取回字幕原文本
     if (videoId) {
       StorageService.saveSubtitleCache(videoId, subtitleText).catch(err => {
@@ -356,6 +463,96 @@ export class TaskManager {
 
     // 与 B 站流程保持一致：获取到字幕后自动创建生成思维导图任务
     await this.createMindmapTask(videoUrl, subtitleText, videoTitle, task.tabId);
+  }
+
+  /**
+   * 收尾「仅获取字幕」任务：缓存字幕、按需落盘、通知 content script。
+   * 该流程不创建 generate_mindmap 任务，因此不会消耗任何 LLM 调用。
+   */
+  private async finishSubtitleOnlyTask(
+    task: Task,
+    result: {
+      videoUrl: string;
+      videoTitle: string;
+      subtitleText: string;
+      isAsr?: boolean;
+      fromCache?: boolean;
+    }
+  ): Promise<void> {
+    const { videoUrl, videoTitle, subtitleText, isAsr, fromCache } = result;
+    const videoId = VideoUtils.extractVideoId(videoUrl);
+
+    if (videoId) {
+      StorageService.saveSubtitleCache(videoId, subtitleText).catch(err => {
+        console.warn('[TaskManager] Failed to save subtitle-only cache:', err);
+      });
+    }
+
+    // 用户开启了「本地文件缓存」时，仅字幕模式也直接把 .txt 落到下载目录。
+    // 缓存命中的场景不重复落盘，避免反复右键产生重复文件。
+    let savedToFile = false;
+    try {
+      const config = await StorageService.getConfig();
+      if (!fromCache && config && FileService.hasCacheDirectory(config)) {
+        await FileService.saveSubtitleFile(
+          subtitleText,
+          FileService.generateSubtitleFileName(videoTitle),
+          config.settings.cacheDirectory
+        );
+        savedToFile = true;
+      }
+    } catch (e) {
+      console.warn('[TaskManager] 仅字幕模式保存文件失败（不影响结果交付）:', e);
+    }
+
+    task.result = {
+      videoUrl,
+      videoTitle,
+      subtitleText,
+      isAsr: isAsr === true,
+      subtitleOnly: true,
+      fromCache: fromCache === true,
+      savedToFile
+    };
+    task.statusMessage = fromCache ? '已复用缓存字幕' : '字幕获取完成';
+    task.updatedAt = Date.now();
+    await this.saveTasks();
+
+    await this.notifySubtitleReady(task);
+  }
+
+  /**
+   * 通知发起任务的标签页：仅字幕结果已就绪
+   */
+  private async notifySubtitleReady(task: Task): Promise<void> {
+    const tabId = task.tabId;
+    const result = task.result;
+    if (!tabId || !result?.subtitleText) {
+      console.log('[TaskManager] 仅字幕任务缺少标签页上下文，结果已保存在存储中');
+      return;
+    }
+
+    try {
+      await chrome.tabs.sendMessage(tabId, {
+        type: 'SUBTITLE_READY',
+        payload: {
+          taskId: task.id,
+          videoUrl: result.videoUrl,
+          videoTitle: result.videoTitle,
+          subtitleText: result.subtitleText,
+          isAsr: result.isAsr === true,
+          savedToFile: result.savedToFile === true
+        }
+      });
+      console.log('[TaskManager] 已通知 content script 字幕就绪 (tabId:', tabId, ')');
+    } catch (error: any) {
+      const message = String(error?.message || error);
+      if (message.includes('Receiving end does not exist') || message.includes('No tab with id')) {
+        console.log('[TaskManager] 目标标签页不可用，字幕结果已保存在存储中');
+      } else {
+        console.error('[TaskManager] 通知字幕结果失败:', error);
+      }
+    }
   }
 
   /**

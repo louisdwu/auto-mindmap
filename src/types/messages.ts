@@ -5,6 +5,12 @@ export interface DownloadSubtitleMessage {
   type: 'DOWNLOAD_SUBTITLE';
   payload: {
     videoUrl: string;
+    /** 页面标题，仅字幕模式下用于命名结果与文件 */
+    videoTitle?: string;
+    /** 清除缓存后重新获取 */
+    force?: boolean;
+    /** true = 仅获取字幕，不生成思维导图 */
+    subtitleOnly?: boolean;
   };
 }
 
@@ -63,6 +69,19 @@ export interface MindmapGeneratedMessage {
   };
 }
 
+export interface SubtitleReadyMessage {
+  type: 'SUBTITLE_READY';
+  payload: {
+    taskId: string;
+    videoUrl: string;
+    videoTitle?: string;
+    subtitleText: string;
+    isAsr?: boolean;
+    /** 后台是否已按「本地文件缓存」设置自动保存了 .txt 文件 */
+    savedToFile?: boolean;
+  };
+}
+
 export interface TaskStatusUpdateMessage {
   type: 'TASK_STATUS_UPDATE';
   payload: {
@@ -83,4 +102,5 @@ export type ExtensionMessage =
 export type ContentMessage =
   | SubtitleDownloadedMessage
   | MindmapGeneratedMessage
-  | TaskStatusUpdateMessage;
+  | TaskStatusUpdateMessage
+  | SubtitleReadyMessage;
