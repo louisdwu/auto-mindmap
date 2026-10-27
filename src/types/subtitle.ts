@@ -13,3 +13,14 @@ export interface SubtitleResultData {
   /** 后台是否已按「本地文件缓存」设置自动保存了 .txt 文件 */
   savedToFile?: boolean;
 }
+
+/** ASR 请求的可选项（跨 adapter / service 传递） */
+export interface AsrRequestOptions {
+  /** 视频 ID，用于服务端音频与字幕缓存 */
+  videoId?: string;
+  /**
+   * 跳过服务端字幕文本缓存，强制重新推理。
+   * 用户主动点「重新语音识别」时使用，否则同一视频会直接瞬发旧文本。
+   */
+  noCache?: boolean;
+}

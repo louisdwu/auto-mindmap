@@ -60,10 +60,12 @@ export class MessageHandler {
   }
 
   private async handleDownloadSubtitle(
-    payload: { videoUrl: string; videoTitle?: string; force?: boolean; subtitleOnly?: boolean; origin?: RequestOrigin },
+    payload: { videoUrl: string; videoTitle?: string; force?: boolean; forceAsr?: boolean; subtitleOnly?: boolean; origin?: RequestOrigin },
     tabId?: number
   ) {
-    const isForce = payload.force === true;
+    const isForceAsr = payload.forceAsr === true;
+    // 「重新语音识别」必然要绕过一切缓存，因此等价于强制模式
+    const isForce = payload.force === true || isForceAsr;
     const isSubtitleOnly = payload.subtitleOnly === true;
     const isAutoRequest = payload.origin === 'auto';
 
@@ -116,16 +118,19 @@ export class MessageHandler {
       }
     }
     
-    // 如果是强制模式，清除该视频的相关缓存（仅字幕模式保留已生成的思维导图）
+    // 如果是强制模式，清除该视频的相关缓存
+    // 例外：仅字幕模式要保留已生成的思维导图；但「重新语音识别」后旧字幕已作废，
+    // 基于旧字幕的导图必须一并清掉，否则用户左键会看到过期结果。
     if (isForce) {
-      console.log('[MessageHandler] 强制模式：正在清除该视频缓存, ID:', videoId, '仅字幕:', isSubtitleOnly);
-      if (!isSubtitleOnly) {
+      console.log('[MessageHandler] 强制模式：正在清除该视频缓存, ID:', videoId,
+        '仅字幕:', isSubtitleOnly, '重新语音识别:', isForceAsr);
+      if (!isSubtitleOnly || isForceAsr) {
         await StorageService.deleteMindmapByUrl(payload.videoUrl);
       }
       if (videoId) {
         await StorageService.deleteAsrCache(videoId);
         await StorageService.deleteSubtitleCache(videoId);
-        if (!isSubtitleOnly) {
+        if (!isSubtitleOnly || isForceAsr) {
           await StorageService.deletePhase1Cache(videoId);
         }
       }
@@ -136,7 +141,8 @@ export class MessageHandler {
       tabId,
       isForce,
       isSubtitleOnly,
-      payload.videoTitle
+      payload.videoTitle,
+      isForceAsr
     );
     return { taskId: task.id };
   }

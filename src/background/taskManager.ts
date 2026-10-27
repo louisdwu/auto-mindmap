@@ -199,7 +199,8 @@ export class TaskManager {
     tabId?: number,
     force: boolean = false,
     subtitleOnly: boolean = false,
-    videoTitle?: string
+    videoTitle?: string,
+    forceAsr: boolean = false
   ): Promise<Task> {
     // 不区分模式地复用进行中的字幕任务：
     // 用户已选择仅字幕时，自动流程的普通请求不能另起一个会生成导图的任务。
@@ -221,7 +222,7 @@ export class TaskManager {
       id: uuidv4(),
       type: 'download_subtitle',
       status: 'pending',
-      data: { videoUrl, force, subtitleOnly, videoTitle },
+      data: { videoUrl, force, subtitleOnly, videoTitle, forceAsr },
       createdAt: Date.now(),
       updatedAt: Date.now(),
       tabId
@@ -435,7 +436,8 @@ export class TaskManager {
         await this.saveTasks();
       },
       task.data.force === true,
-      task.tabId
+      task.tabId,
+      task.data.forceAsr === true
     );
 
     // 读取任务数据而不是启动时的快照：右键可能已把进行中的普通下载任务切换为仅字幕模式
@@ -473,27 +475,33 @@ export class TaskManager {
     let subtitleText: string | null = null;
     let isAsr = false;
 
-    // === 阶段 1：尝试获取 CC 字幕 ===
-    task.statusMessage = '正在通过页面上下文获取 YouTube 字幕...';
-    task.updatedAt = Date.now();
-    await this.saveTasks();
+    const forceAsr = task.data.forceAsr === true;
 
-    try {
-      const resp = await chrome.tabs.sendMessage(tabId, { type: 'FETCH_YOUTUBE_SUBTITLE' });
-      if (resp?.subtitleText && String(resp.subtitleText).trim()) {
-        subtitleText = String(resp.subtitleText);
+    // === 阶段 1：尝试获取 CC 字幕（「重新语音识别」时跳过）===
+    if (!forceAsr) {
+      task.statusMessage = '正在通过页面上下文获取 YouTube 字幕...';
+      task.updatedAt = Date.now();
+      await this.saveTasks();
+
+      try {
+        const resp = await chrome.tabs.sendMessage(tabId, { type: 'FETCH_YOUTUBE_SUBTITLE' });
+        if (resp?.subtitleText && String(resp.subtitleText).trim()) {
+          subtitleText = String(resp.subtitleText);
+        }
+        if (resp?.videoTitle) videoTitle = resp.videoTitle;
+      } catch (e: any) {
+        console.warn('[TaskManager] FETCH_YOUTUBE_SUBTITLE 失败，将尝试 ASR 回退:', e?.message || e);
       }
-      if (resp?.videoTitle) videoTitle = resp.videoTitle;
-    } catch (e: any) {
-      console.warn('[TaskManager] FETCH_YOUTUBE_SUBTITLE 失败，将尝试 ASR 回退:', e?.message || e);
     }
 
-    // === 阶段 2：无 CC 字幕，回退 ASR 语音识别 ===
+    // === 阶段 2：无 CC 字幕（或用户要求重新语音识别），进入 ASR ===
     if (!subtitleText) {
       const config = await StorageService.getConfig();
       if (!config) throw new Error('配置未初始化');
 
-      task.statusMessage = '未检测到 YouTube 字幕，准备下载音频进行语音识别...';
+      task.statusMessage = forceAsr
+        ? '正在重新语音识别（跳过官方字幕与缓存）...'
+        : '未检测到 YouTube 字幕，准备下载音频进行语音识别...';
       task.updatedAt = Date.now();
       await this.saveTasks();
 

@@ -31,6 +31,7 @@ function FloatingBallApp() {
     handleCloseSubtitle,
     handleRetry,
     handleReTranscribe,
+    handleForceAsrSubtitles,
     showToast
   } = useFloatingBallState();
 
@@ -41,6 +42,7 @@ function FloatingBallApp() {
         currentTask={currentTask}
         onClick={handleBallClick}
         onRightClick={handleBallRightClick}
+        onReTranscribeAsr={handleForceAsrSubtitles}
         isFullscreen={isFullscreen}
         onToast={showToast}
       />
@@ -56,6 +58,7 @@ function FloatingBallApp() {
         <SubtitleModal
           data={subtitleResult}
           onClose={handleCloseSubtitle}
+          onReTranscribe={handleForceAsrSubtitles}
           onToast={showToast}
         />
       )}

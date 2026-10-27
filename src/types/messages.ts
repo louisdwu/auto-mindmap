@@ -12,6 +12,11 @@ export interface DownloadSubtitleMessage {
     videoTitle?: string;
     /** 清除缓存后重新获取 */
     force?: boolean;
+    /**
+     * true = 强制「重新语音识别」：跳过官方字幕与服务端/本地缓存，
+     * 直接对音频重新做 ASR（悬浮球右键菜单、字幕面板、导图查看器入口）。
+     */
+    forceAsr?: boolean;
     /** true = 仅获取字幕，不生成思维导图 */
     subtitleOnly?: boolean;
     /** 缺省按 user 处理，auto 会被「仅字幕模式」抑制 */

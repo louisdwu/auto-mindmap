@@ -229,9 +229,9 @@ export const Toolbar: React.FC<ToolbarProps> = ({
               )}
             </div>
 
-            {/* 重新识别 */}
+            {/* 重新语音识别（跳过官方字幕与缓存，重跑 ASR） */}
             {viewerActions.onReTranscribe && (
-              <button onClick={viewerActions.onReTranscribe} data-title="重新生成">
+              <button onClick={viewerActions.onReTranscribe} data-title="重新语音识别">
                 <IconRefresh />
               </button>
             )}
