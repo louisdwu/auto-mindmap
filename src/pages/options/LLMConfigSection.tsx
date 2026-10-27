@@ -320,8 +320,8 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
                 {testing ? '测试中…' : '测试连接'}
               </button>
               <p className="form-hint">
-                用当前填写的地址、密钥和模型发一次最小请求。404 / 401 这类错误只有看到「实际请求地址 + 模型」才能定位，
-                不必先跑一遍完整的导图生成。
+                用当前填写的地址、密钥和模型发一次最小请求，并顺带取回<strong>该密钥可用的模型清单</strong>（点一下即可填入）。
+                404 / 401 这类错误只有看到「实际请求地址 + 模型 + 可用模型」才能定位，不必先跑一遍完整的导图生成。
               </p>
 
               {testResult && (
@@ -337,6 +337,32 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
                     模型：<code>{editingConfig.model || '(未填写)'}</code>
                   </div>
                   <div className="conn-test__detail">{testResult.detail}</div>
+
+                  {testResult.models && testResult.models.length > 0 && (
+                    <div className="conn-test__models">
+                      <div className="conn-test__models-title">
+                        该密钥可用模型（{testResult.models.length}），点击可填入模型名称：
+                      </div>
+                      <div className="conn-test__models-list">
+                        {testResult.models.map(id => (
+                          <button
+                            key={id}
+                            type="button"
+                            className={`conn-test__model ${id === editingConfig.model?.trim() ? 'conn-test__model--active' : ''}`}
+                            onClick={() => onUpdateEditingConfig({ model: id })}
+                          >
+                            {id}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {(!testResult.models || testResult.models.length === 0) && testResult.modelsError && (
+                    <div className="conn-test__models-title">
+                      可用模型清单获取失败：{testResult.modelsError}
+                    </div>
+                  )}
                 </div>
               )}
             </div>

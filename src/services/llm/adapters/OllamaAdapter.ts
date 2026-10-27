@@ -16,6 +16,41 @@ export class OllamaAdapter extends BaseAdapter implements ILLMAdapter {
     return url;
   }
 
+  /**
+   * 由 api 基址推出模型列表地址（Ollama 的模型清单在 /api/tags）
+   */
+  getTagsUrl(llmConfig: LLMConfig): string {
+    const url = this.normalizeUrl(llmConfig.apiUrl).replace(/\/(chat|generate)$/, '');
+    return url.includes('/api') ? `${url}/tags` : `${url}/api/tags`;
+  }
+
+  /**
+   * 列出本地/云端已安装的模型，用于连通性测试时给出可替换项
+   */
+  async listModels(llmConfig: LLMConfig, timeout: number): Promise<string[]> {
+    const response = await this.fetchWithRetry(
+      this.getTagsUrl(llmConfig),
+      { method: 'GET', headers: { Accept: 'application/json' } },
+      timeout
+    );
+    const responseText = await response.text();
+    if (!response.ok) {
+      throw new Error(`获取模型列表失败 (HTTP ${response.status}): ${responseText.slice(0, 200)}`);
+    }
+
+    let data: any;
+    try {
+      data = responseText ? JSON.parse(responseText) : {};
+    } catch {
+      throw new Error('模型列表响应不是合法 JSON');
+    }
+
+    const list = Array.isArray(data?.models) ? data.models : [];
+    return list
+      .map((item: any) => item?.name || item?.model)
+      .filter((id: unknown): id is string => typeof id === 'string' && id.length > 0);
+  }
+
   async generateMindmap(
     config: PluginConfig,
     llmConfig: LLMConfig,

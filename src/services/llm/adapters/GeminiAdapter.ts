@@ -26,6 +26,43 @@ export class GeminiAdapter extends BaseAdapter implements ILLMAdapter {
     return url;
   }
 
+  /**
+   * 由基址推出模型列表地址（Gemini 为 GET {base}/models，密钥走 query）
+   */
+  getModelsUrl(llmConfig: LLMConfig): string {
+    const base = this.normalizeUrl(llmConfig.apiUrl).replace(/\/models\/.*$/, '');
+    const key = llmConfig.apiKey ? `?key=${encodeURIComponent(llmConfig.apiKey)}` : '';
+    return `${base}/models${key}`;
+  }
+
+  /**
+   * 列出该密钥可用的模型，用于连通性测试时给出可替换项
+   */
+  async listModels(llmConfig: LLMConfig, timeout: number): Promise<string[]> {
+    const response = await this.fetchWithRetry(
+      this.getModelsUrl(llmConfig),
+      { method: 'GET', headers: { Accept: 'application/json' } },
+      timeout
+    );
+    const responseText = await response.text();
+    if (!response.ok) {
+      throw new Error(`获取模型列表失败 (HTTP ${response.status}): ${responseText.slice(0, 200)}`);
+    }
+
+    let data: any;
+    try {
+      data = responseText ? JSON.parse(responseText) : {};
+    } catch {
+      throw new Error('模型列表响应不是合法 JSON');
+    }
+
+    const list = Array.isArray(data?.models) ? data.models : [];
+    return list
+      // Gemini 返回的是 "models/gemini-1.5-flash"，请求里只需要裸名
+      .map((item: any) => String(item?.name || '').replace(/^models\//, ''))
+      .filter((id: string) => id.length > 0);
+  }
+
   async generateMindmap(
     config: PluginConfig,
     llmConfig: LLMConfig,
