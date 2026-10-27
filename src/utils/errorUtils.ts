@@ -18,6 +18,20 @@ export class ErrorUtils {
       }
       return `上下文长度超限：当前发送的内容过多。请在本地大模型服务（如 LM Studio）中调大上下文窗口长度 (Context Length) 并重新加载模型。`;
     }
+    // 已经带着明确处置建议的错误（例如 Gemini 的地区限制提示）直接透传，
+    // 不要让下面的通用规则把它覆盖成泛泛的「鉴权失败」。
+    if (errorMessage.includes('服务范围')) {
+      return errorMessage;
+    }
+
+    if (/HTTP 40[13]\b|Unauthorized|Forbidden|invalid[_ ]?api[_ ]?key|incorrect api key/i.test(errorMessage)) {
+      return `鉴权失败：API 密钥无效、已过期，或该密钥无权访问这个模型。请到「大模型配置」重新填写密钥，并用「测试连接」按钮验证。原始错误：${errorMessage}`;
+    }
+
+    if (/HTTP 404|not[_ ]?found|model route not found|model not found|does not exist/i.test(errorMessage)) {
+      return `模型路由不存在（HTTP 404）：上游没有找到这个模型的调用路径，通常是「API 地址」或「模型名称」与服务商文档不一致。请检查：① API 地址是否为文档给出的基址（商汤 SenseNova 为 https://token.sensenova.cn/v1，漏掉 /v1 就会 404）；② 模型标识是否与文档一字不差（如 sensenova-6.8-flash-lite）；③ 该模型是否已在当前账户/套餐中开通。可在「大模型配置」点击「测试连接」快速验证。原始错误：${errorMessage}`;
+    }
+
     return errorMessage;
   }
 }

@@ -608,6 +608,64 @@ body {
   margin-bottom: 4px;
   color: var(--text-main);
 }
+
+/* === 连接测试 === */
+.conn-test__btn {
+  padding: 8px 18px;
+  font-size: 13px;
+}
+
+.conn-test__btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.conn-test__result {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.7;
+  word-break: break-all;
+}
+
+.conn-test__result--ok {
+  background: #ecfdf5;
+  border: 1px solid #a7f3d0;
+  color: #065f46;
+}
+
+.conn-test__result--error {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #991b1b;
+}
+
+.conn-test__headline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+
+.conn-test__latency {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  opacity: 0.75;
+}
+
+.conn-test__line code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  background: rgba(15, 23, 42, 0.06);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+.conn-test__detail {
+  margin-top: 6px;
+  white-space: pre-wrap;
+}
+
 /* === Utility Classes === */
 .flex-row {
   display: flex;

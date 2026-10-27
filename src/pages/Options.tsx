@@ -212,6 +212,8 @@ export default function Options() {
         <div className="content-body">
           {activeTab === 'llm' && (
             <LLMConfigSection
+              key={editingConfig?.id || 'none'}
+              config={config}
               llmConfigs={llmConfigs}
               editingConfigId={editingConfigId}
               editingConfig={editingConfig}

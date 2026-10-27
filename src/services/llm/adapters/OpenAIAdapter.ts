@@ -1,6 +1,6 @@
 import { ILLMAdapter, GenerateContext } from '../base';
 import { BaseAdapter } from '../BaseAdapter';
-import { LLMConfig, PluginConfig, normalizeAsrLanguage } from '../../../types/config';
+import { LLMConfig, LLMProvider, PluginConfig, normalizeAsrLanguage } from '../../../types/config';
 import { AsrRequestOptions } from '../../../types/subtitle';
 
 /** 显式指定语言时的上下文偏置（只在用户主动选了对应语言时发送）。 */
@@ -21,6 +21,23 @@ function describeAsrLanguage(code: string): string {
   return names[code] ? names[code] + '（' + code + '）' : code;
 }
 
+/** 使用 OpenAI Chat Completions 协议的提供商 */
+const OPENAI_COMPATIBLE_PROVIDERS: LLMProvider[] = ['openai', 'custom', 'lmstudio', 'sensenova'];
+
+/** 把各种 OpenAI 兼容网关的错误结构统一抽成一句人话 */
+function extractServerError(data: any, rawText: string): string {
+  const candidates = [
+    data?.error?.message,
+    data?.error?.error?.message,
+    typeof data?.error === 'string' ? data.error : undefined,
+    data?.message,
+    data?.detail
+  ];
+  const found = candidates.find(value => typeof value === 'string' && value.trim().length > 0);
+  const text = found || rawText || '未知错误';
+  return String(text).slice(0, 300);
+}
+
 export class OpenAIAdapter extends BaseAdapter implements ILLMAdapter {
   /**
    * 获取完整的 API 请求 URL
@@ -28,8 +45,8 @@ export class OpenAIAdapter extends BaseAdapter implements ILLMAdapter {
   getFullUrl(llmConfig: LLMConfig): string {
     let apiUrl = this.normalizeUrl(llmConfig.apiUrl);
     const provider = llmConfig.provider;
-    
-    if ((provider === 'openai' || provider === 'lmstudio' || provider === 'custom') && !apiUrl.endsWith('/chat/completions')) {
+
+    if (OPENAI_COMPATIBLE_PROVIDERS.includes(provider) && !apiUrl.endsWith('/chat/completions')) {
       apiUrl = apiUrl + '/chat/completions';
     }
     return apiUrl;
@@ -109,12 +126,16 @@ export class OpenAIAdapter extends BaseAdapter implements ILLMAdapter {
 
     if (!response.ok) {
       const errorCode = response.status;
-      let serverErrorMsg = data.error?.message || data.message || data.detail || responseText;
-      throw new Error(`HTTP ${errorCode}: ${serverErrorMsg}`);
+      const serverErrorMsg = extractServerError(data, responseText);
+      // 错误信息里带上「实际请求地址 + 模型」，否则 404/401 这类问题只能靠猜：
+      // 是同名模型没开通、还是基址写错了（例如漏了 /v1），用户和日志都无从判断。
+      throw new Error(`HTTP ${errorCode}: ${serverErrorMsg}（地址 ${apiUrl}；模型 ${llmConfig.model?.trim()}）`);
     }
 
     let content = data.choices?.[0]?.message?.content || data.choices?.[0]?.text;
-    const reasoningContent = data.choices?.[0]?.message?.reasoning_content;
+    // 推理字段各家命名不一：OpenAI 系用 reasoning_content，商汤 SenseNova 用 reasoning
+    const reasoningContent = data.choices?.[0]?.message?.reasoning_content
+      || data.choices?.[0]?.message?.reasoning;
 
     if (!content || content.trim().length === 0) {
       if (reasoningContent && (reasoningContent.includes('#') || reasoningContent.includes('- '))) {
