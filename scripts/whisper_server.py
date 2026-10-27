@@ -120,7 +120,7 @@ os.environ.setdefault("HF_ENDPOINT", os.getenv("ASR_HF_ENDPOINT", "https://hf-mi
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from asr_engines import create_engine, select_engine_name, ENGINE_ENV  # noqa: E402
-from asr_engines.common import build_context, normalize_language  # noqa: E402
+from asr_engines.common import build_context, is_auto_language, normalize_language  # noqa: E402
 
 import uvicorn  # noqa: E402
 
@@ -382,18 +382,24 @@ threading.Thread(target=_mp3_cleanup_watcher, name="asr-mp3-cleanup", daemon=Tru
 # ------------------------------------------------------------------ #
 # 缓存路径与音频获取（供普通 / 流式共用）
 # ------------------------------------------------------------------ #
-def _cache_paths(video_id):
+def _cache_paths(video_id, language=None):
+    """返回 (缓存目录, 文本缓存, 音频缓存, SRT 缓存, 安全 video_id)。
+
+    文本/SRT 缓存按「识别语言」分档：同一视频用 zh 与 en 识别出的内容不同，
+    共用一份缓存会让切换语言后直接命中旧结果。音频缓存与语言无关，保持原名。
+    """
     cache_dir = CACHE_DIR
     safe_video_id = (
         "".join(c for c in video_id if c.isalnum() or c in "-_") if video_id else None
     )
     if not safe_video_id:
         return cache_dir, None, None, None, None
+    lang_tag = (normalize_language(language) or "auto") if language else "auto"
     return (
         cache_dir,
-        os.path.join(cache_dir, f"{safe_video_id}.txt"),
+        os.path.join(cache_dir, f"{safe_video_id}.{lang_tag}.txt"),
         os.path.join(cache_dir, f"{safe_video_id}.mp3"),
-        os.path.join(cache_dir, f"{safe_video_id}.srt"),
+        os.path.join(cache_dir, f"{safe_video_id}.{lang_tag}.srt"),
         safe_video_id,
     )
 
@@ -453,17 +459,24 @@ async def _acquire_audio(file, audio_url, video_id, file_path, cache_dir, mp3_ca
 # 引擎调用包装（统一语言规范化 / 上下文 / 冷启动提示）
 # ------------------------------------------------------------------ #
 def _prepare_request(language, initial_prompt):
-    """把请求参数规范化成引擎可直接使用的 (language_code, context)。"""
+    """把请求参数规范化成引擎可直接使用的 (language_code, context)。
+
+    language 为空、"auto"、"detect" 等哨兵值时返回 None，交回引擎自动检测语言。
+    这里必须把「没指定」和「指定了某语言」区分开：早期版本无条件回落到
+    WHISPER_DEFAULT_LANGUAGE（曾在启动脚本里被设成 zh），于是英文视频被当成
+    中文解码，Whisper 直接把英文「翻译/改写」成中文输出了。
+    """
     final_language = language if language else DEFAULT_LANGUAGE
+    language_code = None if is_auto_language(final_language) else normalize_language(final_language)
     final_prompt = initial_prompt if initial_prompt else DEFAULT_INITIAL_PROMPT
-    return normalize_language(final_language), build_context(final_prompt, DEFAULT_HOTWORDS)
+    return language_code, build_context(final_prompt, DEFAULT_HOTWORDS)
 
 
 def _log_infer_start(infer_idx, language_code, context):
     """打印统一格式的推理开始日志，含冷启动提示。"""
     desc = engine.describe()
     print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] 启动 {engine.display_name} 识别 "
-          f"(language={language_code}, device={desc.get('device')}, "
+          f"(language={language_code or 'auto'}, device={desc.get('device')}, "
           f"本进程第 {infer_idx} 次推理)...")
     if infer_idx == 1:
         print(f"[{time.strftime('%H:%M:%S')}] 提示：模型刚加载完毕，首次推理会稍慢"
@@ -503,7 +516,11 @@ async def do_transcribe(
     is_temp = False
     cleanup_paths = []
 
-    cache_dir, txt_cache_path, mp3_cache_path, srt_cache_path, safe_video_id = _cache_paths(video_id)
+    # 先解析识别语言：缓存路径要按语言分档（同一视频不同语言结果不同）
+    language_code, context = _prepare_request(language, initial_prompt)
+    cache_dir, txt_cache_path, mp3_cache_path, srt_cache_path, safe_video_id = _cache_paths(
+        video_id, language_code
+    )
 
     # 1. 字幕文本缓存命中（瞬发）
     if safe_video_id:
@@ -523,7 +540,7 @@ async def do_transcribe(
                 return {
                     "text": cached_text,
                     "srt": cached_srt_text,
-                    "language": "auto",
+                    "language": language_code or "auto",
                     "duration": 0,
                     "word_count": len(cached_text),
                     "cached_mp3": mp3_cache_path if os.path.exists(mp3_cache_path) else None,
@@ -552,7 +569,6 @@ async def do_transcribe(
         if is_temp:
             cleanup_paths.append(tmp_path)
 
-        language_code, context = _prepare_request(language, initial_prompt)
         infer_idx = next_infer_index()
         _log_infer_start(infer_idx, language_code, context)
         res = await _run_engine(tmp_path, language_code, context)
@@ -716,7 +732,11 @@ async def _transcribe_stream(
         tmp_path = None
         is_temp = False
         cleanup_paths = []
-        cache_dir, txt_cache_path, mp3_cache_path, srt_cache_path, safe_video_id = _cache_paths(video_id)
+        # 先解析识别语言：缓存路径要按语言分档（同一视频不同语言结果不同）
+        language_code, context = _prepare_request(language, initial_prompt)
+        cache_dir, txt_cache_path, mp3_cache_path, srt_cache_path, safe_video_id = _cache_paths(
+            video_id, language_code
+        )
 
         try:
             yield out(f"[{time.strftime('%H:%M:%S')}] 开始转录任务 "
@@ -737,7 +757,7 @@ async def _transcribe_stream(
                     yield out(f"[{time.strftime('%H:%M:%S')}] 命中字幕文本缓存: {safe_video_id}, 瞬发返回!")
                     payload = {
                         "text": cached_text, "srt": cached_srt_text,
-                        "language": "auto", "duration": 0,
+                        "language": language_code or "auto", "duration": 0,
                     }
                     if response_format == "text":
                         yield out(cached_text)
@@ -780,11 +800,10 @@ async def _transcribe_stream(
                 cleanup_paths.append(tmp_path)
 
             # 3. 执行识别
-            language_code, context = _prepare_request(language, initial_prompt)
             infer_idx = next_infer_index()
             desc = engine.describe()
             yield out(f"[{time.strftime('%H:%M:%S')}] 正在使用 {engine.display_name} 识别 "
-                      f"(language={language_code}, device={desc.get('device')}, "
+                      f"(language={language_code or 'auto'}, device={desc.get('device')}, "
                       f"本进程第 {infer_idx} 次推理)...")
             if infer_idx == 1:
                 yield out(f"[{time.strftime('%H:%M:%S')}] 提示：模型刚加载完毕，首次推理会稍慢"

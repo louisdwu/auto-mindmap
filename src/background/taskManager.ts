@@ -7,6 +7,7 @@ import { FileService } from '../services/fileService';
 import { LoggerService } from '../services/loggerService';
 import { VideoUtils } from '../utils/videoUtils';
 import { StatsService } from '../services/statsService';
+import { normalizeAsrLanguage } from '../types/config';
 
 const TASKS_STORAGE_KEY = 'active_tasks';
 // 用户主动选择「仅获取字幕」后，短时间内抑制同一视频的自动导图流程
@@ -390,6 +391,7 @@ export class TaskManager {
   private async executeDownloadTask(task: Task) {
     const { videoUrl, subtitleOnly } = task.data;
     const videoId = VideoUtils.extractVideoId(videoUrl);
+    const config = await StorageService.getConfig();
 
     // 仅字幕模式优先复用已有字幕缓存，避免重复下载/重复 ASR
     if (subtitleOnly && videoId && task.data.force !== true) {
@@ -398,7 +400,9 @@ export class TaskManager {
       await this.saveTasks();
 
       const subtitleCache = await StorageService.getSubtitleCache(videoId);
-      const asrCache = subtitleCache ? null : await StorageService.getAsrCache(videoId);
+      const asrCache = subtitleCache
+        ? null
+        : await StorageService.getAsrCache(videoId, normalizeAsrLanguage(config?.settings.asrLanguage));
       const cachedText = subtitleCache || asrCache;
       if (cachedText && /\[\d{1,2}:\d{2}/.test(cachedText)) {
         console.log('[TaskManager] 命中字幕缓存，直接返回（仅字幕模式）:', videoId);
@@ -420,7 +424,6 @@ export class TaskManager {
       return;
     }
 
-    const config = await StorageService.getConfig();
     if (!config) throw new Error('配置未初始化');
 
     const result = await SubtitleService.downloadChineseSubtitle(

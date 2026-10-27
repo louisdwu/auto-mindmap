@@ -1,4 +1,4 @@
-import { PluginConfig } from '../types/config';
+import { PluginConfig, normalizeAsrLanguage } from '../types/config';
 import { VideoUtils } from '../utils/videoUtils';
 import { AudioService } from './audioService';
 import { LLMService } from './llmService';
@@ -320,12 +320,15 @@ export class SubtitleService {
   }): Promise<{ videoUrl: string; videoTitle: string; subtitleText: string; isAsr: true }> {
     const { audioUrl, videoId, videoTitle, videoUrl, config, onProgress, forceMode, tabId } = opts;
     const getTime = () => `[${new Date().toLocaleTimeString('zh-CN', { hour12: false })}]`;
+    // 识别语言：'auto' 表示让引擎自动检测源语言（输出原语言原文）。
+    // 缓存也按语言分档，切换语言不会命中另一种语言的旧结果。
+    const asrLanguage = normalizeAsrLanguage(config.settings.asrLanguage);
     const unlock = await this.acquireAsrLock(onProgress);
 
     try {
       if (!forceMode) {
         onProgress?.(`${getTime()} 正在检索本地 ASR 缓存...`);
-        const cachedText = await StorageService.getAsrCache(videoId);
+        const cachedText = await StorageService.getAsrCache(videoId, asrLanguage);
         if (cachedText && /\[\d{1,2}:\d{2}/.test(cachedText)) {
           return { videoUrl, videoTitle, subtitleText: cachedText, isAsr: true };
         } else if (cachedText) {
@@ -339,8 +342,7 @@ export class SubtitleService {
       // 构建识别参数描述
       const beamSize = config.settings.asrBeamSize || 2;
       const vad = config.settings.asrVadFilter !== false;
-      const lang = config.settings.language || 'auto';
-      const paramsDesc = `(beam_size=${beamSize}, vad_filter=${vad}, language=${lang})`;
+      const paramsDesc = `(beam_size=${beamSize}, vad_filter=${vad}, language=${asrLanguage})`;
 
       let text = '';
 
@@ -375,7 +377,7 @@ export class SubtitleService {
       }
 
       if (text?.trim()) {
-        await StorageService.saveAsrCache(videoId, text);
+        await StorageService.saveAsrCache(videoId, text, asrLanguage);
         await StorageService.saveSubtitleCache(videoId, text);
         return { videoUrl, videoTitle, subtitleText: text, isAsr: true };
       }

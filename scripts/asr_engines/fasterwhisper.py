@@ -268,13 +268,17 @@ class FasterWhisperEngine(ASREngine):
 
             if words:
                 for w in words:
-                    wtext = (getattr(w, "word", "") or "").strip()
+                    raw_word = getattr(w, "word", "") or ""
+                    wtext = raw_word.strip()
                     if not wtext:
                         continue
                     items.append({
                         "text": wtext,
                         "start": float(getattr(w, "start", st)),
                         "end": float(getattr(w, "end", en)),
+                        # 保留模型原始分隔信息：英文/数字靠它决定补不补空格，
+                        # 否则 "M6"、"899"、"4-bit" 会被拆成 "M 6"、"8 99"、"4 - bit"。
+                        "space_before": raw_word[:1].isspace(),
                     })
             elif seg_text:
                 # 无词级时间戳时退化为整段一条

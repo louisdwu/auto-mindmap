@@ -182,7 +182,7 @@ Qwen3-ASR-1.7B + Qwen3-ForcedAligner-0.6B。中文/中英夹杂极限准确率�
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
-| `WHISPER_DEFAULT_LANGUAGE` | 空（自动检测） | 建议设 `zh`，跳过语言检测省一次前向 |
+| `WHISPER_DEFAULT_LANGUAGE` | 空（自动检测） | **保持为空**。只在「所有视频都是同一语言」时才设固定值；设成 `zh` 会让英文音频被当成中文解码，Whisper 直接把语音改写成中文（型号、价格、英文术语全错），见下方警告 |
 | `WHISPER_DEFAULT_INITIAL_PROMPT` | 空 | 上下文偏置 |
 | `QWEN_ASR_HOTWORDS` | 空 | 领域热词（faster-whisper 走 `FW_HOTWORDS` 更准） |
 | `WHISPER_MODEL_BASE_DIR` | `D:\Green\卡卡字幕助手VideoCaptioner\AppData\models` | 本地模型根目录 |
@@ -191,6 +191,13 @@ Qwen3-ASR-1.7B + Qwen3-ForcedAligner-0.6B。中文/中英夹杂极限准确率�
 | `ASR_PORT` | `2233` | 仅用于启动横幅显示 |
 | `ASR_HF_ENDPOINT` | `https://hf-mirror.com` | HF 镜像。直连可用时设 `https://huggingface.co` |
 | `_BOOT_GUARD` | 空 | 设 `1` 可跳过模型加载（仅冒烟测试用） |
+
+> **⚠️ 不要为了「省一次语言检测」把 `WHISPER_DEFAULT_LANGUAGE` 设成 `zh`**
+> 这个变量只在请求没带 `language` 时兜底。设成 `zh` 等于对每一段音频说
+> 「这是中文，请照中文写出来」——英文视频会被 Whisper **改写/翻译成中文**，
+> 典型症状：`M6` 变 `M 6`、`$899` 变 `8 99美元`、`memory bandwidth` 变
+> 「记忆级别」、段落整段重复。纯外语素材交给它自动检测，输出的才是原语言原文。
+> 同理，扩展端「识别语言」选项默认也是「自动检测」。
 
 ---
 

@@ -2,6 +2,7 @@ import { TaskManager } from './taskManager';
 import { StorageService } from '../services/storageService';
 import { VideoUtils } from '../utils/videoUtils';
 import { ExtensionMessage, RequestOrigin } from '../types/messages';
+import { normalizeAsrLanguage } from '../types/config';
 
 export class MessageHandler {
   constructor(private taskManager: TaskManager) {
@@ -256,9 +257,13 @@ export class MessageHandler {
       }
     }
 
-    // 3. 检查 ASR 缓存
+    // 3. 检查 ASR 缓存（按当前识别语言读取，避免拿到另一种语言的识别结果）
     if (videoId) {
-      const asrSub = await StorageService.getAsrCache(videoId);
+      const cfg = await StorageService.getConfig();
+      const asrSub = await StorageService.getAsrCache(
+        videoId,
+        normalizeAsrLanguage(cfg?.settings.asrLanguage)
+      );
       if (asrSub) {
         return { subtitleText: asrSub };
       }
