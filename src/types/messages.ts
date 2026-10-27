@@ -114,6 +114,17 @@ export interface TaskStatusUpdateMessage {
   };
 }
 
+/**
+ * 任务状态 / 进度广播（Background -> Content）。
+ * payload.task 已经剥离字幕与导图大字段，避免跨上下文消息过大。
+ */
+export interface TaskUpdateMessage {
+  type: 'TASK_UPDATE';
+  payload: {
+    task: Task;
+  };
+}
+
 export type ExtensionMessage =
   | DownloadSubtitleMessage
   | GetLatestMindmapMessage
@@ -128,4 +139,5 @@ export type ContentMessage =
   | SubtitleDownloadedMessage
   | MindmapGeneratedMessage
   | TaskStatusUpdateMessage
+  | TaskUpdateMessage
   | SubtitleReadyMessage;

@@ -45,7 +45,6 @@ export function useFloatingBallState() {
   const [showSubtitle, setShowSubtitle] = useState(false);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isContextValid = useRef(true);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   // 记录已经自动弹过字幕面板的任务，避免轮询期间重复弹出
   const openedSubtitleTaskRef = useRef<string | null>(null);
 
@@ -74,126 +73,167 @@ export function useFloatingBallState() {
     setShowNotification(false);
   }, []);
 
+  const currentTaskRef = useRef<CurrentTask | undefined>(undefined);
+  const showViewerRef = useRef(false);
+  const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const fetchCurrentTaskRef = useRef<() => Promise<void>>(async () => {});
+
+  useEffect(() => {
+    currentTaskRef.current = currentTask;
+  }, [currentTask]);
+
+  useEffect(() => {
+    showViewerRef.current = showViewer;
+  }, [showViewer]);
+
+  const stopPolling = useCallback(() => {
+    if (pollTimerRef.current) {
+      clearInterval(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
+  }, []);
+
+  /**
+   * 仅在有排队/运行中任务时轮询。事件（TASK_UPDATE / MINDMAP_GENERATED）
+   * 是主路径，轮询只是断线兜底，间隔 1.5s，任务结束立即停止。
+   */
+  const startPolling = useCallback(() => {
+    if (pollTimerRef.current || !isContextValid.current) return;
+    pollTimerRef.current = setInterval(() => {
+      void fetchCurrentTaskRef.current();
+    }, 1500);
+  }, []);
+
+  /**
+   * 把后台任务快照应用到 UI。
+   * Background 已用 media key 过滤过一次，这里再确认一次，防止标签页切换瞬间的串台。
+   */
+  const applyTask = useCallback(async (task: any) => {
+    if (!task) {
+      currentTaskRef.current = undefined;
+      setCurrentTask(undefined);
+      stopPolling();
+      return;
+    }
+
+    const currentUrl = window.location.href;
+    const taskUrl = task.data?.videoUrl;
+    const isMatch = !!taskUrl && (
+      VideoUtils.isSameVideo(currentUrl, taskUrl)
+      || normalizeUrl(currentUrl) === normalizeUrl(taskUrl)
+    );
+
+    if (!isMatch) {
+      currentTaskRef.current = undefined;
+      setCurrentTask(undefined);
+      stopPolling();
+      return;
+    }
+
+    const subtitleOnly = task.data?.subtitleOnly === true || task.result?.subtitleOnly === true;
+    const videoTitle = task.data?.videoTitle || task.result?.videoTitle
+      || (subtitleOnly ? '视频字幕' : '处理中...');
+
+    let subtitleText = task.result?.subtitleText as string | undefined;
+
+    // 失败任务可能已在后台把字幕写入缓存；补一次，用户才能复制原文
+    if (!subtitleText && task.status === 'failed') {
+      try {
+        const subRes = await RuntimeUtils.sendMessage({
+          type: 'GET_SUBTITLE_CACHE',
+          payload: { videoUrl: currentUrl }
+        });
+        if (subRes?.subtitleText) subtitleText = subRes.subtitleText;
+      } catch {
+        // 忽略缓存检索失败
+      }
+    }
+
+    const previous = currentTaskRef.current;
+    const newTaskState: CurrentTask = {
+      id: task.id,
+      type: task.type,
+      status: task.status,
+      videoTitle,
+      result: task.result,
+      errorMessage: task.error,
+      statusMessage: task.statusMessage,
+      subtitleText,
+      subtitleOnly,
+      isAsr: task.result?.isAsr === true,
+      savedToFile: task.result?.savedToFile === true
+    };
+
+    currentTaskRef.current = newTaskState;
+    setCurrentTask(newTaskState);
+
+    if (task.status === 'pending' || task.status === 'running') {
+      startPolling();
+    } else {
+      stopPolling();
+    }
+
+    if (task.status === 'completed') {
+      if (subtitleOnly && subtitleText) {
+        if (openedSubtitleTaskRef.current !== task.id) {
+          openedSubtitleTaskRef.current = task.id;
+          openSubtitleResult({
+            videoUrl: taskUrl || currentUrl,
+            videoTitle,
+            subtitleText,
+            isAsr: task.result?.isAsr === true,
+            savedToFile: task.result?.savedToFile === true
+          });
+          showToast(task.result?.savedToFile
+            ? '✅ 字幕已获取并保存到下载目录'
+            : '✅ 字幕已获取，可复制或下载 .txt');
+        }
+      } else if (!showViewerRef.current) {
+        setShowNotification(true);
+      }
+    }
+
+    if (task.status === 'failed' && previous?.status !== 'failed') {
+      if (subtitleOnly) {
+        showToast('⚠️ 字幕获取失败，请点击红色悬浮球查看详情', 5000);
+      } else if (subtitleText) {
+        showToast('⚠️ 导图生成失败，但字幕已就绪！点击悬浮球可复制字幕原文本', 6000);
+      } else {
+        showToast('⚠️ 任务失败，请点击红色悬浮球查看报错详情', 5000);
+      }
+    }
+  }, [normalizeUrl, openSubtitleResult, showToast, startPolling, stopPolling]);
+
   const fetchCurrentTask = useCallback(async () => {
     if (!isContextValid.current || !chrome.runtime?.id) {
       isContextValid.current = false;
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-        intervalRef.current = null;
-      }
+      stopPolling();
       return;
     }
 
     try {
-      const response = await RuntimeUtils.sendMessage({ 
+      const response = await RuntimeUtils.sendMessage({
         type: 'GET_CURRENT_TASK',
         payload: { videoUrl: window.location.href }
       });
-      
-      const task = response?.task;
-      if (task) {
-          // 由于后台已经根据 URL 进行了过滤，这里只需要进行二次确认或直接使用
-          const taskUrl = task.data?.videoUrl;
-          const currentUrl = window.location.href;
-          
-          // 使用更健壮的 VideoUtils 匹配
-          const isMatch = VideoUtils.isSameVideo(currentUrl, taskUrl)
-            || normalizeUrl(currentUrl) === normalizeUrl(taskUrl);
-
-          if (isMatch) {
-            const subtitleOnly = task.data?.subtitleOnly === true || task.result?.subtitleOnly === true;
-
-            let videoTitle: string | undefined;
-            if (task.data) {
-              videoTitle = task.data.videoTitle || task.result?.videoTitle
-                || task.data.subtitleText?.substring(0, 30)
-                || (subtitleOnly ? '视频字幕' : '处理中...');
-            }
-
-            let subtitleText = task.data?.subtitleText || task.result?.subtitleText;
-
-            // 如果当前任务处于失败状态，且任务对象内未携带 subtitleText，主动尝试拉取字幕缓存进行补充
-            if (!subtitleText && task.status === 'failed') {
-              try {
-                const subRes = await RuntimeUtils.sendMessage({
-                  type: 'GET_SUBTITLE_CACHE',
-                  payload: { videoUrl: currentUrl }
-                });
-                if (subRes?.subtitleText) {
-                  subtitleText = subRes.subtitleText;
-                }
-              } catch (e) {
-                // 忽略缓存检索失败
-              }
-            }
-
-            const newTaskState: CurrentTask = {
-              id: task.id,
-              type: task.type,
-              status: task.status,
-              videoTitle,
-              result: task.result,
-              errorMessage: task.error,
-              statusMessage: task.statusMessage,
-              subtitleText,
-              subtitleOnly,
-              isAsr: task.result?.isAsr === true,
-              savedToFile: task.result?.savedToFile === true
-            };
-
-            setCurrentTask(newTaskState);
-
-            if (task.status === 'completed') {
-              if (subtitleOnly && subtitleText) {
-                // 仅字幕任务完成后自动弹出结果面板（每个任务只弹一次）
-                if (openedSubtitleTaskRef.current !== task.id) {
-                  openedSubtitleTaskRef.current = task.id;
-                  openSubtitleResult({
-                    videoUrl: taskUrl || currentUrl,
-                    videoTitle,
-                    subtitleText,
-                    isAsr: task.result?.isAsr === true,
-                    savedToFile: task.result?.savedToFile === true
-                  });
-                  showToast(task.result?.savedToFile
-                    ? '✅ 字幕已获取并保存到下载目录'
-                    : '✅ 字幕已获取，可复制或下载 .txt');
-                }
-              } else if (!showNotification && !showViewer) {
-                setShowNotification(true);
-              }
-            }
-
-            if (task.status === 'failed' && currentTask?.status !== 'failed') {
-              if (subtitleOnly) {
-                showToast('⚠️ 字幕获取失败，请点击红色悬浮球查看详情', 5000);
-              } else if (subtitleText) {
-                showToast('⚠️ 导图生成失败，但字幕已就绪！点击悬浮球可复制字幕原文本', 6000);
-              } else {
-                showToast('⚠️ 任务失败，请点击红色悬浮球查看报错详情', 5000);
-              }
-            }
-          } else {
-            setCurrentTask(undefined);
-          }
-        } else {
-          setCurrentTask(undefined);
-        }
+      await applyTask(response?.task);
     } catch (error: any) {
       const errMsg = String(error?.message || error);
       if (errMsg.includes('context invalidated')) {
         console.warn('[FloatingBall] Extension context invalidated, stopping polling.');
         isContextValid.current = false;
-        if (intervalRef.current) {
-          clearInterval(intervalRef.current);
-          intervalRef.current = null;
-        }
+        stopPolling();
       } else {
         console.error('[FloatingBall] Failed to get current task:', error);
       }
+      currentTaskRef.current = undefined;
       setCurrentTask(undefined);
     }
-  }, [showNotification, showViewer, normalizeUrl, currentTask?.status, showToast, openSubtitleResult]);
+  }, [applyTask, stopPolling]);
+
+  useEffect(() => {
+    fetchCurrentTaskRef.current = fetchCurrentTask;
+  }, [fetchCurrentTask]);
 
   useEffect(() => {
     const handleFullscreenChange = () => setIsFullscreen(!!document.fullscreenElement);
@@ -203,21 +243,22 @@ export function useFloatingBallState() {
       switch (message?.type) {
         case 'MINDMAP_GENERATED': {
           const data = message.payload?.mindmapData;
-          if (data) {
-            const currentUrl = window.location.href;
-            const mindmapVideoUrl = data.videoUrl;
-            if (normalizeUrl(currentUrl) === normalizeUrl(mindmapVideoUrl)) {
-              setMindmapData(data);
-              setShowNotification(true);
-            }
+          if (data && VideoUtils.isSameVideo(window.location.href, data.videoUrl)) {
+            setMindmapData(data);
+            setShowNotification(true);
           }
-          fetchCurrentTask();
+          void fetchCurrentTask();
+          break;
+        }
+        case 'TASK_UPDATE': {
+          // 主路径：后台在创建/启动/完成/失败/进度时推送，不再依赖 1s 轮询
+          void applyTask(message.payload?.task);
           break;
         }
         case 'SUBTITLE_READY': {
           const payload = message.payload;
           if (payload?.subtitleText && payload.videoUrl
-            && normalizeUrl(payload.videoUrl) === normalizeUrl(window.location.href)) {
+            && VideoUtils.isSameVideo(payload.videoUrl, window.location.href)) {
             if (payload.taskId) {
               openedSubtitleTaskRef.current = payload.taskId;
             }
@@ -232,7 +273,7 @@ export function useFloatingBallState() {
               ? '✅ 字幕已获取并保存到下载目录'
               : '✅ 字幕已获取，可复制或下载 .txt');
           }
-          fetchCurrentTask();
+          void fetchCurrentTask();
           break;
         }
         default:
@@ -248,29 +289,26 @@ export function useFloatingBallState() {
         setMindmapData(data);
         setShowNotification(true);
       }
-      fetchCurrentTask();
+      void fetchCurrentTask();
     };
     window.addEventListener('mindmap-generated', handleLocalGenerated);
 
+    // URL 轮询只比较字符串，开销远低于监听整个 body 的 MutationObserver
     let lastUrl = window.location.href;
-    const handleUrlChange = () => {
-      if (window.location.href !== lastUrl) {
-        lastUrl = window.location.href;
-        setMindmapData(null);
-        setShowViewer(false);
-        setShowNotification(false);
-        setShowSubtitle(false);
-        setSubtitleResult(null);
-        openedSubtitleTaskRef.current = null;
-      }
-    };
+    const urlWatchTimer = setInterval(() => {
+      if (window.location.href === lastUrl) return;
+      lastUrl = window.location.href;
+      setMindmapData(null);
+      setShowViewer(false);
+      setShowNotification(false);
+      setShowSubtitle(false);
+      setSubtitleResult(null);
+      openedSubtitleTaskRef.current = null;
+      stopPolling();
+      void fetchCurrentTask();
+    }, 750);
 
-    const urlObserver = new MutationObserver(handleUrlChange);
-    urlObserver.observe(document.body, { childList: true, subtree: true });
-
-    fetchCurrentTask();
-    const intervalId = setInterval(fetchCurrentTask, 1000);
-    intervalRef.current = intervalId;
+    void fetchCurrentTask();
 
     return () => {
       document.removeEventListener('fullscreenchange', handleFullscreenChange);
@@ -278,12 +316,10 @@ export function useFloatingBallState() {
         chrome.runtime.onMessage.removeListener(handleRuntimeMessage);
       }
       window.removeEventListener('mindmap-generated', handleLocalGenerated);
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-      }
-      urlObserver.disconnect();
+      stopPolling();
+      clearInterval(urlWatchTimer);
     };
-  }, [fetchCurrentTask, normalizeUrl, openSubtitleResult, showToast]);
+  }, [applyTask, fetchCurrentTask, openSubtitleResult, showToast, stopPolling]);
 
   /**
    * 已有字幕文本时直接进入思维导图生成，避免重复下载字幕 / 重复 ASR
@@ -314,8 +350,13 @@ export function useFloatingBallState() {
       return;
     }
 
-    // 已完成的普通导图任务：直接打开查看器
-    if (currentTask?.status === 'completed' && !currentTask.subtitleOnly && currentTask.result) {
+    // 已完成的普通导图任务：内存里仍有完整结果时直接打开；
+    // SW 重启后任务结果被剥离大字段，则走下面的 GET_LATEST_MINDMAP_BY_URL 重新读取。
+    if (
+      currentTask?.status === 'completed'
+      && !currentTask.subtitleOnly
+      && currentTask.result?.mindmapMarkdown
+    ) {
       setMindmapData(currentTask.result);
       setShowViewer(true);
       return;
