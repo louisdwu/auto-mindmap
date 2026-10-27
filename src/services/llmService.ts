@@ -18,6 +18,10 @@ export interface ConnectionTestResult {
   latencyMs: number;
   /** 成功时是模型回显，失败时是可操作的原因 */
   detail: string;
+  /** 该密钥当前可用的模型清单（拿不到时为 undefined） */
+  models?: string[];
+  /** 拿模型清单失败的原因 */
+  modelsError?: string;
 }
 
 /** 探针 Prompt：只要最短回复，避免连通性测试本身消耗大量 token */
@@ -279,11 +283,13 @@ export class LLMService {
 
 
   /**
-   * 连通性测试：用当前填写的地址、密钥、模型发一次最小请求。
+   * 连通性测试：发一次最小请求，并顺带取回该密钥可用的模型清单。
    *
-   * 存在的意义是把「配置写错」和「服务端异常」区分开。像 404「model route not found」
-   * 这种错误，只有同时看到请求地址与模型标识才能判断到底错在哪一步，
-   * 靠用户跑一遍完整生成任务去试错代价太高（字幕下载 + 长时间等待）。
+   * 两件事一次做完，是因为它们回答的是同一个问题「这条链路现在能怎么用」：
+   * - 探测请求告诉你「当前这个地址 + 模型」通不通；
+   * - 模型清单告诉你「还可以换成哪个」——上游把模型改名/下线时，
+   *   用户配置一个字没改也会突然 404，只有清单能直接给出下一步该填什么。
+   * 靠跑完整生成任务去试错代价太高（字幕下载 + 长时间等待）。
    */
   static async testConnection(
     config: PluginConfig,
@@ -293,47 +299,56 @@ export class LLMService {
     const startedAt = Date.now();
     const apiKey = llmConfig.apiKey || (llmConfig.id === 'default' ? DEFAULT_LLM_CONFIG.apiKey : '');
     const probeConfig: LLMConfig = { ...llmConfig, apiKey, timeout: timeoutSeconds };
+
     let url = llmConfig.apiUrl || '';
-
+    let adapter: ILLMAdapter;
     try {
-      url = this.getAdapter(llmConfig.provider).getFullUrl(probeConfig);
-      const reply = await this.callLLM(config, probeConfig, CONNECTION_TEST_PROMPT, {
-        systemPrompt: CONNECTION_TEST_SYSTEM_PROMPT
-      });
-      return {
-        ok: true,
-        url,
-        latencyMs: Date.now() - startedAt,
-        detail: `模型返回：${reply.trim().slice(0, 120)}`
-      };
+      adapter = this.getAdapter(llmConfig.provider);
+      url = adapter.getFullUrl(probeConfig);
     } catch (error: any) {
-      let detail = error?.message || String(error);
-
-      // 「模型路由不存在」时顺手问服务端要一份可用模型清单：
-      // 上游改名/下线模型时，用户的配置一个字没改也会突然 404，
-      // 直接把当前 key 能用的模型列出来，比让用户逐个猜要快。
-      const looksLikeMissingModel = /404|not.?found|route|模型/i.test(detail);
-      if (looksLikeMissingModel) {
-        try {
-          const adapter = this.getAdapter(llmConfig.provider);
-          if (adapter.listModels) {
-            const models = await adapter.listModels(probeConfig, 15000);
-            detail += models.length > 0
-              ? `\n\n当前密钥可用模型（${models.length} 个）：${models.slice(0, 40).join('、')}${models.length > 40 ? ' …' : ''}`
-              : '\n\n模型列表为空：该密钥可能还没有被授权任何模型，或该服务商不提供 /models 接口。';
-          }
-        } catch (listError: any) {
-          detail += `\n\n（尝试获取可用模型列表失败：${listError?.message || listError}）`;
-        }
-      }
-
       return {
         ok: false,
         url,
         latencyMs: Date.now() - startedAt,
-        detail
+        detail: error?.message || String(error),
+        modelsError: '提供商不受支持，无法查询模型列表'
       };
     }
+
+    let ok = false;
+    let detail = '';
+    try {
+      const reply = await this.callLLM(config, probeConfig, CONNECTION_TEST_PROMPT, {
+        systemPrompt: CONNECTION_TEST_SYSTEM_PROMPT
+      });
+      ok = true;
+      detail = `模型返回：${reply.trim().slice(0, 120)}`;
+    } catch (error: any) {
+      detail = error?.message || String(error);
+    }
+
+    // 无论成败都拉一次清单：失败时它是定位依据，成功时它是「可替换项」。
+    // 单独失败不影响探测结论，只作为附注展示。
+    let models: string[] | undefined;
+    let modelsError: string | undefined;
+    if (adapter.listModels) {
+      try {
+        models = await adapter.listModels(probeConfig, 15000);
+      } catch (error: any) {
+        modelsError = error?.message || String(error);
+      }
+    } else {
+      modelsError = '该提供商暂不支持查询模型列表';
+    }
+
+    return {
+      ok,
+      url,
+      latencyMs: Date.now() - startedAt,
+      detail,
+      models,
+      modelsError
+    };
   }
 
   /**
