@@ -9,9 +9,26 @@ import { extractMarkdown } from '../utils/markdownParser';
 import { ErrorUtils } from '../utils/errorUtils';
 import { AsrRequestOptions } from '../types/subtitle';
 
+/** 连通性测试结果（供选项页展示） */
+export interface ConnectionTestResult {
+  ok: boolean;
+  /** 实际请求地址（已包含适配器补全的 endpoint 路径） */
+  url: string;
+  /** 往返耗时（毫秒） */
+  latencyMs: number;
+  /** 成功时是模型回显，失败时是可操作的原因 */
+  detail: string;
+}
+
+/** 探针 Prompt：只要最短回复，避免连通性测试本身消耗大量 token */
+const CONNECTION_TEST_PROMPT = '连通性测试：本次只回复「收到」两个字，不要输出任何其他内容。';
+const CONNECTION_TEST_SYSTEM_PROMPT = '你是连通性测试助手，严格按用户要求给出最短回复。';
+
 export class LLMService {
   private static adapters: Record<string, ILLMAdapter> = {
     openai: new OpenAIAdapter(),
+    // 商汤 SenseNova 提供 OpenAI 兼容的 Chat Completions 接口
+    sensenova: new OpenAIAdapter(),
     custom: new OpenAIAdapter(),
     lmstudio: new OpenAIAdapter(),
     gemini: new GeminiAdapter(),
@@ -260,6 +277,44 @@ export class LLMService {
     }
   }
 
+
+  /**
+   * 连通性测试：用当前填写的地址、密钥、模型发一次最小请求。
+   *
+   * 存在的意义是把「配置写错」和「服务端异常」区分开。像 404「model route not found」
+   * 这种错误，只有同时看到请求地址与模型标识才能判断到底错在哪一步，
+   * 靠用户跑一遍完整生成任务去试错代价太高（字幕下载 + 长时间等待）。
+   */
+  static async testConnection(
+    config: PluginConfig,
+    llmConfig: LLMConfig,
+    timeoutSeconds: number = 30
+  ): Promise<ConnectionTestResult> {
+    const startedAt = Date.now();
+    const apiKey = llmConfig.apiKey || (llmConfig.id === 'default' ? DEFAULT_LLM_CONFIG.apiKey : '');
+    const probeConfig: LLMConfig = { ...llmConfig, apiKey, timeout: timeoutSeconds };
+    let url = llmConfig.apiUrl || '';
+
+    try {
+      url = this.getAdapter(llmConfig.provider).getFullUrl(probeConfig);
+      const reply = await this.callLLM(config, probeConfig, CONNECTION_TEST_PROMPT, {
+        systemPrompt: CONNECTION_TEST_SYSTEM_PROMPT
+      });
+      return {
+        ok: true,
+        url,
+        latencyMs: Date.now() - startedAt,
+        detail: `模型返回：${reply.trim().slice(0, 120)}`
+      };
+    } catch (error: any) {
+      return {
+        ok: false,
+        url,
+        latencyMs: Date.now() - startedAt,
+        detail: error?.message || String(error)
+      };
+    }
+  }
 
   /**
    * 验证配置是否有效

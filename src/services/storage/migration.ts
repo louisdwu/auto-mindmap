@@ -1,4 +1,4 @@
-import { PluginConfig, LLMConfig, DEFAULT_CONFIG, normalizeAsrLanguage } from '../../types/config';
+import { PluginConfig, LLMConfig, DEFAULT_CONFIG, normalizeAsrLanguage, getProviderLabel } from '../../types/config';
 
 export class StorageMigration {
   /**
@@ -51,8 +51,7 @@ export class StorageMigration {
    */
   static migrateToLLMConfigs(pluginConfig: any): LLMConfig | null {
     if (pluginConfig && pluginConfig.llm && pluginConfig.llm.apiKey) {
-      const providerName = pluginConfig.llm.provider === 'openai' ? 'OpenAI' : 
-                         pluginConfig.llm.provider === 'gemini' ? 'Gemini' : '自定义';
+      const providerName = getProviderLabel(pluginConfig.llm.provider);
       
       return {
         id: 'migrated_default',

@@ -1,8 +1,9 @@
-import React from 'react';
-import { LLMConfig, LLMProvider } from '../../types/config';
-import { LLMService } from '../../services/llmService';
+import React, { useState } from 'react';
+import { LLMConfig, LLMProvider, LLM_PROVIDER_PRESETS, PluginConfig, getProviderLabel } from '../../types/config';
+import { ConnectionTestResult, LLMService } from '../../services/llmService';
 
 interface LLMConfigSectionProps {
+  config: PluginConfig;
   llmConfigs: LLMConfig[];
   editingConfigId: string;
   editingConfig: LLMConfig | null;
@@ -15,6 +16,7 @@ interface LLMConfigSectionProps {
 }
 
 export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
+  config,
   llmConfigs,
   editingConfigId,
   editingConfig,
@@ -25,6 +27,24 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
   onAddNewConfig,
   onUpdateEditingConfig
 }) => {
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<ConnectionTestResult | null>(null);
+
+  // 切换配置时清掉上一份测试结果，避免把 A 配置的结论误读成 B 配置的
+  const resetTestResult = () => setTestResult(null);
+
+  const handleTestConnection = async () => {
+    if (!editingConfig || testing) return;
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const result = await LLMService.testConnection(config, editingConfig);
+      setTestResult(result);
+    } finally {
+      setTesting(false);
+    }
+  };
+
   return (
     <section className="options-section">
       {/* 配置列表 */}
@@ -34,14 +54,18 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
             <div
               key={cfg.id}
               className={`llm-config-card ${editingConfigId === cfg.id ? 'llm-config-card--selected' : ''}`}
-              onClick={() => !isAddingNew && onEditConfig(cfg.id)}
+              onClick={() => {
+                if (isAddingNew) return;
+                resetTestResult();
+                onEditConfig(cfg.id);
+              }}
             >
               <div style={{ flex: 1 }}>
                 <div className="llm-config-card__name">
                   {cfg.name}
                 </div>
                 <div className="llm-config-card__detail">
-                  {cfg.provider === 'openai' ? 'OpenAI' : cfg.provider === 'gemini' ? 'Gemini' : cfg.provider === 'ollama' ? 'Ollama' : '自定义'} · {cfg.model}
+                  {getProviderLabel(cfg.provider)} · {cfg.model}
                 </div>
               </div>
               {llmConfigs.length > 1 && (
@@ -97,34 +121,23 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
               value={editingConfig.provider}
               onChange={(e) => {
                 const provider = e.target.value as LLMProvider;
-                const updates: Partial<LLMConfig> = { provider };
-                if (provider === 'openai') {
-                  updates.apiUrl = 'https://api.openai.com/v1';
-                  updates.model = 'gpt-3.5-turbo';
-                } else if (provider === 'gemini') {
-                  updates.apiUrl = 'https://generativelanguage.googleapis.com/v1beta';
-                  updates.model = 'gemini-1.5-flash';
-                } else if (provider === 'lmstudio') {
-                  updates.apiUrl = 'http://localhost:1234/v1';
-                  updates.model = 'qwen_qwen3.5-9b';
-                  updates.maxTokens = 16384;
-                  updates.num_ctx = 32768;
-                  updates.temperature = 0.7;
-                } else if (provider === 'ollama') {
-                  updates.apiUrl = 'http://localhost:11434/api';
-                  updates.model = 'llama3';
-                  updates.maxTokens = 16384;
-                  updates.num_ctx = 32768;
-                  updates.temperature = 0.7;
-                } else if (provider === 'custom') {
-                  updates.apiUrl = '';
-                  updates.model = '';
-                }
+                const preset = LLM_PROVIDER_PRESETS[provider];
+                // 默认值来自唯一来源（LLM_PROVIDER_PRESETS），与「新增配置」保持一致
+                const updates: Partial<LLMConfig> = {
+                  provider,
+                  apiUrl: preset.apiUrl,
+                  model: preset.model
+                };
+                if (preset.maxTokens) updates.maxTokens = preset.maxTokens;
+                if (preset.numCtx) updates.num_ctx = preset.numCtx;
+                if (preset.temperature) updates.temperature = preset.temperature;
+                resetTestResult();
                 onUpdateEditingConfig(updates);
               }}
             >
               <option value="openai">OpenAI (GPT-3.5/GPT-4)</option>
               <option value="gemini">Google Gemini</option>
+              <option value="sensenova">商汤 SenseNova (6.8 Flash-Lite)</option>
               <option value="ollama">Ollama (本地/云端)</option>
               <option value="lmstudio">LM Studio (本地模型)</option>
               <option value="custom">自定义 (OpenAI 兼容)</option>
@@ -149,6 +162,8 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
                 ? 'OpenAI API 地址，例如：https://api.openai.com/v1'
                 : editingConfig.provider === 'ollama'
                 ? 'Ollama API 地址，本地通常为 http://localhost:11434/api，云端为 https://ollama.com/api'
+                : editingConfig.provider === 'sensenova'
+                ? '商汤 SenseNova 基址为 https://token.sensenova.cn/v1（必须带 /v1），插件会自动补 /chat/completions'
                 : '自定义 API 地址，需兼容 OpenAI API 格式'}
             </p>
 
@@ -168,6 +183,16 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
               <div className="alert--info">
                 <strong>Ollama 提示：</strong>
                 本地使用建议填写 <code>http://localhost:11434/api</code>。使用 Ollama Cloud 请填写 <code>https://ollama.com/api</code> 并提供 API Key。
+              </div>
+            )}
+
+            {/* 商汤 SenseNova 提示 */}
+            {editingConfig.provider === 'sensenova' && (
+              <div className="alert--info">
+                <strong>商汤 SenseNova 提示：</strong>
+                基址填 <code>https://token.sensenova.cn/v1</code>，模型标识按官方文档填写（6.8 预览版为{' '}
+                <code>sensenova-6.8-flash-lite</code>，6.7 版为 <code>sensenova-6.7-flash-lite</code>）。
+                基址漏写 <code>/v1</code> 或模型名写错，网关都会返回 <code>HTTP 404: model route not found</code>。
               </div>
             )}
 
@@ -208,8 +233,13 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
               type="text"
               value={editingConfig.model}
               onChange={(e) => onUpdateEditingConfig({ model: e.target.value })}
-              placeholder={editingConfig.provider === 'gemini' ? 'gemini-1.5-flash' : 'gpt-3.5-turbo'}
+              placeholder={LLM_PROVIDER_PRESETS[editingConfig.provider]?.model || 'gpt-3.5-turbo'}
             />
+            {editingConfig.provider === 'sensenova' && (
+              <p className="form-hint">
+                必须是服务商文档里的模型标识（区分大小写与连字符），例如 <code>sensenova-6.8-flash-lite</code>。
+              </p>
+            )}
           </div>
 
           {/* 超时时间 */}
@@ -271,10 +301,45 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
             />
             <p className="form-hint">
               模型允许的总 Token 数（输入+输出）。Ollama 默认 4096。长视频建议设为 16384 或更大。
-              {editingConfig.provider === 'openai' || editingConfig.provider === 'gemini' 
-                ? ' (对于 OpenAI/Gemini，此参数通常由模型硬性决定，插件配置仅作参考)' 
+              {editingConfig.provider === 'openai' || editingConfig.provider === 'gemini' || editingConfig.provider === 'sensenova'
+                ? ' (对于 OpenAI/Gemini/商汤，此参数由模型硬性决定，不会随请求发送)' 
                 : ' (对于 Ollama/LM Studio，此参数会发送给后端生效)'}
             </p>
+          </div>
+
+          {/* 连通性测试 */}
+          <div className="form-group">
+            <label className="form-label">连接测试</label>
+            <div className="conn-test">
+              <button
+                type="button"
+                className="btn--secondary-outline conn-test__btn"
+                onClick={handleTestConnection}
+                disabled={testing || !editingConfig.apiUrl || !editingConfig.model}
+              >
+                {testing ? '测试中…' : '测试连接'}
+              </button>
+              <p className="form-hint">
+                用当前填写的地址、密钥和模型发一次最小请求。404 / 401 这类错误只有看到「实际请求地址 + 模型」才能定位，
+                不必先跑一遍完整的导图生成。
+              </p>
+
+              {testResult && (
+                <div className={`conn-test__result ${testResult.ok ? 'conn-test__result--ok' : 'conn-test__result--error'}`}>
+                  <div className="conn-test__headline">
+                    <strong>{testResult.ok ? '✅ 连接成功' : '❌ 连接失败'}</strong>
+                    <span className="conn-test__latency">{testResult.latencyMs}ms</span>
+                  </div>
+                  <div className="conn-test__line">
+                    实际请求地址：<code>{testResult.url || '(未填写)'}</code>
+                  </div>
+                  <div className="conn-test__line">
+                    模型：<code>{editingConfig.model || '(未填写)'}</code>
+                  </div>
+                  <div className="conn-test__detail">{testResult.detail}</div>
+                </div>
+              )}
+            </div>
           </div>
 
           {/* 自动保存提示 */}
