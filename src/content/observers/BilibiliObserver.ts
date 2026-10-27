@@ -34,7 +34,7 @@ export class BilibiliObserver extends BaseObserver {
         GeneratorService.notifyUIMindmapReady(result.cachedMindmap);
       } else {
         console.log('[BilibiliObserver] 请求下载字幕');
-        await GeneratorService.requestSubtitleDownload(url);
+        await GeneratorService.requestSubtitleDownload(url, title);
       }
     } else {
       console.log('[BilibiliObserver] 跳过处理:', result.reason);

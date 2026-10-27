@@ -163,8 +163,7 @@ export class MessageHandler {
     
     // 检查缓存开关
     const config = await StorageService.getConfig();
-    console.log('[MessageHandler] 当前配置:', config);
-    
+
     if (!config?.settings.enableCache) {
       console.log('[MessageHandler] 缓存已禁用');
       return { mindmap: null };
@@ -180,8 +179,7 @@ export class MessageHandler {
     
     // 检查缓存开关
     const config = await StorageService.getConfig();
-    console.log('[MessageHandler] 当前配置:', config);
-    
+
     if (!config?.settings.enableCache) {
       console.log('[MessageHandler] 缓存已禁用');
       return { mindmap: null };
@@ -206,6 +204,9 @@ export class MessageHandler {
     payload: { videoUrl: string; subtitleText: string; videoTitle: string; force?: boolean; origin?: RequestOrigin },
     tabId?: number
   ) {
+    if (!payload.videoUrl || !payload.subtitleText?.trim()) {
+      throw new Error('生成思维导图缺少视频地址或字幕内容');
+    }
     const isAutoRequest = payload.origin === 'auto';
 
     // 用户已选择仅字幕时，页面自动流程不得再生成导图
@@ -246,11 +247,8 @@ export class MessageHandler {
     const { videoUrl } = payload;
     const videoId = VideoUtils.getCacheId(videoUrl);
 
-    // 1. 检查当前或最近任务中的 subtitleText
+    // 1. 检查当前或最近任务中的 subtitleText（任务表本身不再保存原文）
     const task = this.taskManager.getCurrentTask(videoUrl);
-    if (task?.data?.subtitleText) {
-      return { subtitleText: task.data.subtitleText };
-    }
     if (task?.result?.subtitleText) {
       return { subtitleText: task.result.subtitleText };
     }

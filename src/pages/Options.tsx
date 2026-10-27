@@ -69,6 +69,12 @@ export default function Options() {
       setEditingConfig(selected);
       // 初始填充不应触发一次无意义的自动保存
       skipEditingSaveRef.current = true;
+    } else if (editingConfigId) {
+      const current = configs.find(item => item.id === editingConfigId);
+      if (current) {
+        setEditingConfig(current);
+        skipEditingSaveRef.current = true;
+      }
     }
   };
 

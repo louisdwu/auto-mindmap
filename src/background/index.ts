@@ -63,8 +63,9 @@ initConfig().then(async () => {
   chrome.runtime.onInstalled.addListener(async (details) => {
     if (details.reason === 'install') {
       console.log('[Background] Extension installed');
-      // 安装时初始化 badge 状态
+      // 安装时初始化 badge 状态，并直接打开设置页引导填写 LLM
       await updateBadgeState();
+      chrome.runtime.openOptionsPage();
     } else if (details.reason === 'update') {
       console.log('[Background] Extension updated');
       // 更新时也更新 badge 状态

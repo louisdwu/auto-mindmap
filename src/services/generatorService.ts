@@ -63,10 +63,10 @@ export class GeneratorService {
   /**
    * 发起字幕下载任务 (B站)
    */
-  static async requestSubtitleDownload(videoUrl: string): Promise<any> {
+  static async requestSubtitleDownload(videoUrl: string, videoTitle?: string): Promise<any> {
     return RuntimeUtils.sendMessage({
       type: 'DOWNLOAD_SUBTITLE',
-      payload: { videoUrl, origin: 'auto' }
+      payload: { videoUrl, videoTitle, origin: 'auto' }
     });
   }
 

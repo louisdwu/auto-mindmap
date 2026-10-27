@@ -138,16 +138,37 @@ export const MindmapRenderer: React.FC<MindmapRendererProps> = ({
     onReset: handleReset
   });
 
-  // 辅助方法：获取分支颜色索引
-  const getBranchIndex = useCallback((nodeId: string): number => {
-    if (!treeData || nodeId === 'root') return -1;
-    for (let i = 0; i < treeData.children.length; i++) {
-        const isDescendant = (n: any, id: string): boolean => 
-            n.id === id || n.children.some((c: any) => isDescendant(c, id));
-        if (isDescendant(treeData.children[i], nodeId)) return i % 5;
-    }
-    return -1;
+  // 节点查找表：避免每个节点都递归遍历整棵树（大导图下是 O(n²)）
+  const nodeById = useMemo(() => {
+    const map = new Map<string, any>();
+    if (!treeData) return map;
+    const walk = (node: any) => {
+      map.set(node.id, node);
+      node.children.forEach(walk);
+    };
+    walk(treeData);
+    return map;
   }, [treeData]);
+
+  // 分支颜色索引表：每个节点只计算一次，而不是渲染时反复递归
+  const branchIndexById = useMemo(() => {
+    const map = new Map<string, number>();
+    if (!treeData) return map;
+    treeData.children.forEach((child: any, index: number) => {
+      const branch = index % 5;
+      const walk = (node: any) => {
+        map.set(node.id, branch);
+        node.children.forEach(walk);
+      };
+      walk(child);
+    });
+    return map;
+  }, [treeData]);
+
+  const getBranchIndex = useCallback(
+    (nodeId: string): number => branchIndexById.get(nodeId) ?? -1,
+    [branchIndexById]
+  );
 
   // 自动对齐展开节点的逻辑 (Phase 3 保持现状)
   useEffect(() => {
@@ -199,7 +220,7 @@ export const MindmapRenderer: React.FC<MindmapRendererProps> = ({
     if (!treeData) return [];
     const nodes: React.ReactNode[] = [];
     positions.forEach((pos) => {
-      const nodeData = findNode(treeData, pos.id);
+      const nodeData = nodeById.get(pos.id);
       if (!nodeData || pos.id === 'root') return;
       nodes.push(
         <Node 
@@ -218,7 +239,7 @@ export const MindmapRenderer: React.FC<MindmapRendererProps> = ({
       );
     });
     return nodes;
-  }, [positions, treeData, styleName, getBranchIndex, onNodeClick, onTimestampClick, toggleNode, findNode]);
+  }, [positions, treeData, nodeById, styleName, getBranchIndex, onNodeClick, onTimestampClick, toggleNode]);
 
   // 解析根节点时间戳
   const { rootTitleText, rootTimestampStr } = useMemo(() => {
