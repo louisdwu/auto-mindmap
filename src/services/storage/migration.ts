@@ -38,6 +38,11 @@ export class StorageMigration {
         ...config.settings,
         enableCache: config.settings?.enableCache !== undefined ? config.settings.enableCache : true,
         soundNotificationVolume: config.settings?.soundNotificationVolume !== undefined ? config.settings.soundNotificationVolume : 0.8,
+        // 旧版本用 cacheDirectory 非空表示「保存到下载目录」；新版本改用布尔字段。
+        saveToLocalFile: typeof config.settings?.saveToLocalFile === 'boolean'
+          ? config.settings.saveToLocalFile
+          : !!(config.settings?.cacheDirectory && String(config.settings.cacheDirectory).trim()),
+        enableChunking: config.settings?.enableChunking !== false,
         // 旧版本没有这个字段，且此前的实现是「写死中文」——统一迁移成自动检测，
         // 否则老配置会继续把英文视频识别成中文译文。
         asrLanguage: normalizeAsrLanguage(config.settings?.asrLanguage)

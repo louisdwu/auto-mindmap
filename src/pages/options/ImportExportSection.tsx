@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { StorageService } from '../../services/storageService';
 
 interface ImportExportSectionProps {
@@ -12,9 +12,11 @@ export const ImportExportSection: React.FC<ImportExportSectionProps> = ({
   onReload,
   onSetImportStatus
 }) => {
+  const [includeSecrets, setIncludeSecrets] = useState(false);
+
   const handleExportConfig = async () => {
     try {
-      await StorageService.downloadConfigFile();
+      await StorageService.downloadConfigFile({ includeSecrets });
       onSetImportStatus({ type: 'success', message: '配置已导出' });
       setTimeout(() => onSetImportStatus(null), 3000);
     } catch (error) {
@@ -68,6 +70,14 @@ export const ImportExportSection: React.FC<ImportExportSectionProps> = ({
             <span>📤</span> 导出配置
           </button>
           <p className="form-hint">将所有配置导出为 JSON 文件</p>
+          <label className="form-hint" style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={includeSecrets}
+              onChange={(e) => setIncludeSecrets(e.target.checked)}
+            />
+            包含 API 密钥（明文，谨慎勾选）
+          </label>
         </div>
 
         {/* 导入 */}
@@ -97,8 +107,9 @@ export const ImportExportSection: React.FC<ImportExportSectionProps> = ({
 
       <div className="import-export-hint">
         <p>
-          <strong>提示：</strong>导出的配置文件包含所有 LLM 配置（包括 API 密钥）和插件设置。
-          请妥善保管导出的文件，避免泄露敏感信息。
+          <strong>提示：</strong>默认导出的配置<strong>不含 API 密钥</strong>；在本机重新导入时，
+          同 ID 配置会保留本机已有的密钥。只有勾选「包含 API 密钥」才会把密钥写进文件，
+          请务必妥善保管。
         </p>
       </div>
     </section>

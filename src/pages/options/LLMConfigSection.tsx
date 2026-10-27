@@ -29,6 +29,7 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
 }) => {
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<ConnectionTestResult | null>(null);
+  const [showApiKey, setShowApiKey] = useState(false);
 
   // 切换配置时清掉上一份测试结果，避免把 A 配置的结论误读成 B 配置的
   const resetTestResult = () => setTestResult(null);
@@ -210,13 +211,30 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
           {/* API 密钥 */}
           <div className="form-group">
             <label className="form-label">API密钥</label>
-            <input
-              className="form-input"
-              type="text"
-              value={editingConfig.apiKey}
-              onChange={(e) => onUpdateEditingConfig({ apiKey: e.target.value })}
-              placeholder="sk-..."
-            />
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <input
+                className="form-input"
+                type={showApiKey ? 'text' : 'password'}
+                value={editingConfig.apiKey}
+                onChange={(e) => onUpdateEditingConfig({ apiKey: e.target.value })}
+                placeholder="sk-..."
+                autoComplete="off"
+                spellCheck={false}
+                style={{ flex: 1 }}
+              />
+              <button
+                type="button"
+                className="btn--secondary-outline"
+                onClick={() => setShowApiKey(v => !v)}
+                title={showApiKey ? '隐藏密钥' : '显示密钥'}
+                style={{ whiteSpace: 'nowrap', padding: '0 12px' }}
+              >
+                {showApiKey ? '隐藏' : '显示'}
+              </button>
+            </div>
+            <p className="form-hint">
+              密钥只保存在本机 <code>chrome.storage.local</code>，不会同步到云端；导出配置时默认脱敏。
+            </p>
             {editingConfig.provider === 'lmstudio' && (
               <p className="form-hint">本地 LM Studio 通常不需要 API 密钥，可以留空。</p>
             )}

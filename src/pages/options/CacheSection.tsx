@@ -67,12 +67,12 @@ export const CacheSection: React.FC<CacheSectionProps> = ({ config, onConfigChan
           <input
             className="form-checkbox"
             type="checkbox"
-            checked={config.settings.cacheDirectory.trim().length > 0}
+            checked={config.settings.saveToLocalFile === true}
             onChange={(e) => onConfigChange({
               ...config,
               settings: {
                 ...config.settings,
-                cacheDirectory: e.target.checked ? 'enabled' : ''
+                saveToLocalFile: e.target.checked
               }
             })}
           />
@@ -85,7 +85,7 @@ export const CacheSection: React.FC<CacheSectionProps> = ({ config, onConfigChan
         </div>
       </div>
 
-      {config.settings.cacheDirectory.trim().length > 0 && (
+      {config.settings.saveToLocalFile === true && (
         <div className="cache-info">
           <p>
             <strong>缓存说明：</strong>生成的字幕(.txt)和思维导图(.md)文件将自动保存到
