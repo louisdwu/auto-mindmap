@@ -25,13 +25,19 @@ export const LLM_PROVIDER_PRESETS: Record<LLMProvider, LLMProviderPreset> = {
     label: 'OpenAI',
     defaultName: 'OpenAI GPT',
     apiUrl: 'https://api.openai.com/v1',
-    model: 'gpt-3.5-turbo'
+    model: 'gpt-4o-mini',
+    maxTokens: 8192,
+    numCtx: 128000,
+    temperature: 0.6
   },
   gemini: {
     label: 'Gemini',
     defaultName: 'Google Gemini',
     apiUrl: 'https://generativelanguage.googleapis.com/v1beta',
-    model: 'gemini-1.5-flash'
+    model: 'gemini-1.5-flash',
+    maxTokens: 8192,
+    numCtx: 1000000,
+    temperature: 0.6
   },
   // 商汤 SenseNova 走 OpenAI 兼容协议。基址必须带 /v1、模型标识必须与官方文档一字不差，
   // 两者任一不对，网关都会返回 404「model route not found」。
@@ -40,14 +46,18 @@ export const LLM_PROVIDER_PRESETS: Record<LLMProvider, LLMProviderPreset> = {
     label: '商汤 SenseNova',
     defaultName: '商汤 SenseNova',
     apiUrl: 'https://token.sensenova.cn/v1',
-    model: 'sensenova-6.8-flash-lite'
+    model: 'sensenova-6.8-flash-lite',
+    maxTokens: 8192,
+    numCtx: 128000,
+    temperature: 0.6
   },
   custom: {
     label: '自定义',
     defaultName: '自定义配置',
     apiUrl: '',
     model: '',
-    numCtx: 4096
+    maxTokens: 8192,
+    numCtx: 32768
   },
   lmstudio: {
     label: 'LM Studio',
@@ -142,7 +152,7 @@ export function createDefaultLLMConfig(provider: LLMProvider = 'openai'): LLMCon
     model: preset.model,
     apiKey: '',
     timeout: 120,
-    maxTokens: preset.maxTokens ?? 16384,
+    maxTokens: preset.maxTokens ?? 8192,
     temperature: preset.temperature ?? 0.7,
     ...(preset.numCtx ? { num_ctx: preset.numCtx } : {}),
     createdAt: now,

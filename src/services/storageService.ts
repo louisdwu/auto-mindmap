@@ -65,6 +65,7 @@ export class StorageService {
   /** 配置 / LLM 配置 / 缓存的写操作都串行化，避免并发读改写互相覆盖 */
   private static configWriteChain: Promise<void> = Promise.resolve();
   private static llmWriteChain: Promise<void> = Promise.resolve();
+  private static mindmapWriteChain: Promise<void> = Promise.resolve();
   private static cacheLock: Promise<void> = Promise.resolve();
 
   private static cacheIndex: Record<string, CacheIndexEntry> | null = null;
@@ -72,7 +73,7 @@ export class StorageService {
   /** 配额恢复过程中避免 localSet 递归触发 prune */
   private static recoveringQuota = false;
 
-  private static withLock<T>(chainRef: 'configWriteChain' | 'llmWriteChain', fn: () => Promise<T>): Promise<T> {
+  private static withLock<T>(chainRef: 'configWriteChain' | 'llmWriteChain' | 'mindmapWriteChain', fn: () => Promise<T>): Promise<T> {
     const previous = this[chainRef];
     const run = previous.then(fn, fn);
     this[chainRef] = run.then(() => undefined, () => undefined);
@@ -244,18 +245,20 @@ export class StorageService {
   }
 
   static async saveMindmap(mindmap: MindmapData): Promise<void> {
-    const mindmaps = await this.getMindmaps();
-    const existingIndex = mindmaps.findIndex(m => m.id === mindmap.id);
-    if (existingIndex >= 0) {
-      mindmaps[existingIndex] = mindmap;
-    } else {
-      mindmaps.unshift(mindmap);
-    }
-    if (mindmaps.length > MINDMAP_LIMIT) mindmaps.splice(MINDMAP_LIMIT);
+    await this.withLock('mindmapWriteChain', async () => {
+      const mindmaps = await this.getMindmaps();
+      const existingIndex = mindmaps.findIndex(m => m.id === mindmap.id);
+      if (existingIndex >= 0) {
+        mindmaps[existingIndex] = mindmap;
+      } else {
+        mindmaps.unshift(mindmap);
+      }
+      if (mindmaps.length > MINDMAP_LIMIT) mindmaps.splice(MINDMAP_LIMIT);
 
-    await this.localSet({
-      [STORAGE_KEYS.MINDMAPS]: mindmaps,
-      [STORAGE_KEYS.LATEST_MINDMAP_ID]: mindmap.id
+      await this.localSet({
+        [STORAGE_KEYS.MINDMAPS]: mindmaps,
+        [STORAGE_KEYS.LATEST_MINDMAP_ID]: mindmap.id
+      });
     });
 
     // 导图可能很大，写入后顺手做一次容量治理（不阻塞主流程）
@@ -268,20 +271,21 @@ export class StorageService {
   }
 
   static async deleteMindmapByUrl(videoUrl: string): Promise<void> {
-    const mindmaps = await this.getMindmaps();
-    const filtered = mindmaps.filter(m => !VideoUtils.isSameVideo(m.videoUrl, videoUrl));
-    if (filtered.length === mindmaps.length) return;
+    await this.withLock('mindmapWriteChain', async () => {
+      const mindmaps = await this.getMindmaps();
+      const filtered = mindmaps.filter(m => !VideoUtils.isSameVideo(m.videoUrl, videoUrl));
+      if (filtered.length === mindmaps.length) return;
 
-    const latest = await chrome.storage.local.get(STORAGE_KEYS.LATEST_MINDMAP_ID);
-    const latestId = latest[STORAGE_KEYS.LATEST_MINDMAP_ID];
-    const latestStillExists = filtered.some(m => m.id === latestId);
+      const latest = await chrome.storage.local.get(STORAGE_KEYS.LATEST_MINDMAP_ID);
+      const latestId = latest[STORAGE_KEYS.LATEST_MINDMAP_ID];
+      const latestStillExists = filtered.some(m => m.id === latestId);
 
-    const updates: Record<string, unknown> = { [STORAGE_KEYS.MINDMAPS]: filtered };
-    if (!latestStillExists) {
-      if (filtered[0]) updates[STORAGE_KEYS.LATEST_MINDMAP_ID] = filtered[0].id;
-      else updates[STORAGE_KEYS.LATEST_MINDMAP_ID] = '';
-    }
-    await this.localSet(updates);
+      const updates: Record<string, unknown> = { [STORAGE_KEYS.MINDMAPS]: filtered };
+      if (!latestStillExists) {
+        updates[STORAGE_KEYS.LATEST_MINDMAP_ID] = filtered[0]?.id || '';
+      }
+      await this.localSet(updates);
+    });
   }
 
   static async getLatestMindmap(): Promise<MindmapData | null> {
@@ -293,10 +297,12 @@ export class StorageService {
   }
 
   static async clearMindmaps(): Promise<void> {
-    await chrome.storage.local.remove([
-      STORAGE_KEYS.MINDMAPS,
-      STORAGE_KEYS.LATEST_MINDMAP_ID
-    ]);
+    await this.withLock('mindmapWriteChain', async () => {
+      await chrome.storage.local.remove([
+        STORAGE_KEYS.MINDMAPS,
+        STORAGE_KEYS.LATEST_MINDMAP_ID
+      ]);
+    });
   }
 
   // ------------------------------------------------------------------ //

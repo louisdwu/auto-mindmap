@@ -8,6 +8,8 @@ export interface ModelUsageStats {
 export interface DailyStats {
   generations: number;
   videos: number;
+  /** 当日处理过的视频 ID，用于正确计算每日去重视频数 */
+  videoIds?: string[];
 }
 
 export interface AppStats {

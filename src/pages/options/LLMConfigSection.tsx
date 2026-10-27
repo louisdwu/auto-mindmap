@@ -281,12 +281,12 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
               <input
                 className="form-input"
                 type="number"
-                value={editingConfig.maxTokens || 16384}
-                onChange={(e) => onUpdateEditingConfig({ maxTokens: parseInt(e.target.value) || 16384 })}
+                value={editingConfig.maxTokens || 8192}
+                onChange={(e) => onUpdateEditingConfig({ maxTokens: parseInt(e.target.value) || 8192 })}
                 min="1"
                 max="128000"
               />
-              <p className="form-hint">单次请求最大生成的 Token 数。推理模型建议设为 4096 以上。</p>
+              <p className="form-hint">单次请求最大生成的 Token 数。实际输出会被限制在上下文窗口的 30% 以内，避免挤占输入。</p>
             </div>
             <div>
               <label className="form-label">温度 (Temperature)</label>
@@ -311,14 +311,14 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
             <input
               className="form-input"
               type="number"
-              value={editingConfig.num_ctx || 16384}
-              onChange={(e) => onUpdateEditingConfig({ num_ctx: parseInt(e.target.value) || 16384 })}
+              value={editingConfig.num_ctx || 32768}
+              onChange={(e) => onUpdateEditingConfig({ num_ctx: parseInt(e.target.value) || 32768 })}
               min="512"
               max="1048576"
               step="512"
             />
             <p className="form-hint">
-              模型允许的总 Token 数（输入+输出）。Ollama 默认 4096。长视频建议设为 16384 或更大。
+              模型允许的总 Token 数（输入+输出）。它决定长视频分段阈值；本地模型请与 LM Studio/Ollama 的实际上下文设置一致。
               {editingConfig.provider === 'openai' || editingConfig.provider === 'gemini' || editingConfig.provider === 'sensenova'
                 ? ' (对于 OpenAI/Gemini/商汤，此参数由模型硬性决定，不会随请求发送)' 
                 : ' (对于 Ollama/LM Studio，此参数会发送给后端生效)'}

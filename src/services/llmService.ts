@@ -8,6 +8,7 @@ import { LoggerService } from './loggerService';
 import { extractMarkdown } from '../utils/markdownParser';
 import { ErrorUtils } from '../utils/errorUtils';
 import { AsrRequestOptions } from '../types/subtitle';
+import { computeInputBudget, estimateTokens, splitTranscriptByBudget } from './llm/tokenBudget';
 
 /** 连通性测试结果（供选项页展示） */
 export interface ConnectionTestResult {
@@ -27,6 +28,31 @@ export interface ConnectionTestResult {
 /** 探针 Prompt：只要最短回复，避免连通性测试本身消耗大量 token */
 const CONNECTION_TEST_PROMPT = '连通性测试：本次只回复「收到」两个字，不要输出任何其他内容。';
 const CONNECTION_TEST_SYSTEM_PROMPT = '你是连通性测试助手，严格按用户要求给出最短回复。';
+
+/** 长视频分段提炼的系统提示词 */
+const CHUNK_SYSTEM_PROMPT = `你是视频字幕的分段提炼助手。你的任务是从一段带时间戳的字幕中提取结构化提纲，供后续合并成完整思维导图。
+必须遵循：
+1. 保留所有关键结论、论据、案例、数字与专业术语，并保留对应的 [mm:ss] 时间戳；
+2. 使用 Markdown 无序列表（-）表达层级，不要输出 # 根标题，不要输出开场白或解释；
+3. 不要按时间流水账罗列，按主题逻辑归并；
+4. 只输出提纲正文。`;
+
+const CHUNK_MAP_PROMPT = `这是长视频字幕的第 {index}/{total} 段。请把这一段提炼成结构化提纲。
+要求：保留 [mm:ss] 时间戳与关键数据；用 "-" 列表表达层级；不要输出根标题与解释。
+字幕：
+{chunk}`;
+
+const CHUNK_REDUCE_SYSTEM_PROMPT = `你是思维导图提纲的合并助手。把多段分段提纲合并为一份更紧凑、去重后的提纲，保留 [mm:ss] 时间戳、关键数据与主题层级。
+只输出提纲正文，不要输出解释、根标题或代码块。`;
+
+const CHUNK_REDUCE_PROMPT = `请合并以下分段提纲，去除重复，保留全部关键结论、数据与时间戳：
+{outlines}`;
+
+interface Phase1Result {
+  markdown: string;
+  /** 反思阶段使用的压缩稿；正常长度时为 undefined（直接用原字幕） */
+  reflectionSource?: string;
+}
 
 export class LLMService {
   private static adapters: Record<string, ILLMAdapter> = {
@@ -56,6 +82,10 @@ export class LLMService {
 
   /**
    * 调用大模型 API 生成思维导图
+   *
+   * 短字幕：单次生成。
+   * 长字幕：先按 token 预算分段提炼，再合并提纲生成最终导图；
+   *         开启反思模式时，反思阶段也优先使用压缩稿，避免再次超上下文。
    */
   static async generateMindmap(
     config: PluginConfig,
@@ -68,30 +98,242 @@ export class LLMService {
     const isReflectionEnabled = config.settings.enableReflection;
 
     if (!isReflectionEnabled) {
-      const result = cachedInitialMindmap || await this.generateSinglePhase(config, subtitleText, taskId);
+      const phase1 = cachedInitialMindmap
+        ? { markdown: cachedInitialMindmap }
+        : await this.generateSinglePhase(config, subtitleText, taskId, onProgress);
       if (onPhase1Complete && !cachedInitialMindmap) {
-        await onPhase1Complete(result);
+        await onPhase1Complete(phase1.markdown);
       }
-      return { result };
+      return { result: phase1.markdown };
     }
-    
+
     return this.generateWithReflection(config, subtitleText, onProgress, onPhase1Complete, cachedInitialMindmap, taskId);
   }
 
+  /** 根据上下文窗口与用户配置推导实际输出预算（输出最多占上下文 30%） */
+  private static resolveOutputTokens(llmConfig: LLMConfig): number {
+    const contextWindow = Math.max(2048, Number(llmConfig.num_ctx) || 16384);
+    const configured = Math.max(512, Number(llmConfig.maxTokens) || 8192);
+    return Math.min(
+      configured,
+      Math.max(1024, Math.floor(contextWindow * 0.3)),
+      Math.max(1024, contextWindow - 2048)
+    );
+  }
+
+  /** 模型可容纳的最大 prompt token（已扣除输出与安全边际） */
+  private static maxPromptTokens(llmConfig: LLMConfig): number {
+    const contextWindow = Math.max(2048, Number(llmConfig.num_ctx) || 16384);
+    return Math.max(1024, contextWindow - this.resolveOutputTokens(llmConfig) - 512);
+  }
+
+  /** 把模板中的占位符清空后估算固定开销 */
+  private static templateOverheadTokens(template: string): number {
+    return estimateTokens(template.split('{subtitle_content}').join(''));
+  }
+
   /**
-   * 单阶段生成逻辑 (默认)
+   * 单阶段生成逻辑。
+   * 返回 markdown 与可选的 reflectionSource（长字幕时是合并后的提纲）。
    */
-  private static async generateSinglePhase(config: PluginConfig, subtitleText: string, taskId?: string): Promise<string> {
+  private static async generateSinglePhase(
+    config: PluginConfig,
+    subtitleText: string,
+    taskId?: string,
+    onProgress?: (msg: string) => void
+  ): Promise<Phase1Result> {
     const llmConfig = await StorageService.getSelectedLLMConfig();
     if (!llmConfig) throw new Error('未找到有效的 LLM 配置');
 
-    await LoggerService.info('LLMService', `正在调用模型 ${llmConfig.name} (${llmConfig.model}) 生成思维导图`, undefined, taskId);
-
-    // 使用 split/join 代替 replace 以避免字幕中包含 $ 符号导致的替换错误
     const template = config.prompt.template || DEFAULT_CONFIG.prompt.template;
-    const prompt = template.split('{subtitle_content}').join(subtitleText);
-    const result = await this.callLLM(config, llmConfig, prompt, { taskId });
-    return extractMarkdown(result);
+    const systemPrompt = config.prompt.systemPrompt || DEFAULT_CONFIG.prompt.systemPrompt;
+    const contextWindow = Math.max(2048, Number(llmConfig.num_ctx) || 16384);
+    const outputTokens = this.resolveOutputTokens(llmConfig);
+    const inputBudget = computeInputBudget({
+      contextWindow,
+      maxOutputTokens: outputTokens,
+      systemPromptTokens: estimateTokens(systemPrompt),
+      templateTokens: this.templateOverheadTokens(template)
+    });
+
+    const subtitleTokens = estimateTokens(subtitleText);
+    const canUseSingleCall = !config.settings.enableChunking || subtitleTokens <= inputBudget;
+
+    await LoggerService.info(
+      'LLMService',
+      canUseSingleCall
+        ? `正在调用模型 ${llmConfig.name} (${llmConfig.model}) 生成思维导图`
+        : `字幕约 ${subtitleTokens} tokens，超过单次输入预算 ${inputBudget}，启用分段提炼`,
+      undefined,
+      taskId
+    );
+
+    if (canUseSingleCall) {
+      const prompt = template.split('{subtitle_content}').join(subtitleText);
+      const result = await this.callLLM(config, llmConfig, prompt, { taskId });
+      return { markdown: extractMarkdown(result) };
+    }
+
+    return this.generateByChunks(config, llmConfig, subtitleText, template, taskId, onProgress, inputBudget, outputTokens);
+  }
+
+  /**
+   * 长字幕分段提炼：
+   *   分段提纲 -> 合并/压缩到输入预算 -> 用原模板生成最终导图。
+   */
+  private static async generateByChunks(
+    config: PluginConfig,
+    llmConfig: LLMConfig,
+    subtitleText: string,
+    template: string,
+    taskId: string | undefined,
+    onProgress: ((msg: string) => void) | undefined,
+    inputBudget: number,
+    outputTokens: number
+  ): Promise<Phase1Result> {
+    const totalTokens = estimateTokens(subtitleText);
+    onProgress?.(`字幕较长（约 ${totalTokens} tokens），将分段提炼后再生成思维导图...`);
+
+    // 每段留出 map prompt 的固定开销
+    const chunkBudget = Math.max(600, Math.floor(inputBudget * 0.82));
+    const chunks = splitTranscriptByBudget(subtitleText, chunkBudget);
+    if (chunks.length <= 1) {
+      const prompt = template.split('{subtitle_content}').join(subtitleText);
+      const result = await this.callLLM(config, llmConfig, prompt, { taskId });
+      return { markdown: extractMarkdown(result) };
+    }
+
+    const mapLlmConfig: LLMConfig = {
+      ...llmConfig,
+      maxTokens: Math.min(2048, outputTokens),
+      temperature: 0.3
+    };
+
+    const outlines: string[] = [];
+    for (let i = 0; i < chunks.length; i++) {
+      onProgress?.(`阶段 1/3: 正在提炼第 ${i + 1}/${chunks.length} 段字幕...`);
+      const prompt = CHUNK_MAP_PROMPT
+        .replace('{index}', String(i + 1))
+        .replace('{total}', String(chunks.length))
+        .replace('{chunk}', chunks[i]);
+
+      const raw = await this.callLLM(config, mapLlmConfig, prompt, {
+        systemPrompt: CHUNK_SYSTEM_PROMPT,
+        taskId
+      });
+      const outline = this.cleanChunkText(raw);
+      if (!outline) {
+        throw new Error(`第 ${i + 1} 段字幕提炼结果为空，请重试或更换模型。`);
+      }
+      outlines.push(`### 分段 ${i + 1}/${chunks.length}\n${outline}`);
+    }
+
+    // 合并后的提纲必须能塞进最终生成请求，否则递归压缩
+    const targetTokens = Math.max(800, inputBudget - 400);
+    onProgress?.(`阶段 2/3: 正在合并 ${outlines.length} 段提纲...`);
+    const merged = await this.reduceOutlines(config, llmConfig, outlines, targetTokens, taskId, onProgress);
+
+    onProgress?.('阶段 3/3: 正在生成最终思维导图...');
+    const header = '[说明] 原视频字幕过长，以下内容为按时间顺序分段提炼的提纲（保留原始时间戳与关键数据），请据此生成完整思维导图。\n\n';
+    const finalPrompt = template.split('{subtitle_content}').join(header + merged);
+    const result = await this.callLLM(config, llmConfig, finalPrompt, { taskId });
+
+    return {
+      markdown: extractMarkdown(result),
+      reflectionSource: header + merged
+    };
+  }
+
+  /** 递归合并分段提纲，直到能放进最终请求 */
+  private static async reduceOutlines(
+    config: PluginConfig,
+    llmConfig: LLMConfig,
+    outlines: string[],
+    targetTokens: number,
+    taskId: string | undefined,
+    onProgress: ((msg: string) => void) | undefined
+  ): Promise<string> {
+    let current = outlines;
+    let round = 0;
+
+    while (estimateTokens(current.join('\n\n')) > targetTokens) {
+      round++;
+      if (round > 4) {
+        return this.truncateToBudget(current.join('\n\n'), targetTokens);
+      }
+
+      onProgress?.(`正在压缩分段提纲（第 ${round} 轮）...`);
+      const groups = this.groupByBudget(current, Math.max(1200, targetTokens * 2));
+      const next: string[] = [];
+      const reduceLlmConfig: LLMConfig = {
+        ...llmConfig,
+        maxTokens: Math.min(2048, Number(llmConfig.maxTokens) || 2048),
+        temperature: 0.2
+      };
+
+      for (const group of groups) {
+        const prompt = CHUNK_REDUCE_PROMPT.replace('{outlines}', group.join('\n\n'));
+        const raw = await this.callLLM(config, reduceLlmConfig, prompt, {
+          systemPrompt: CHUNK_REDUCE_SYSTEM_PROMPT,
+          taskId
+        });
+        const cleaned = this.cleanChunkText(raw);
+        if (cleaned) next.push(cleaned);
+      }
+
+      // 无法再通过分组压缩时，按行硬截断，并显式说明
+      if (next.length === 0 || next.length >= current.length) {
+        return this.truncateToBudget(current.join('\n\n'), targetTokens);
+      }
+      current = next;
+    }
+
+    return current.join('\n\n');
+  }
+
+  /** 按 token 预算把条目分组，供合并阶段使用 */
+  private static groupByBudget(items: string[], budgetTokens: number): string[][] {
+    const groups: string[][] = [];
+    let current: string[] = [];
+    let currentTokens = 0;
+
+    for (const item of items) {
+      const itemTokens = estimateTokens(item);
+      if (current.length > 0 && currentTokens + itemTokens > budgetTokens) {
+        groups.push(current);
+        current = [];
+        currentTokens = 0;
+      }
+      current.push(item);
+      currentTokens += itemTokens;
+    }
+    if (current.length > 0) groups.push(current);
+    return groups;
+  }
+
+  /** 极端情况下按行截断，宁可少一些内容也不要直接失败 */
+  private static truncateToBudget(text: string, budgetTokens: number): string {
+    const lines = text.split('\n');
+    const kept: string[] = [];
+    let tokens = 0;
+    for (const line of lines) {
+      const lineTokens = estimateTokens(line) + 1;
+      if (tokens + lineTokens > budgetTokens) break;
+      kept.push(line);
+      tokens += lineTokens;
+    }
+    if (kept.length === 0) {
+      return text.slice(0, Math.max(100, Math.floor(budgetTokens * 0.8)));
+    }
+    return kept.join('\n') + '\n\n[注] 后续内容因模型上下文限制被省略。';
+  }
+
+  /** 清理分段/合并阶段返回的文本（去掉 think 标签与代码块包裹） */
+  private static cleanChunkText(text: string): string {
+    let cleaned = (text || '').replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+    const fence = cleaned.match(/^\`\`\`(?:markdown|md|text)?\s*([\s\S]*?)\`\`\`$/i);
+    if (fence) cleaned = fence[1].trim();
+    return cleaned;
   }
 
   /**
@@ -106,44 +348,43 @@ export class LLMService {
     taskId?: string
   ): Promise<{ result: string, initialResult?: string, reflectionSuccess?: boolean }> {
     await LoggerService.info('LLMService', '开始反思模式生成流程', undefined, taskId);
-    
-    // 阶段 1: 初步生成
-    let initialMindmap = cachedInitialMindmap;
-    if (initialMindmap) {
+
+    let phase1: Phase1Result;
+    if (cachedInitialMindmap) {
+      phase1 = { markdown: cachedInitialMindmap };
       onProgress?.('阶段 1/2: 发现初版缓存，跳过生成...');
       await LoggerService.info('LLMService', '阶段 1: 发现初版缓存，跳过主模型生成', undefined, taskId);
     } else {
       const mainLLMConfig = await StorageService.getSelectedLLMConfig();
       onProgress?.(`阶段 1/2: 正在通过 ${mainLLMConfig?.model || '主模型'} 生成初步思维导图...`);
       await LoggerService.info('LLMService', `阶段 1: 正在调用主模型 ${mainLLMConfig?.name || '默认'} (${mainLLMConfig?.model || '未知'}) 生成初稿`, undefined, taskId);
-      initialMindmap = await this.generateSinglePhase(config, subtitleText, taskId);
+      phase1 = await this.generateSinglePhase(config, subtitleText, taskId, onProgress);
       await LoggerService.debug('LLMService', '阶段 1 完成，收到初稿内容', undefined, taskId);
 
       if (onPhase1Complete) {
         try {
-          await onPhase1Complete(initialMindmap);
+          await onPhase1Complete(phase1.markdown);
         } catch (err) {
           await LoggerService.error('LLMService', '阶段 1 完成后的回调执行失败', err, taskId);
         }
       }
     }
 
-    // 阶段 2: 评价与优化
+    const initialMindmap = phase1.markdown;
+
     onProgress?.('阶段 2/2: 正在评估并优化思维导图...');
     const reflectionConfigId = config.settings.reflectionLLMConfigId;
-    const reflectionLLMConfig = reflectionConfigId === 'default' 
+    const reflectionLLMConfig = reflectionConfigId === 'default'
       ? await StorageService.getSelectedLLMConfig()
       : await StorageService.getLLMConfigById(reflectionConfigId);
-    
+
     if (!reflectionLLMConfig) {
       await LoggerService.error('LLMService', '未找到反思阶段的 LLM 配置', undefined, taskId);
       throw new Error('未找到反思阶段的 LLM 配置');
     }
 
     await LoggerService.info('LLMService', `阶段 2: 正在调用反思模型 ${reflectionLLMConfig.name} (${reflectionLLMConfig.model}) 进行评估与优化`, undefined, taskId);
-    
-    // 在反思阶段前不再添加硬编码延迟，改为由适配器层的指数退避重试机制处理限流或负载问题
-    
+
     let reflectionPromptTemplate = config.prompt.reflectionPrompt || DEFAULT_CONFIG.prompt.reflectionPrompt;
     // 兼容性处理：如果检测到用户仍在使用旧版三阶段 Prompt，则自动 fallback 到系统内置的新版两阶段 Prompt
     if (!reflectionPromptTemplate.includes('补充优化后的完整 Markdown')) {
@@ -151,25 +392,47 @@ export class LLMService {
       reflectionPromptTemplate = DEFAULT_CONFIG.prompt.reflectionPrompt;
     }
 
-    const reflectionPrompt = reflectionPromptTemplate
-      .split('{subtitle_content}').join(subtitleText)
+    const buildPrompt = (source: string) => reflectionPromptTemplate
+      .split('{subtitle_content}').join(source)
       .split('{initial_mindmap}').join(initialMindmap);
-    
+
     const reflectionSystemPrompt = `你是一个资深知识分析师与思维导图可视化专家。你的任务是基于原视频带时间戳的字幕稿，严格评价初步生成的思维导图质量，并在必要时直接执行优化。
 必须遵循以下准则：
 1. 定性概括与时间对齐：将口语化表达转化为书面逻辑观点，保留节点末尾的视频时间戳 [mm:ss]。
 2. 数据敏感：精准保留所有价格、日期、百分比等数字点位。
 3. 结构规范：最高层级唯一(#)，严禁标题编号，严格采用标准 Markdown 无序列表缩进，拒绝单纯按时间流水账罗列。
 4. 严禁输出任何开场白、解释或结束语。`;
+
+    const maxReflectionPromptTokens = this.maxPromptTokens(reflectionLLMConfig);
+    let reflectionPrompt = buildPrompt(subtitleText);
+
+    // 超长字幕：优先用阶段 1 生成的压缩稿；仍超限则跳过反思，保留初稿。
+    if (estimateTokens(reflectionPrompt) > maxReflectionPromptTokens) {
+      if (phase1.reflectionSource) {
+        const compressedPrompt = buildPrompt(phase1.reflectionSource);
+        if (estimateTokens(compressedPrompt) <= maxReflectionPromptTokens) {
+          reflectionPrompt = compressedPrompt;
+          await LoggerService.info('LLMService', '反思阶段输入超限，已改用分段提炼稿', undefined, taskId);
+        } else {
+          await LoggerService.warn('LLMService', '反思阶段输入超限且压缩稿仍过长，跳过反思阶段', undefined, taskId);
+          onProgress?.('字幕与导图超出反思模型上下文，已跳过反思阶段，采用初稿');
+          return { result: initialMindmap, initialResult: initialMindmap, reflectionSuccess: false };
+        }
+      } else {
+        await LoggerService.warn('LLMService', '反思阶段输入超限，跳过反思阶段', undefined, taskId);
+        onProgress?.('字幕与导图超出反思模型上下文，已跳过反思阶段，采用初稿');
+        return { result: initialMindmap, initialResult: initialMindmap, reflectionSuccess: false };
+      }
+    }
+
     const reflectionResult = await this.callLLM(config, reflectionLLMConfig, reflectionPrompt, {
       isReflection: true,
       systemPrompt: reflectionSystemPrompt,
       taskId
     });
-    
+
     await LoggerService.debug('LLMService', '阶段 2 完成，收到反思结果', undefined, taskId);
 
-    // 处理合并后的逻辑
     const cleanedResult = extractMarkdown(reflectionResult);
     if (cleanedResult === '优秀' || (cleanedResult.includes('优秀') && cleanedResult.length < 10)) {
       await LoggerService.info('LLMService', '评价结果为“优秀”，使用初稿', undefined, taskId);
@@ -181,7 +444,6 @@ export class LLMService {
     onProgress?.('发现遗漏点，已完成自动优化');
     return { result: cleanedResult, initialResult: initialMindmap, reflectionSuccess: false };
   }
-
 
   /**
    * 通用的 LLM 调用方法

@@ -32,9 +32,12 @@ export function StatsSection({ llmConfigs }: StatsSectionProps) {
   }
 
   // 计算反思成功率
-  const reflectionSuccessRate = stats.totalGenerations > 0 
-    ? Math.round((stats.reflectionSuccessCount / stats.totalGenerations) * 100) 
+  const reflectionSuccessRate = stats.totalGenerations > 0
+    ? Math.round((stats.reflectionSuccessCount / stats.totalGenerations) * 100)
     : 0;
+
+  const todayKey = new Date().toISOString().split('T')[0];
+  const today = stats.dailyStats[todayKey] || { generations: 0, videos: 0 };
 
   return (
     <div className="stats-container animate-fade-in">
@@ -62,6 +65,22 @@ export function StatsSection({ llmConfigs }: StatsSectionProps) {
               <div className="stats-progress-fill" style={{ width: `${reflectionSuccessRate}%` }}></div>
             </div>
             <span className="stats-card__sub">初稿即优秀的比例</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="options-section">
+        <h2>📅 今日统计</h2>
+        <div className="stats-grid" style={{ marginTop: '12px' }}>
+          <div className="stats-card">
+            <span className="stats-card__label">今日生成</span>
+            <span className="stats-card__value">{today.generations}</span>
+            <span className="stats-card__sub">次导图构建</span>
+          </div>
+          <div className="stats-card">
+            <span className="stats-card__label">今日视频</span>
+            <span className="stats-card__value">{today.videos}</span>
+            <span className="stats-card__sub">个去重视频</span>
           </div>
         </div>
       </div>

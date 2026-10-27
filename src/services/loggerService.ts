@@ -13,6 +13,9 @@ const LOGS_STORAGE_KEY = 'run_logs';
 const MAX_LOGS = 500;
 
 export class LoggerService {
+  /** 并发任务同时写日志会互相覆盖，串行化读改写 */
+  private static writeChain: Promise<void> = Promise.resolve();
+
   /**
    * 记录日志
    */
@@ -29,25 +32,31 @@ export class LoggerService {
     const taskPrefix = taskId ? `[Task:${taskId.substring(0, 8)}] ` : '';
     console.log(`${taskPrefix}[${module}] [${level.toUpperCase()}] ${message}`, data || '');
 
-    try {
-      const result = await chrome.storage.local.get(LOGS_STORAGE_KEY);
-      const logs: LogEntry[] = result[LOGS_STORAGE_KEY] || [];
-      
-      logs.unshift(entry);
-      
-      if (logs.length > MAX_LOGS) {
-        logs.splice(MAX_LOGS);
-      }
+    const write = async () => {
+      try {
+        const result = await chrome.storage.local.get(LOGS_STORAGE_KEY);
+        const logs: LogEntry[] = result[LOGS_STORAGE_KEY] || [];
 
-      await chrome.storage.local.set({ [LOGS_STORAGE_KEY]: logs });
-      
-      // 通知 UI 更新 (如果有监听者)
-      chrome.runtime.sendMessage({ type: 'LOG_ADDED', payload: entry }).catch(() => {
-        // 忽略没有接收者的错误
-      });
-    } catch (error) {
-      console.error('Failed to save log:', error);
-    }
+        logs.unshift(entry);
+
+        if (logs.length > MAX_LOGS) {
+          logs.splice(MAX_LOGS);
+        }
+
+        await chrome.storage.local.set({ [LOGS_STORAGE_KEY]: logs });
+
+        // 通知 UI 更新 (如果有监听者)
+        chrome.runtime.sendMessage({ type: 'LOG_ADDED', payload: entry }).catch(() => {
+          // 忽略没有接收者的错误
+        });
+      } catch (error) {
+        console.error('Failed to save log:', error);
+      }
+    };
+
+    const run = this.writeChain.then(write, write);
+    this.writeChain = run.then(() => undefined, () => undefined);
+    await run;
   }
 
   static async info(module: string, message: string, data?: any, taskId?: string) {
