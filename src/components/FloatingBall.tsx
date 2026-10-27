@@ -1,4 +1,9 @@
 import React, { useState } from 'react';
+import {
+  buildSubtitleFileName,
+  copyTextToClipboard,
+  downloadTextFile
+} from '../utils/subtitleExport';
 
 interface FloatingBallProps {
   showNotification: boolean;
@@ -9,8 +14,11 @@ interface FloatingBallProps {
     errorMessage?: string;
     statusMessage?: string;
     subtitleText?: string;
+    subtitleOnly?: boolean;
   };
   onClick: () => void;
+  /** 右键：仅获取字幕，不生成思维导图 */
+  onRightClick?: () => void;
   isFullscreen: boolean;
   onToast?: (message: string, duration?: number) => void;
 }
@@ -19,6 +27,7 @@ export const FloatingBall: React.FC<FloatingBallProps> = ({
   showNotification,
   currentTask,
   onClick,
+  onRightClick,
   isFullscreen,
   onToast
 }) => {
@@ -27,33 +36,7 @@ export const FloatingBall: React.FC<FloatingBallProps> = ({
   const [isCopied, setIsCopied] = useState(false);
 
   const handleCopySubtitle = async (text: string) => {
-    let success = false;
-    try {
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        await navigator.clipboard.writeText(text);
-        success = true;
-      }
-    } catch (e) {
-      console.warn('[FloatingBall] navigator.clipboard writeText error:', e);
-    }
-
-    if (!success) {
-      try {
-        const textarea = document.createElement('textarea');
-        textarea.value = text;
-        textarea.style.position = 'fixed';
-        textarea.style.left = '-9999px';
-        textarea.style.top = '-9999px';
-        document.body.appendChild(textarea);
-        textarea.focus();
-        textarea.select();
-        success = document.execCommand('copy');
-        document.body.removeChild(textarea);
-      } catch (e) {
-        console.error('[FloatingBall] Fallback copy failed:', e);
-      }
-    }
-
+    const success = await copyTextToClipboard(text);
     if (success) {
       setIsCopied(true);
       setTimeout(() => setIsCopied(false), 2500);
@@ -64,20 +47,8 @@ export const FloatingBall: React.FC<FloatingBallProps> = ({
   };
 
   const handleDownloadSubtitle = (text: string, title?: string) => {
-    try {
-      const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      const cleanTitle = (title || '视频字幕').replace(/[\\/:*?"<>|]/g, '_');
-      a.download = `${cleanTitle}_字幕原文本.txt`;
-      a.click();
-      URL.revokeObjectURL(url);
-      onToast?.('📥 字幕文件已开始下载');
-    } catch (e) {
-      console.error('[FloatingBall] Download failed:', e);
-      onToast?.('❌ 下载失败，请直接复制文本');
-    }
+    const success = downloadTextFile(text, buildSubtitleFileName(title));
+    onToast?.(success ? '📥 字幕文件已开始下载' : '❌ 下载失败，请直接复制文本');
   };
 
   const isFailed = currentTask?.status === 'failed';
@@ -89,7 +60,7 @@ export const FloatingBall: React.FC<FloatingBallProps> = ({
     if (!currentTask) return '暂无任务';
     
     const typeMap: Record<string, string> = {
-      'download_subtitle': '获取字幕',
+      'download_subtitle': currentTask.subtitleOnly ? '仅获取字幕' : '获取字幕',
       'generate_mindmap': '生成思维导图'
     };
     
@@ -146,6 +117,13 @@ export const FloatingBall: React.FC<FloatingBallProps> = ({
             onClick();
           }
         }}
+        onContextMenu={(e) => {
+          // 右键：仅获取字幕，不进入 LLM 生成流程
+          e.preventDefault();
+          e.stopPropagation();
+          onRightClick?.();
+        }}
+        title="左键：生成思维导图 · 右键：仅获取字幕"
         onMouseEnter={(e) => {
           setShowTooltip(true);
           e.currentTarget.style.transform = 'scale(1.1)';
@@ -258,6 +236,20 @@ export const FloatingBall: React.FC<FloatingBallProps> = ({
           }}
         >
           {getTaskDescription()}
+          {!isFailed && (
+            <div
+              style={{
+                marginTop: '8px',
+                paddingTop: '8px',
+                borderTop: '1px solid rgba(255, 255, 255, 0.2)',
+                color: 'rgba(255, 255, 255, 0.72)',
+                fontSize: '11px',
+                lineHeight: '1.6'
+              }}
+            >
+              左键：生成思维导图 · 右键：仅获取字幕
+            </div>
+          )}
           <style>{`
             @keyframes fadeIn {
               from { opacity: 0; transform: translateY(5px); }
@@ -316,11 +308,13 @@ export const FloatingBall: React.FC<FloatingBallProps> = ({
                 <line x1="12" y1="8" x2="12" y2="12" />
                 <line x1="12" y1="16" x2="12.01" y2="16" />
               </svg>
-              <h3 style={{ margin: 0, fontSize: '18px' }}>任务失败</h3>
+              <h3 style={{ margin: 0, fontSize: '18px' }}>
+                {currentTask?.subtitleOnly ? '字幕获取失败' : '任务失败'}
+              </h3>
             </div>
 
-            {/* 针对 429 额度耗尽的特别提示 */}
-            {(currentTask?.errorMessage?.includes('429') ||
+            {/* 针对 429 额度耗尽的特别提示（仅字幕模式不涉及 LLM） */}
+            {!currentTask?.subtitleOnly && (currentTask?.errorMessage?.includes('429') ||
               currentTask?.errorMessage?.includes('entitlement exhausted') ||
               currentTask?.errorMessage?.includes('quota')) && (
               <div style={{
@@ -485,7 +479,11 @@ export const FloatingBall: React.FC<FloatingBallProps> = ({
               <button
                 onClick={() => {
                   setShowErrorModal(false);
-                  onClick();
+                  if (currentTask?.subtitleOnly) {
+                    onRightClick?.();
+                  } else {
+                    onClick();
+                  }
                 }}
                 style={{
                   padding: '8px 16px',
@@ -496,7 +494,7 @@ export const FloatingBall: React.FC<FloatingBallProps> = ({
                   cursor: 'pointer'
                 }}
               >
-                重新生成
+                {currentTask?.subtitleOnly ? '重新获取字幕' : '重新生成'}
               </button>
             </div>
           </div>

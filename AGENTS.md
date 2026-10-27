@@ -81,6 +81,7 @@ src/
 │   ├── MindmapRenderer/      #  子组件（Node、Link、Toolbar）
 │   ├── MindmapRenderer/themes/ #  主题样式
 │   ├── MindmapViewer.tsx     #  导图查看弹窗
+│   ├── SubtitleModal.tsx     #  仅字幕结果面板（复制/下载）
 │   └── Icons.tsx             #  SVG 图标集合
 │
 ├── pages/               # 页面
@@ -131,12 +132,14 @@ src/
 │   ├── config.ts        #  配置类型与 DEFAULT_CONFIG
 │   ├── mindmap.ts       #  导图节点/主题类型
 │   ├── messages.ts      #  跨上下文消息协议
+│   ├── subtitle.ts      #  仅字幕模式结果类型
 │   └── stats.ts         #  统计类型
 │
 └── utils/               # 工具函数
     ├── markdownParser.ts  #  Markdown → 导图节点树
     ├── layout.ts          #  布局算法
     ├── exportMindmap.ts   #  导图导出
+    ├── subtitleExport.ts  #  字幕复制/下载（悬浮球与字幕面板共用）
     ├── videoUtils.ts      #  视频信息提取
     ├── youtubeUtils.ts    #  YouTube 专用工具
     ├── crypto.ts          #  加密
