@@ -109,6 +109,26 @@ export const PromptSection: React.FC<PromptSectionProps> = ({ config, llmConfigs
       <div className="section-divider" />
 
       <div className="form-group">
+        <label className="flex-row" style={{ cursor: 'pointer', gap: '8px' }}>
+          <input
+            type="checkbox"
+            checked={config.settings.enableChunking !== false}
+            onChange={(e) => onConfigChange({
+              ...config,
+              settings: { ...config.settings, enableChunking: e.target.checked }
+            })}
+          />
+          <span className="form-label" style={{ margin: 0 }}>长视频自动分段提炼</span>
+        </label>
+        <p className="form-hint">
+          字幕超出模型上下文时，先按时间顺序分段提炼，再合并生成导图。会增加调用次数，
+          但能避免长视频直接因 context length 失败。关闭后超长字幕会原样发送。
+        </p>
+      </div>
+
+      <div className="section-divider" />
+
+      <div className="form-group">
         <label className="form-label">
           系统提示词（System Prompt）
           {config.prompt.systemPrompt.trim() === DEFAULT_PROMPTS.systemPrompt.trim() ? (
