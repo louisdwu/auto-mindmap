@@ -138,7 +138,7 @@
 ```bash
 npm run build       # tsc + vite build 通过
 npm test            # 16 个测试文件 / 106 个测试通过
-npm run test:e2e    # 真实 Chromium 扩展 smoke：7 项通过
+npm run test:e2e    # 真实 Chromium 扩展 smoke：8 项通过
 ```
 
 新增测试覆盖：
@@ -173,7 +173,8 @@ npm run test:e2e    # 真实 Chromium 扩展 smoke：7 项通过
 
 ### P1（体验/成本）
 
-4. **流式 LLM 输出**：SSE 增量渲染，长视频不再只看到「阶段 3/3」。
+4. **流式 LLM 输出（已降级为可选）**：~~SSE 增量渲染~~。用户反馈只查看最终导图，流式没有实际消费场景，
+   已从必做项移除，保留为可选优化（主要价值是保活/减少等待焦虑，而非功能刚需）。
 5. **IndexedDB 存大文本**：chrome.storage 适合小状态，不适合每次重写 30 张导图；
    可保留 storage 做索引/配置，正文进 IDB。
 6. ~~Token/费用统计~~：已回传并展示 token 用量；费用估算可基于模型价目表再加。

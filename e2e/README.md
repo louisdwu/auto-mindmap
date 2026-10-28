@@ -17,10 +17,11 @@ npm run test:e2e
 ## 覆盖内容
 
 1. 扩展加载、options 页面渲染、`unlimitedStorage` 权限、本地存储初始化。
-2. 后台真实任务链路：B 站 view / WBI / 字幕接口打桩 → 字幕获取 → 缓存 → 任务完成。
-3. B 站分 P：P1 与 P2 使用各自缓存键，P2 不会污染 P1。
-4. B 站视频页 content script 注入与悬浮球渲染；首页不渲染悬浮球。
-5. YouTube watch 页 content script 注入与悬浮球渲染。
+2. 大模型配置页的服务商选择器（新版 provider-first UI）。
+3. 后台真实任务链路：B 站 view / WBI / 字幕接口打桩 → 字幕获取 → 缓存 → 任务完成。
+4. B 站分 P：P1 与 P2 使用各自缓存键，P2 不会污染 P1。
+5. B 站视频页 content script 注入与悬浮球渲染；首页不渲染悬浮球。
+6. YouTube watch 页 content script 注入与悬浮球渲染。
 
 ## 不覆盖
 
