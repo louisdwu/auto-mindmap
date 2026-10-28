@@ -14,6 +14,7 @@ import { Toolbar, ViewerActions } from './MindmapRenderer/Toolbar';
 import './MindmapRenderer.css';
 
 import { VideoUtils } from '../utils/videoUtils';
+import { splitNodeTimestamp } from '../utils/nodeTimestamp';
 
 interface MindmapRendererProps {
   markdown: string;
@@ -241,16 +242,11 @@ export const MindmapRenderer: React.FC<MindmapRendererProps> = ({
     return nodes;
   }, [positions, treeData, nodeById, styleName, getBranchIndex, onNodeClick, onTimestampClick, toggleNode]);
 
-  // 解析根节点时间戳
+  // 解析根节点时间戳（与节点徽章、布局估宽共用同一实现）
   const { rootTitleText, rootTimestampStr } = useMemo(() => {
     if (!treeData) return { rootTitleText: '', rootTimestampStr: null };
-    const raw = treeData.text || '';
-    const match = raw.match(/(?:\[|\()(\d{1,2}:\d{2}(?::\d{2})?)(?:\]|\))/);
-    if (!match) return { rootTitleText: raw, rootTimestampStr: null };
-    return {
-      rootTitleText: raw.replace(match[0], '').trim() || raw,
-      rootTimestampStr: match[1]
-    };
+    const { title, timestamp } = splitNodeTimestamp(treeData.text);
+    return { rootTitleText: title, rootTimestampStr: timestamp };
   }, [treeData]);
 
   if (!treeData) return <div className="mm-container"><div className="mm-empty">暂无思维导图内容</div></div>;

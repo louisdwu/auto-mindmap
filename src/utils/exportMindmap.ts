@@ -11,6 +11,7 @@ import {
   calculateLayout, calculateLayoutBounds,
   generateLinkPath, NodePosition, LayoutOptions
 } from './layout';
+import { splitNodeTimestamp } from './nodeTimestamp';
 
 // 分支颜色（与 CSS 中 branch-0~4 保持一致）
 const BRANCH_COLORS = ['#b3005b', '#ff80cc', '#2b00b3', '#5c3daf', '#cc80ff'];
@@ -168,11 +169,19 @@ function drawNode(
     ctx.font = `${fontWeight} ${pos.fontSize}px "Microsoft YaHei", "PingFang SC", sans-serif`;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
-    const lines = wrapCanvasText(ctx, pos.text, maxTextWidth);
+    // 与屏幕渲染一致：时间戳从标题剥离，画成胶囊徽章而不是 [mm:ss] 原文
+    const { title, timestamp } = splitNodeTimestamp(pos.text);
+    const lines = wrapCanvasText(ctx, title, maxTextWidth);
     const startY = pos.y - ((lines.length - 1) * lineHeight) / 2;
     lines.forEach((line, index) => {
       ctx.fillText(line, x, startY + index * lineHeight);
     });
+
+    if (timestamp) {
+      const lastLineY = startY + (lines.length - 1) * lineHeight;
+      const lastLineWidth = ctx.measureText(lines[lines.length - 1] || '').width;
+      drawTimestampBadge(ctx, pos, x, lastLineY, lineHeight, lastLineWidth, maxTextWidth, timestamp);
+    }
 
     // 下划线
     const underlineY = pos.y + pos.height / 2;
@@ -185,6 +194,41 @@ function drawNode(
     ctx.stroke();
     ctx.globalAlpha = 1;
   }
+}
+
+/** 绘制节点尾部的时间戳胶囊，配色与屏幕端 mm-timestamp-badge 一致 */
+function drawTimestampBadge(
+  ctx: CanvasRenderingContext2D,
+  pos: NodePosition,
+  nodeLeftX: number,
+  lastLineY: number,
+  lineHeight: number,
+  lastLineWidth: number,
+  maxTextWidth: number,
+  timestamp: string
+): void {
+  const badgeFontSize = Math.max(9, Math.round(pos.fontSize * 0.8));
+  ctx.font = `600 ${badgeFontSize}px ui-monospace, SFMono-Regular, Consolas, monospace`;
+  const badgeWidth = Math.ceil(ctx.measureText(timestamp).width) + 12;
+  const badgeHeight = Math.ceil(badgeFontSize * 1.3) + 4;
+
+  // 跟在标题最后一行后面，放不下时换到下一行行首
+  const sameLineX = nodeLeftX + lastLineWidth + 6;
+  const sameLine = sameLineX + badgeWidth <= nodeLeftX + maxTextWidth;
+  const bx = sameLine ? sameLineX : nodeLeftX;
+  const by = sameLine ? lastLineY : lastLineY + lineHeight;
+
+  drawRoundRect(ctx, bx, by - badgeHeight / 2, badgeWidth, badgeHeight, badgeHeight / 2);
+  ctx.fillStyle = '#f0f9ff';
+  ctx.fill();
+  ctx.strokeStyle = '#bae6fd';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  ctx.fillStyle = '#0284c7';
+  ctx.textAlign = 'center';
+  ctx.fillText(timestamp, bx + badgeWidth / 2, by);
+  ctx.textAlign = 'left';
 }
 
 /** 绘制标题栏 */

@@ -46,3 +46,29 @@ describe('calculateLayout 长文本换行', () => {
     expect(small.height).toBeLessThan(normal.height);
   });
 });
+
+describe('calculateLayout 时间戳徽章估宽', () => {
+  it('尾部时间戳按徽章预留宽度，而不是按原始括号字符', () => {
+    const stamped = calculateLayout(makeTree('疯狂购买GPU和内存 [00:10]'), { direction: 'right', fontSizeBase: 1 }).get('n1')!;
+    const plain = calculateLayout(makeTree('疯狂购买GPU和内存'), { direction: 'right', fontSizeBase: 1 }).get('n1')!;
+    // 一级节点英文字宽 10：徽章预留 = 5 字符 × 10 + 固定余量 22
+    expect(stamped.width - plain.width).toBe(5 * 10 + 22);
+  });
+
+  it('预留宽度保证标题与徽章同行，不产生额外换行高度', () => {
+    const stamped = calculateLayout(makeTree('疯狂购买GPU和内存 [00:10]'), { direction: 'right', fontSizeBase: 1 }).get('n1')!;
+    expect(stamped.height).toBe(stamped.baseHeight);
+  });
+
+  it('开头时间戳同样剥离并预留徽章宽度', () => {
+    const stamped = calculateLayout(makeTree('[00:10] 开场介绍'), { direction: 'right', fontSizeBase: 1 }).get('n1')!;
+    const plain = calculateLayout(makeTree('开场介绍'), { direction: 'right', fontSizeBase: 1 }).get('n1')!;
+    expect(stamped.width - plain.width).toBe(5 * 10 + 22);
+  });
+
+  it('正文中间的括号数字不按时间戳剥离，宽度计入括号字符', () => {
+    const pos = calculateLayout(makeTree('屏幕(16:9)对比'), { direction: 'right', fontSizeBase: 1 }).get('n1')!;
+    // 2×18 + 6×10 + 2×18 + padding 28
+    expect(pos.width).toBe(2 * 18 + 6 * 10 + 2 * 18 + 28);
+  });
+});
