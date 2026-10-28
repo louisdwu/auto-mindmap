@@ -25,15 +25,15 @@
 
 ### P1：影响稳定性、性能与可维护性
 
-- **Service Worker 生命周期**：长任务随时可能被浏览器回收。原实现靠 10s 心跳 +
-  running 任务启动时直接失败。现在心跳只在有任务时开启，任务表剥离大字段，
-  pending 任务可恢复；但**真正的中断续跑**还没有（需要把阶段结果持久化 + 任务可恢复）。
+- **Service Worker 生命周期**：长任务随时可能被浏览器回收。现在心跳只在有任务时开启，
+  任务表剥离大字段，pending 任务可恢复；running 任务首次中断会自动续跑一次，
+  阶段 1 缓存 + 字幕缓存支撑断点续跑，连续多次中断才标记失败。
 - **存储无限增长**：字幕/ASR 缓存没有 TTL，导图 50 张且含全文字幕。现已加索引、
   TTL、数量/容量上限与配额重试；后续可迁移 IndexedDB 进一步降低写入成本。
 - **1s 轮询 + 全页 MutationObserver**：content 每秒查后台，且监听整个 body 的
   DOM 变化。已改为事件驱动 + 仅任务运行时 1.5s 兜底轮询 + 750ms URL 检查。
 - **导图渲染 O(n²)**：每个节点递归找分支、每个位置递归找节点。已用 map 预计算；
-  但长文本仍是单行 nowrap，节点会非常宽，后续应做换行/测量。
+  长文本已按最大宽度换行，布局/渲染/Canvas 导出统一使用真实高度。
 - **配置写入并发**：LLM 配置、导图、统计、日志的读改写可能互相覆盖。已分别串行化。
 - **YouTube 自动流程依赖字幕按钮**：未开 CC 时永远不会自动生成。已加导航后主动
   从页面数据/HTML 提取一次 CC 字幕的兜底（不自动触发 ASR）。
@@ -42,12 +42,13 @@
 
 ### P2：体验与工程化
 
-- 导图长文本换行、节点测量、导出 Canvas 与渲染器一致性。
-- 任务取消（AbortController 贯穿 ASR/LLM）、流式输出、重试策略可配置。
+- 任务取消与中断恢复已完成；流式输出、重试策略可配置仍待做。
+- 导图长文本换行、节点测量、导出 Canvas 与渲染器一致性已完成。
 - `<all_urls>` 权限过宽：自定义 LLM 需要任意 host，但可改为 optional_host_permissions，
   在设置页按需申请。
-- 无 E2E：只有 Vitest。Chrome 扩展的真实行为（content script 注入、MV3 生命周期、
-  跨上下文消息）必须在浏览器里回归。
+- 已有零依赖 CDP E2E（`e2e/smoke.mjs`）：真实 Chromium 加载 dist，覆盖 options、
+  service worker 任务、分 P 缓存、content script 注入与视频页门控。真实 B 站/YouTube
+  网络与登录态仍需人工回归。
 - 无 ESLint/Prettier/CI；Vite 4 + CRXJS beta 较旧；依赖里有未使用的 tailwind/sharp（已清理）。
 - 无 i18n、无障碍标注、暗色设置页。
 - ASR 后端仍偏 Windows 本地环境，跨平台启动脚本与 Docker 化可补。
@@ -95,6 +96,27 @@
    - 新增 `npm run typecheck`、`npm test` 改为单次运行、`test:watch`。
    - 清理未使用的 tailwindcss / postcss / autoprefixer / sharp。
 
+7. **任务取消与中断恢复**
+   - `AbortController` 贯穿 `BaseAdapter`、OpenAI/Gemini/Ollama、字幕/音频/ASR 请求；
+     外部取消不进入重试，避免「点了取消还在退避重试」。
+   - 悬浮球右键新增「取消当前任务」；取消后状态为 `cancelled`，不会误报失败。
+   - running 任务首次被 SW 回收时自动恢复一次（依赖字幕/阶段 1 缓存），连续中断才失败。
+
+8. **导图长文本换行**
+   - 按层级设定最大宽度，超出换行；行数参与高度计算。
+   - 节点渲染、连线锚点、内容边界、Canvas/PDF 导出统一使用 `height`。
+   - 修复「屏幕上换行、导出仍是单行」的错位。
+
+9. **Token 用量统计**
+   - 三个适配器解析上游 usage：OpenAI `prompt_tokens/completion_tokens`、
+     Gemini `usageMetadata`、Ollama `prompt_eval_count/eval_count`。
+   - 分段/反思多次调用累加；统计页展示累计输入/输出 token 与模型维度用量。
+
+10. **零依赖 E2E + CI**
+   - `e2e/smoke.mjs` 用原生 CDP 驱动 Chromium：options、service worker、分 P 缓存、
+     content script 注入、视频页门控、YouTube 注入；网络用 `Fetch` 打桩，可重复运行。
+   - `.github/workflows/ci.yml`：`npm ci` → typecheck → unit test → build → 上传 dist。
+
 ---
 
 ## 3. 数据迁移与兼容
@@ -114,8 +136,9 @@
 已在本机完成：
 
 ```bash
-npm run build     # tsc + vite build 通过
-npm test          # 14 个测试文件 / 98 个测试通过
+npm run build       # tsc + vite build 通过
+npm test            # 16 个测试文件 / 106 个测试通过
+npm run test:e2e    # 真实 Chromium 扩展 smoke：7 项通过
 ```
 
 新增测试覆盖：
@@ -124,39 +147,44 @@ npm test          # 14 个测试文件 / 98 个测试通过
 - `services/storageService.test.ts`：local 迁移、密钥脱敏、缓存 TTL/索引/分 P 匹配。
 - `services/llm/tokenBudget.test.ts`：token 估算、按行切分、超长行硬切。
 - `services/llmService.test.ts`：短字幕单次、长字幕分段、关闭分段、反思超限跳过。
-- `background/taskManager.test.ts`：并发上限、持久化剥离、分 P 匹配、running 恢复。
+- `background/taskManager.test.ts`：并发上限、持久化剥离、分 P 匹配、中断恢复、Abort 取消。
+- `utils/layout.test.ts`：长文本宽度上限、真实高度、字号缩放。
+- `services/statsService.test.ts`：token 累加与每日视频去重。
+- `services/llm/adapters/OpenAIAdapter.test.ts`：usage 回传、外部取消不重试。
+- `e2e/smoke.mjs`：真实 Chromium 扩展 smoke（options、后台任务、分 P、content script、
+  视频页门控、YouTube 注入）。
 
-**未完成真实浏览器回归**：当前环境没有可自动化的 Chrome 扩展 E2E。
-上线前必须手动验证：加载 dist → B 站单 P/多 P → 无字幕 ASR → YouTube 有/无 CC →
-任务进行中刷新/关闭标签页 → 扩展更新后旧 content script 失效提示。
+**仍需人工回归**：真实 B 站/YouTube 登录态与网络、无字幕 ASR、任务进行中刷新页面、
+扩展更新后旧 content script 失效提示、真实 LLM/ASR 服务联调。E2E 已把这些场景中
+可稳定打桩的部分自动化，不能替代真实网络回归。
 
 ---
 
 ## 5. 下一阶段路线图
 
-### P0（建议紧接着做）
+### P0（本轮已完成）
 
-1. **真实浏览器 E2E**：Playwright 加载扩展，覆盖 B 站/YouTube、分 P、ASR 回退、
-   MV3 中断恢复。没有这一层，后面的重构都缺安全网。
-2. **任务取消/中断恢复**：AbortController 贯穿 `fetch`；任务阶段结果落盘，
-   SW 重启后可「继续反思」「继续生成」而不是直接失败。
-3. **导图长文本换行**：按最大宽度测量换行、节点高度参与布局；同步修正 Canvas/PDF
-   导出的换行逻辑，避免「屏幕好看、导出错位」。
+1. ~~真实浏览器 E2E~~：已用零依赖 CDP 实现 `e2e/smoke.mjs`，覆盖扩展加载、options、
+   后台任务、分 P 缓存、content script 注入、视频页门控、YouTube 注入。
+   仍建议补：真实登录态回归、ASR 回退、扩展更新/刷新场景。
+2. ~~任务取消/中断恢复~~：AbortController 已贯穿 LLM/ASR/字幕/音频；首次中断自动恢复。
+   仍可改进：把分段提纲等中间结果也落盘，支持「继续反思」而不只是重跑。
+3. ~~导图长文本换行~~：布局/渲染/导出已统一真实高度。
 
 ### P1（体验/成本）
 
 4. **流式 LLM 输出**：SSE 增量渲染，长视频不再只看到「阶段 3/3」。
 5. **IndexedDB 存大文本**：chrome.storage 适合小状态，不适合每次重写 30 张导图；
    可保留 storage 做索引/配置，正文进 IDB。
-6. **Token/费用统计**：适配器回传 usage，统计页展示输入/输出 token 与估算费用。
+6. ~~Token/费用统计~~：已回传并展示 token 用量；费用估算可基于模型价目表再加。
 7. **可选 host 权限**：把 `<all_urls>` 改为 `optional_host_permissions`，在设置页
    按自定义 API 域名申请，降低安装时的权限告警。
 8. **错误 UX**：无 LLM 配置/无 ASR 服务/Ollama 未启动时给出一键跳转设置，
-   而不是等任务失败后弹红色悬浮球。
+   而不是等任务失败后弹红色悬浮球（当前只做了错误文案增强与安装打开设置页）。
 
 ### P2（工程化/产品化）
 
-9. ESLint + Prettier + GitHub Actions（build/test/typecheck）。
+9. ~~GitHub Actions~~：已加 CI（typecheck/test/build/artifact）；ESLint/Prettier 仍待加。
 10. 依赖升级：CRXJS 稳定版或迁移 WXT；React 19；Vite 6/7。
 11. i18n（中/英）、无障碍、设置页暗色模式。
 12. ASR 服务 Docker 化 / 跨平台启动脚本 / 模型目录管理。
