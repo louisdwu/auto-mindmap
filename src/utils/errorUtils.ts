@@ -26,6 +26,10 @@ export class ErrorUtils {
       return errorMessage;
     }
 
+    if (/未找到有效的 LLM 配置|未找到反思阶段的 LLM 配置|API 密钥不能为空|API 地址不能为空|模型名称不能为空/.test(errorMessage)) {
+      return `LLM 配置不完整：${errorMessage}。请打开扩展设置 →「大模型配置」补全地址、模型与密钥，并用「测试连接」确认链路可用。`;
+    }
+
     if (/HTTP 40[13]\b|Unauthorized|Forbidden|invalid[_ ]?api[_ ]?key|incorrect api key/i.test(errorMessage)) {
       return `鉴权失败：API 密钥无效、已过期，或该密钥无权访问这个模型。请到「大模型配置」重新填写密钥，并用「测试连接」按钮验证。原始错误：${errorMessage}`;
     }

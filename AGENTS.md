@@ -29,7 +29,8 @@ Chrome 浏览器插件，自动从 **Bilibili** 和 **YouTube** 视频字幕生�
 npm install           # 安装依赖
 npm run build         # 编译（tsc 类型检查 + vite 打包）
 npm run dev           # 开发模式（监听文件变化，实时更新 dist）
-npm run test          # 运行单元测试（vitest）
+npm run test          # 运行单元测试（vitest，单次）
+npm run test:e2e      # 真实 Chromium 扩展 smoke（需本机 Chromium）
 ```
 
 **强制规则：每次修改代码后必须运行 `npm run build` 以确保类型安全和构建产物有效。**
@@ -150,6 +151,13 @@ src/
     ├── errorUtils.ts      #  错误处理
     └── runtimeUtils.ts    #  运行时工具
     # 另有 *.test.ts 单元测试文件
+
+e2e/                     # 零依赖 CDP 扩展 smoke 测试
+├── cdp.mjs              #  极简 CDP 客户端
+├── smoke.mjs            #  扩展加载 / 分 P / content script 注入
+└── README.md
+
+.github/workflows/ci.yml # typecheck + unit test + build + dist artifact
 
 scripts/                 # Python ASR 后端
 ├── whisper_server.py    #  FastAPI 服务入口
