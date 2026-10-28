@@ -7,6 +7,12 @@ interface ImportExportSectionProps {
   onSetImportStatus: (status: { type: 'success' | 'error'; message: string } | null) => void;
 }
 
+/**
+ * 配置备份与迁移
+ *
+ * 放在「大模型配置」页底部，因为换电脑/重装时最先要迁移的就是 LLM 配置。
+ * 默认导出不带密钥；同 ID 配置在本机重新导入时会保留本机密钥。
+ */
 export const ImportExportSection: React.FC<ImportExportSectionProps> = ({
   importStatus,
   onReload,
@@ -17,7 +23,7 @@ export const ImportExportSection: React.FC<ImportExportSectionProps> = ({
   const handleExportConfig = async () => {
     try {
       await StorageService.downloadConfigFile({ includeSecrets });
-      onSetImportStatus({ type: 'success', message: '配置已导出' });
+      onSetImportStatus({ type: 'success', message: '配置已导出为 JSON 文件' });
       setTimeout(() => onSetImportStatus(null), 3000);
     } catch (error) {
       console.error('导出配置失败:', error);
@@ -54,64 +60,75 @@ export const ImportExportSection: React.FC<ImportExportSectionProps> = ({
       });
     }
 
-    // 清除文件输入
     event.target.value = '';
     setTimeout(() => onSetImportStatus(null), 3000);
   };
 
   return (
-    <section className="options-section options-section--bordered">
-      <h2>配置备份与恢复</h2>
-
-      <div className="import-export-row">
-        {/* 导出 */}
+    <section className="options-section backup-section">
+      <div className="llm-section__head">
         <div>
-          <button className="btn--purple" onClick={handleExportConfig}>
-            <span>📤</span> 导出配置
-          </button>
-          <p className="form-hint">将所有配置导出为 JSON 文件</p>
-          <label className="form-hint" style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
-            <input
-              type="checkbox"
-              checked={includeSecrets}
-              onChange={(e) => setIncludeSecrets(e.target.checked)}
-            />
-            包含 API 密钥（明文，谨慎勾选）
-          </label>
-        </div>
-
-        {/* 导入 */}
-        <div>
-          <label className="btn--cyan">
-            <span>📥</span> 导入配置
-            <input
-              type="file"
-              accept=".json"
-              onChange={handleImportConfig}
-              style={{ display: 'none' }}
-            />
-          </label>
-          <p className="form-hint">从 JSON 文件恢复配置</p>
+          <h2 className="llm-section__title">导入 / 导出配置</h2>
+          <p className="llm-section__desc">
+            换电脑、重装扩展或备份时使用。包含大模型配置、Prompt、ASR、排除词与系统设置。
+          </p>
         </div>
       </div>
 
-      {/* 导入状态 */}
+      <div className="backup-grid">
+        <div className="backup-card">
+          <div className="backup-card__icon">📤</div>
+          <div className="backup-card__body">
+            <strong>导出配置</strong>
+            <p>生成一个 JSON 备份文件，可保存到本地或迁移到另一台电脑。</p>
+            <label className="backup-checkbox">
+              <input
+                type="checkbox"
+                checked={includeSecrets}
+                onChange={(event) => setIncludeSecrets(event.target.checked)}
+              />
+              包含 API 密钥（明文，谨慎勾选）
+            </label>
+            <button type="button" className="btn--primary" onClick={handleExportConfig}>
+              导出为 JSON
+            </button>
+          </div>
+        </div>
+
+        <div className="backup-card">
+          <div className="backup-card__icon">📥</div>
+          <div className="backup-card__body">
+            <strong>导入配置</strong>
+            <p>选择之前导出的 JSON。默认导入不会覆盖本机已有的 API 密钥。</p>
+            <label className="btn--secondary-outline backup-upload">
+              选择 JSON 文件
+              <input
+                type="file"
+                accept=".json,application/json"
+                onChange={handleImportConfig}
+                style={{ display: 'none' }}
+              />
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <div className="backup-chips">
+        {['大模型配置', 'Prompt', 'ASR', '排除词', '系统设置'].map(item => (
+          <span key={item} className="backup-chip">{item}</span>
+        ))}
+      </div>
+
       {importStatus && (
-        <div
-          className={importStatus.type === 'success' ? 'alert--success' : 'alert--error'}
-          style={{ marginTop: '15px' }}
-        >
+        <div className={importStatus.type === 'success' ? 'alert--success backup-status' : 'alert--error backup-status'}>
           {importStatus.type === 'success' ? '✓' : '✗'} {importStatus.message}
         </div>
       )}
 
-      <div className="import-export-hint">
-        <p>
-          <strong>提示：</strong>默认导出的配置<strong>不含 API 密钥</strong>；在本机重新导入时，
-          同 ID 配置会保留本机已有的密钥。只有勾选「包含 API 密钥」才会把密钥写进文件，
-          请务必妥善保管。
-        </p>
-      </div>
+      <p className="form-hint backup-note">
+        默认导出的文件<strong>不包含 API 密钥</strong>；在本机重新导入时，同 ID 配置会保留
+        本机已有的密钥。只有勾选「包含 API 密钥」才会把密钥写进文件，请妥善保管。
+      </p>
     </section>
   );
 };
