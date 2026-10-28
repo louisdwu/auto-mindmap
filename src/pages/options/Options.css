@@ -1476,3 +1476,132 @@ input:checked + .switch-label:before {
     opacity: 1;
   }
 }
+
+
+/* === 配置备份与迁移 === */
+.backup-section {
+  padding: 28px;
+}
+
+.backup-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.backup-card {
+  display: flex;
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  background: #ffffff;
+}
+
+.backup-card__icon {
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  background: #f1f5f9;
+  font-size: 20px;
+}
+
+.backup-card__body {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+}
+
+.backup-card__body strong {
+  font-size: 14px;
+  color: var(--text-main);
+}
+
+.backup-card__body p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.backup-card__body .btn--primary,
+.backup-card__body .backup-upload {
+  margin-top: 4px;
+}
+
+.backup-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #92400e;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.backup-upload {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 16px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.backup-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 14px;
+}
+
+.backup-chip {
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  color: #475569;
+  font-size: 11px;
+}
+
+.backup-status {
+  margin-top: 14px;
+}
+
+.backup-note {
+  margin-top: 12px;
+}
+
+@media (max-width: 720px) {
+  .backup-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+
+
+.alert--success {
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: #ecfdf5;
+  border: 1px solid #a7f3d0;
+  color: #065f46;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.alert--error {
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #991b1b;
+  font-size: 13px;
+  line-height: 1.5;
+}
+

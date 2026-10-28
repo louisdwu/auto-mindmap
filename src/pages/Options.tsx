@@ -275,19 +275,29 @@ export default function Options() {
       <main className="options-content">
         <div className="content-body">
           {activeTab === 'llm' && (
-            <LLMConfigSection
-              key={editingConfig?.id || 'none'}
-              config={config}
-              llmConfigs={llmConfigs}
-              editingConfigId={editingConfigId}
-              editingConfig={editingConfig}
-              saved={saved}
-              onEditConfig={handleEditConfig}
-              onDeleteConfig={handleDeleteConfig}
-              onAddNewConfig={handleAddNewConfig}
-              onSetActiveConfig={handleSetActiveConfig}
-              onUpdateEditingConfig={updateEditingConfig}
-            />
+            <>
+              <LLMConfigSection
+                key={editingConfig?.id || 'none'}
+                config={config}
+                llmConfigs={llmConfigs}
+                editingConfigId={editingConfigId}
+                editingConfig={editingConfig}
+                saved={saved}
+                onEditConfig={handleEditConfig}
+                onDeleteConfig={handleDeleteConfig}
+                onAddNewConfig={handleAddNewConfig}
+                onSetActiveConfig={handleSetActiveConfig}
+                onUpdateEditingConfig={updateEditingConfig}
+              />
+
+              <div className="section-divider" />
+
+              <ImportExportSection
+                importStatus={importStatus}
+                onReload={reloadAll}
+                onSetImportStatus={setImportStatus}
+              />
+            </>
           )}
 
           {activeTab === 'content' && (
@@ -314,14 +324,6 @@ export default function Options() {
               <div className="section-divider" />
 
               <StorageSection />
-
-              <div className="section-divider" />
-              
-              <ImportExportSection
-                importStatus={importStatus}
-                onReload={reloadAll}
-                onSetImportStatus={setImportStatus}
-              />
 
               <div className="section-divider" />
               

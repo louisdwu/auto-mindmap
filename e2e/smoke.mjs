@@ -182,6 +182,11 @@ async function main() {
     }, { timeout: 5000, label: 'provider picker' });
     ok('LLM 配置页服务商选择器');
 
+    await waitFor(async () => {
+      return await options.evaluate("document.body.innerText.includes('导入 / 导出配置')");
+    }, { timeout: 5000, label: 'config backup section' });
+    ok('大模型配置页提供导入 / 导出入口');
+
     await sleep(1000); // 等 options 自动保存的首次抖动结束，避免覆盖测试配置
 
     // 连接 service worker
