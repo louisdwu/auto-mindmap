@@ -4,6 +4,7 @@
  */
 
 import { INodeData } from './markdownParser';
+import { splitNodeTimestamp, TIMESTAMP_BADGE_EXTRA_WIDTH } from './nodeTimestamp';
 
 /**
  * 获取所有节点（包括折叠的子节点）
@@ -162,17 +163,24 @@ function calculateNodeDimensions(
   const dimensions = new Map<string, { width: number; height: number; baseHeight: number; fontSize: number }>();
 
   for (const node of nodes) {
-    const text = node.text;
+    // 渲染时时间戳会从标题剥离成徽章，布局必须按同一份切分结果估宽：
+    // 徽章比 [mm:ss] 原字符更宽，按原始文本估宽会把徽章挤到第二行、压上下划线
+    const { title, timestamp } = splitNodeTimestamp(node.text);
     const fontConfig = getFontConfig(node.level, fontSizeBase);
 
-    // 根据层级和字体大小计算文本宽度
+    // 根据层级和字体大小计算标题文本宽度
     let textWidth = 0;
-    for (const char of text) {
+    for (const char of title) {
       if (/[\u4e00-\u9fa5\u3000-\u303f\uff00-\uffef]/.test(char)) {
         textWidth += fontConfig.chineseWidth;
       } else {
         textWidth += fontConfig.englishWidth;
       }
+    }
+
+    // 徽章按等长文本估宽再叠加固定余量，保证「标题 + 徽章」同行放下不换行
+    if (timestamp) {
+      textWidth += timestamp.length * fontConfig.englishWidth + TIMESTAMP_BADGE_EXTRA_WIDTH;
     }
 
     const estimatedWidth = Math.max(60, textWidth + fontConfig.padding);

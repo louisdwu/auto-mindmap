@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { NodePosition } from '../../utils/layout';
 import { VideoUtils } from '../../utils/videoUtils';
+import { splitNodeTimestamp } from '../../utils/nodeTimestamp';
 
 interface NodeProps {
   pos: NodePosition;
@@ -21,19 +22,9 @@ export const Node: React.FC<NodeProps> = ({
 }) => {
   const isRoot = pos.id === 'root';
 
-  // 正则匹配时间戳，例如 [01:23] 或 (01:23:45)
-  const { titleText, timestampStr } = useMemo(() => {
-    const raw = pos.text || '';
-    const match = raw.match(/(?:\[|\()(\d{1,2}:\d{2}(?::\d{2})?)(?:\]|\))/);
-    if (!match) {
-      return { titleText: raw, timestampStr: null };
-    }
-    const cleanText = raw.replace(match[0], '').trim();
-    return {
-      titleText: cleanText || raw,
-      timestampStr: match[1]
-    };
-  }, [pos.text]);
+  // 时间戳从标题剥离为可点击徽章；切分与布局估宽共用同一实现，
+  // 标题为空（纯时间戳节点）时只渲染徽章
+  const { title: titleText, timestamp: timestampStr } = useMemo(() => splitNodeTimestamp(pos.text), [pos.text]);
 
   const handleTimestampClick = (e: React.MouseEvent) => {
     e.stopPropagation();
