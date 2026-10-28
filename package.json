@@ -21,7 +21,8 @@
     "typecheck": "tsc --noEmit",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:e2e": "node e2e/smoke.mjs"
   },
   "dependencies": {
     "react": "^18.2.0",

@@ -95,6 +95,9 @@ npm run typecheck
 # 单元测试（单次运行 / 监听）
 npm test
 npm run test:watch
+
+# 真实 Chromium 扩展 smoke E2E（需要本机 Chromium）
+npm run test:e2e
 ```
 
 ## 技术栈
