@@ -1,5 +1,11 @@
-import React, { useState } from 'react';
-import { LLMConfig, LLMProvider, LLM_PROVIDER_PRESETS, PluginConfig, getProviderLabel } from '../../types/config';
+import React, { useMemo, useState } from 'react';
+import {
+  LLMConfig,
+  LLMProvider,
+  LLM_PROVIDER_PRESETS,
+  PluginConfig,
+  getProviderLabel
+} from '../../types/config';
 import { ConnectionTestResult, LLMService } from '../../services/llmService';
 
 interface LLMConfigSectionProps {
@@ -7,12 +13,41 @@ interface LLMConfigSectionProps {
   llmConfigs: LLMConfig[];
   editingConfigId: string;
   editingConfig: LLMConfig | null;
-  isAddingNew: boolean;
   saved: boolean;
   onEditConfig: (id: string) => void;
   onDeleteConfig: (id: string) => void;
-  onAddNewConfig: () => void;
+  onAddNewConfig: (provider?: LLMProvider) => void;
+  onSetActiveConfig: (id: string) => void;
   onUpdateEditingConfig: (updates: Partial<LLMConfig>) => void;
+}
+
+const PROVIDER_ORDER: LLMProvider[] = [
+  'openai',
+  'gemini',
+  'sensenova',
+  'ollama',
+  'lmstudio',
+  'custom'
+];
+
+/** 每个提供商只保留一条真正需要用户知道的信息，避免表单变成说明书 */
+function providerNote(provider: LLMProvider): string {
+  switch (provider) {
+    case 'openai':
+      return '基址通常以 /v1 结尾，插件会自动补 /chat/completions。';
+    case 'gemini':
+      return '中国大陆通常需要全局代理或反向代理地址；模型名可点「测试连接」后从清单里选。';
+    case 'sensenova':
+      return '内地基址必须带 /v1（https://token.sensenova.cn/v1），与海外 Key 不通用。';
+    case 'ollama':
+      return '本地默认 http://localhost:11434/api；Ollama Cloud 用 https://ollama.com/api 并填写 Key。';
+    case 'lmstudio':
+      return '本地默认 http://localhost:1234/v1；通常不需要 API Key。';
+    case 'custom':
+      return '填写任意兼容 OpenAI /chat/completions 的基址即可。';
+    default:
+      return '';
+  }
 }
 
 export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
@@ -20,18 +55,37 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
   llmConfigs,
   editingConfigId,
   editingConfig,
-  isAddingNew,
   saved,
   onEditConfig,
   onDeleteConfig,
   onAddNewConfig,
+  onSetActiveConfig,
   onUpdateEditingConfig
 }) => {
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<ConnectionTestResult | null>(null);
   const [showApiKey, setShowApiKey] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [showProviderPicker, setShowProviderPicker] = useState(false);
 
-  // 切换配置时清掉上一份测试结果，避免把 A 配置的结论误读成 B 配置的
+  const activeId = llmConfigs.some(cfg => cfg.id === config.selectedLLMConfigId)
+    ? config.selectedLLMConfigId
+    : (llmConfigs[0]?.id || '');
+
+  const preset = editingConfig ? LLM_PROVIDER_PRESETS[editingConfig.provider] : null;
+  const isActive = !!editingConfig && editingConfig.id === activeId;
+  const needsManualUrl = editingConfig
+    ? ['custom', 'ollama', 'lmstudio'].includes(editingConfig.provider)
+    : false;
+
+  const modelSuggestions = useMemo(() => {
+    const values = [
+      preset?.model,
+      ...(testResult?.models || [])
+    ].filter((value): value is string => Boolean(value && value.trim()));
+    return Array.from(new Set(values)).slice(0, 8);
+  }, [preset?.model, testResult]);
+
   const resetTestResult = () => setTestResult(null);
 
   const handleTestConnection = async () => {
@@ -46,360 +100,464 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
     }
   };
 
+  const applyProvider = (provider: LLMProvider) => {
+    const nextPreset = LLM_PROVIDER_PRESETS[provider];
+    const updates: Partial<LLMConfig> = {
+      provider,
+      apiUrl: nextPreset.apiUrl,
+      model: nextPreset.model
+    };
+    if (nextPreset.maxTokens) updates.maxTokens = nextPreset.maxTokens;
+    if (nextPreset.numCtx) updates.num_ctx = nextPreset.numCtx;
+    if (nextPreset.temperature !== undefined) updates.temperature = nextPreset.temperature;
+    resetTestResult();
+    onUpdateEditingConfig(updates);
+  };
+
+  const handlePickProvider = (provider: LLMProvider) => {
+    setShowProviderPicker(false);
+    onAddNewConfig(provider);
+  };
+
   return (
-    <section className="options-section">
-      {/* 配置列表 */}
-      <div className="form-group">
-        <div className="llm-config-list">
-          {llmConfigs.map(cfg => (
+    <section className="options-section llm-section">
+      <div className="llm-section__head">
+        <div>
+          <h2 className="llm-section__title">大模型</h2>
+          <p className="llm-section__desc">
+            选一个服务商，填入密钥和模型即可。超时、上下文等参数默认折叠，通常不需要改。
+          </p>
+        </div>
+        <button
+          type="button"
+          className="btn--primary llm-add-btn"
+          onClick={() => setShowProviderPicker(value => !value)}
+        >
+          ＋ 添加模型
+        </button>
+      </div>
+
+      {showProviderPicker && (
+        <div className="llm-provider-picker">
+          <div className="llm-provider-picker__head">
+            <strong>选择服务商</strong>
+            <span>添加后可在下方填写密钥与模型</span>
+          </div>
+          <div className="llm-provider-grid">
+            {PROVIDER_ORDER.map(provider => {
+              const item = LLM_PROVIDER_PRESETS[provider];
+              const badgeClass = item.badge === '本地'
+                ? 'llm-provider-card__badge--local'
+                : item.badge === '兼容'
+                  ? 'llm-provider-card__badge--compat'
+                  : 'llm-provider-card__badge--cloud';
+              return (
+                <button
+                  key={provider}
+                  type="button"
+                  className="llm-provider-card"
+                  onClick={() => handlePickProvider(provider)}
+                >
+                  <span className="llm-provider-card__icon">{item.icon}</span>
+                  <span className="llm-provider-card__body">
+                    <strong>{item.label}</strong>
+                    <small title={item.tagline}>{item.tagline}</small>
+                  </span>
+                  <span className={'llm-provider-card__badge ' + badgeClass}>
+                    {item.badge}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      <div className="llm-config-list">
+        {llmConfigs.map(cfg => {
+          const item = LLM_PROVIDER_PRESETS[cfg.provider];
+          const active = cfg.id === activeId;
+          const cardClass = [
+            'llm-config-card',
+            editingConfigId === cfg.id ? 'llm-config-card--selected' : '',
+            active ? 'llm-config-card--active' : ''
+          ].filter(Boolean).join(' ');
+          return (
             <div
               key={cfg.id}
-              className={`llm-config-card ${editingConfigId === cfg.id ? 'llm-config-card--selected' : ''}`}
+              className={cardClass}
+              role="button"
+              tabIndex={0}
               onClick={() => {
-                if (isAddingNew) return;
                 resetTestResult();
                 onEditConfig(cfg.id);
               }}
-            >
-              <div style={{ flex: 1 }}>
-                <div className="llm-config-card__name">
-                  {cfg.name}
-                </div>
-                <div className="llm-config-card__detail">
-                  {getProviderLabel(cfg.provider)} · {cfg.model}
-                </div>
-              </div>
-              {llmConfigs.length > 1 && (
-                <button
-                  className="llm-config-card__delete"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onDeleteConfig(cfg.id);
-                  }}
-                  title="删除配置"
-                >
-                  <span className="icon-delete">🗑️</span>
-                </button>
-              )}
-            </div>
-          ))}
-          <button
-            className="btn--add"
-            onClick={onAddNewConfig}
-            disabled={isAddingNew}
-          >
-            <span>+</span> 新增配置
-          </button>
-        </div>
-
-        {isAddingNew && (
-          <div className="alert--adding">
-            正在添加新配置，请填写下方信息后点击"保存当前配置"
-          </div>
-        )}
-      </div>
-
-      {editingConfig && (
-        <>
-          {/* 配置名称 */}
-          <div className="form-group">
-            <label className="form-label">配置名称</label>
-            <input
-              className="form-input"
-              type="text"
-              value={editingConfig.name}
-              onChange={(e) => onUpdateEditingConfig({ name: e.target.value })}
-              placeholder="例如：GPT-4、Claude API、本地 Ollama"
-            />
-            <p className="form-hint">为这个配置起一个便于识别的名称</p>
-          </div>
-
-          {/* LLM 提供商 */}
-          <div className="form-group">
-            <label className="form-label">LLM 提供商</label>
-            <select
-              className="form-select"
-              value={editingConfig.provider}
-              onChange={(e) => {
-                const provider = e.target.value as LLMProvider;
-                const preset = LLM_PROVIDER_PRESETS[provider];
-                // 默认值来自唯一来源（LLM_PROVIDER_PRESETS），与「新增配置」保持一致
-                const updates: Partial<LLMConfig> = {
-                  provider,
-                  apiUrl: preset.apiUrl,
-                  model: preset.model
-                };
-                if (preset.maxTokens) updates.maxTokens = preset.maxTokens;
-                if (preset.numCtx) updates.num_ctx = preset.numCtx;
-                if (preset.temperature) updates.temperature = preset.temperature;
-                resetTestResult();
-                onUpdateEditingConfig(updates);
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault();
+                  resetTestResult();
+                  onEditConfig(cfg.id);
+                }
               }}
             >
-              <option value="openai">OpenAI (GPT-3.5/GPT-4)</option>
-              <option value="gemini">Google Gemini</option>
-              <option value="sensenova">商汤 SenseNova (6.8 Flash-Lite)</option>
-              <option value="ollama">Ollama (本地/云端)</option>
-              <option value="lmstudio">LM Studio (本地模型)</option>
-              <option value="custom">自定义 (OpenAI 兼容)</option>
-            </select>
-            <p className="form-hint">选择您要使用的 LLM 服务提供商</p>
-          </div>
-
-          {/* API 地址 */}
-          <div className="form-group">
-            <label className="form-label">API地址</label>
-            <input
-              className="form-input"
-              type="text"
-              value={editingConfig.apiUrl}
-              onChange={(e) => onUpdateEditingConfig({ apiUrl: e.target.value })}
-              placeholder="https://api.openai.com/v1"
-            />
-            <p className="form-hint">
-              {editingConfig.provider === 'gemini'
-                ? 'Gemini API 地址，例如：https://generativelanguage.googleapis.com/v1beta'
-                : editingConfig.provider === 'openai'
-                ? 'OpenAI API 地址，例如：https://api.openai.com/v1'
-                : editingConfig.provider === 'ollama'
-                ? 'Ollama API 地址，本地通常为 http://localhost:11434/api，云端为 https://ollama.com/api'
-                : editingConfig.provider === 'sensenova'
-                ? '商汤 SenseNova 基址为 https://token.sensenova.cn/v1（必须带 /v1），插件会自动补 /chat/completions'
-                : '自定义 API 地址，需兼容 OpenAI API 格式'}
-            </p>
-
-            {/* Gemini 地区提示 */}
-            {editingConfig.provider === 'gemini' && (
-              <div className="alert--warning">
-                <span style={{ fontSize: '16px' }}>⚠️</span>
-                <div>
-                  <strong>地区限制提醒：</strong>
-                  如果您在中国大陆使用，直接访问上述地址会报错。请确保开启<strong>全局代理</strong>，或使用可靠的<strong>反向代理地址</strong>。
+              <div className="llm-config-card__icon">{item?.icon || '🤖'}</div>
+              <div className="llm-config-card__body">
+                <div className="llm-config-card__name">
+                  {cfg.name || '未命名配置'}
+                  {active && <span className="llm-config-card__badge">使用中</span>}
+                </div>
+                <div className="llm-config-card__detail">
+                  {getProviderLabel(cfg.provider)} · {cfg.model || '未填写模型'}
                 </div>
               </div>
-            )}
-
-            {/* Ollama 提示 */}
-            {editingConfig.provider === 'ollama' && (
-              <div className="alert--info">
-                <strong>Ollama 提示：</strong>
-                本地使用建议填写 <code>http://localhost:11434/api</code>。使用 Ollama Cloud 请填写 <code>https://ollama.com/api</code> 并提供 API Key。
+              <div className="llm-config-card__actions">
+                {!active && (
+                  <button
+                    type="button"
+                    className="llm-config-card__use"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onSetActiveConfig(cfg.id);
+                    }}
+                  >
+                    使用
+                  </button>
+                )}
+                {llmConfigs.length > 1 && (
+                  <button
+                    type="button"
+                    className="llm-config-card__delete"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onDeleteConfig(cfg.id);
+                    }}
+                    title="删除配置"
+                    aria-label="删除配置"
+                  >
+                    ×
+                  </button>
+                )}
               </div>
-            )}
+            </div>
+          );
+        })}
+      </div>
 
-            {/* 商汤 SenseNova 提示 */}
-            {editingConfig.provider === 'sensenova' && (
-              <div className="alert--info">
-                <strong>商汤 SenseNova 提示：</strong>
-                内地基址 <code>https://token.sensenova.cn/v1</code>，海外基址 <code>https://token.sensenova.ai/v1</code>（两边 key 不通用）。
-                模型标识按官方文档填写（6.8 预览版为 <code>sensenova-6.8-flash-lite</code>，6.7 版为 <code>sensenova-6.7-flash-lite</code>）。
-                基址漏写 <code>/v1</code>、模型被上游改名/下线，网关都会返回 <code>HTTP 404: model route not found</code>。
+      {editingConfig ? (
+        <div className="llm-editor">
+          <div className="llm-editor__head">
+            <div>
+              <div className="llm-editor__title">
+                编辑 · {editingConfig.name || '未命名配置'}
               </div>
-            )}
-
-            {/* 实际请求地址预览 */}
-            {editingConfig.apiUrl && (
-              <div className="url-preview">
-                <div className="url-preview__label">实际请求地址：</div>
-                <code className="url-preview__url">
-                  {LLMService.getFullRequestUrl(editingConfig.provider, editingConfig.apiUrl, editingConfig.model)}
-                </code>
+              <div className="llm-editor__sub">
+                {getProviderLabel(editingConfig.provider)}
+                {isActive ? ' · 当前生成使用此配置' : ' · 尚未设为当前使用'}
               </div>
-            )}
+            </div>
+            <div className="llm-editor__actions">
+              {isActive ? (
+                <span className="llm-status-pill">✓ 使用中</span>
+              ) : (
+                <button
+                  type="button"
+                  className="btn--secondary-outline"
+                  onClick={() => {
+                    resetTestResult();
+                    onSetActiveConfig(editingConfig.id);
+                  }}
+                >
+                  设为当前使用
+                </button>
+              )}
+              <span className="llm-save-status">{saved ? '✓ 已保存' : '修改自动保存'}</span>
+            </div>
           </div>
 
-          {/* API 密钥 */}
+          <div className="llm-form-grid">
+            <div className="form-group">
+              <label className="form-label">配置名称</label>
+              <input
+                className="form-input"
+                type="text"
+                value={editingConfig.name}
+                onChange={(event) => onUpdateEditingConfig({ name: event.target.value })}
+                placeholder="例如：GPT-4o、SenseNova、本地 Ollama"
+              />
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">模型</label>
+              <input
+                className="form-input"
+                type="text"
+                value={editingConfig.model}
+                onChange={(event) => onUpdateEditingConfig({ model: event.target.value })}
+                placeholder={preset?.model || '例如：gpt-4o-mini'}
+                list="llm-model-suggestions"
+                spellCheck={false}
+              />
+              <datalist id="llm-model-suggestions">
+                {modelSuggestions.map(model => <option key={model} value={model} />)}
+              </datalist>
+              {modelSuggestions.length > 1 && (
+                <div className="llm-model-chips">
+                  {modelSuggestions.slice(0, 6).map(model => {
+                    const chipClass = model === editingConfig.model
+                      ? 'llm-model-chip llm-model-chip--active'
+                      : 'llm-model-chip';
+                    return (
+                      <button
+                        key={model}
+                        type="button"
+                        className={chipClass}
+                        onClick={() => onUpdateEditingConfig({ model })}
+                      >
+                        {model}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+
           <div className="form-group">
-            <label className="form-label">API密钥</label>
-            <div style={{ display: 'flex', gap: '8px' }}>
+            <label className="form-label">API 密钥</label>
+            <div className="llm-key-row">
               <input
                 className="form-input"
                 type={showApiKey ? 'text' : 'password'}
                 value={editingConfig.apiKey}
-                onChange={(e) => onUpdateEditingConfig({ apiKey: e.target.value })}
-                placeholder="sk-..."
+                onChange={(event) => onUpdateEditingConfig({ apiKey: event.target.value })}
+                placeholder={editingConfig.provider === 'ollama' ? '本地 Ollama 可留空；云端需填写' : 'sk-...'}
                 autoComplete="off"
                 spellCheck={false}
-                style={{ flex: 1 }}
               />
               <button
                 type="button"
                 className="btn--secondary-outline"
-                onClick={() => setShowApiKey(v => !v)}
+                onClick={() => setShowApiKey(value => !value)}
                 title={showApiKey ? '隐藏密钥' : '显示密钥'}
-                style={{ whiteSpace: 'nowrap', padding: '0 12px' }}
               >
                 {showApiKey ? '隐藏' : '显示'}
               </button>
             </div>
             <p className="form-hint">
-              密钥只保存在本机 <code>chrome.storage.local</code>，不会同步到云端；导出配置时默认脱敏。
+              只保存在本机 <code>chrome.storage.local</code>，不会同步到云端；导出配置时默认脱敏。
             </p>
             {['openai', 'gemini', 'sensenova'].includes(editingConfig.provider)
               && !editingConfig.apiKey.trim() && (
-                <div className="alert--warning" style={{ marginTop: '8px' }}>
-                  ⚠️ 该提供商需要 API 密钥，留空会导致生成任务失败。可先点「测试连接」验证，或切换到本地 Ollama。
+                <div className="llm-inline-warning">
+                  该服务商需要 API 密钥，留空会导致生成任务失败。
                 </div>
               )}
-            {editingConfig.provider === 'lmstudio' && (
-              <p className="form-hint">本地 LM Studio 通常不需要 API 密钥，可以留空。</p>
-            )}
-            {editingConfig.provider === 'ollama' && (
-              <p className="form-hint">本地 Ollama 不需要 API 密钥；Ollama Cloud 请填入官方生成的 API Key。</p>
-            )}
           </div>
 
-          {/* 模型名称 */}
-          <div className="form-group">
-            <label className="form-label">模型名称</label>
-            <input
-              className="form-input"
-              type="text"
-              value={editingConfig.model}
-              onChange={(e) => onUpdateEditingConfig({ model: e.target.value })}
-              placeholder={LLM_PROVIDER_PRESETS[editingConfig.provider]?.model || 'gpt-3.5-turbo'}
-            />
-            {editingConfig.provider === 'sensenova' && (
-              <p className="form-hint">
-                必须是服务商文档里的模型标识（区分大小写与连字符），例如 <code>sensenova-6.8-flash-lite</code>。
-              </p>
-            )}
-          </div>
-
-          {/* 超时时间 */}
-          <div className="form-group">
-            <label className="form-label">超时时间 (秒)</label>
-            <input
-              className="form-input"
-              type="number"
-              value={editingConfig.timeout || 60}
-              onChange={(e) => onUpdateEditingConfig({ timeout: parseInt(e.target.value) || 60 })}
-              min="5"
-              max="300"
-            />
-            <p className="form-hint">API 请求的超时时间，建议 30-120 秒</p>
-          </div>
-
-          {/* Max Tokens & Temperature */}
-          <div className="form-group--row">
-            <div>
-              <label className="form-label">Max Tokens</label>
+          {needsManualUrl && (
+            <div className="form-group">
+              <label className="form-label">API 地址</label>
               <input
-                className="form-input"
-                type="number"
-                value={editingConfig.maxTokens || 8192}
-                onChange={(e) => onUpdateEditingConfig({ maxTokens: parseInt(e.target.value) || 8192 })}
-                min="1"
-                max="128000"
+                className="form-input form-input--mono"
+                type="text"
+                value={editingConfig.apiUrl}
+                onChange={(event) => onUpdateEditingConfig({ apiUrl: event.target.value })}
+                placeholder={preset?.apiUrl || 'https://example.com/v1'}
+                spellCheck={false}
               />
-              <p className="form-hint">单次请求最大生成的 Token 数。实际输出会被限制在上下文窗口的 30% 以内，避免挤占输入。</p>
+              <p className="form-hint">{providerNote(editingConfig.provider)}</p>
             </div>
-            <div>
-              <label className="form-label">温度 (Temperature)</label>
-              <input
-                className="form-input"
-                type="number"
-                value={editingConfig.temperature ?? 0.7}
-                onChange={(e) => {
-                  const val = parseFloat(e.target.value);
-                  onUpdateEditingConfig({ temperature: isNaN(val) ? 0.7 : val });
-                }}
-                step="0.1"
-                min="0"
-                max="2"
-              />
-              <p className="form-hint">控制输出的随机性。思维导图建议 0.5 - 0.7 之间。</p>
-            </div>
-          </div>
+          )}
 
           <div className="form-group">
-            <label className="form-label">上下文窗口大小 (Context Window)</label>
-            <input
-              className="form-input"
-              type="number"
-              value={editingConfig.num_ctx || 32768}
-              onChange={(e) => onUpdateEditingConfig({ num_ctx: parseInt(e.target.value) || 32768 })}
-              min="512"
-              max="1048576"
-              step="512"
-            />
-            <p className="form-hint">
-              模型允许的总 Token 数（输入+输出）。它决定长视频分段阈值；本地模型请与 LM Studio/Ollama 的实际上下文设置一致。
-              {editingConfig.provider === 'openai' || editingConfig.provider === 'gemini' || editingConfig.provider === 'sensenova'
-                ? ' (对于 OpenAI/Gemini/商汤，此参数由模型硬性决定，不会随请求发送)' 
-                : ' (对于 Ollama/LM Studio，此参数会发送给后端生效)'}
-            </p>
+            <label className="form-label">服务商</label>
+            <div className="llm-provider-grid llm-provider-grid--compact">
+              {PROVIDER_ORDER.map(provider => {
+                const item = LLM_PROVIDER_PRESETS[provider];
+                const providerClass = editingConfig.provider === provider
+                  ? 'llm-provider-card llm-provider-card--compact llm-provider-card--active'
+                  : 'llm-provider-card llm-provider-card--compact';
+                return (
+                  <button
+                    key={provider}
+                    type="button"
+                    className={providerClass}
+                    onClick={() => applyProvider(provider)}
+                  >
+                    <span className="llm-provider-card__icon">{item.icon}</span>
+                    <span className="llm-provider-card__body">
+                      <strong>{item.shortLabel || item.label}</strong>
+                      <small>{item.badge}</small>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+            {!needsManualUrl && <p className="form-hint">{providerNote(editingConfig.provider)}</p>}
           </div>
 
-          {/* 连通性测试 */}
-          <div className="form-group">
-            <label className="form-label">连接测试</label>
-            <div className="conn-test">
-              <button
-                type="button"
-                className="btn--secondary-outline conn-test__btn"
-                onClick={handleTestConnection}
-                disabled={testing || !editingConfig.apiUrl || !editingConfig.model}
-              >
-                {testing ? '测试中…' : '测试连接'}
-              </button>
-              <p className="form-hint">
-                用当前填写的地址、密钥和模型发一次最小请求，并顺带取回<strong>该密钥可用的模型清单</strong>（点一下即可填入）。
-                404 / 401 这类错误只有看到「实际请求地址 + 模型 + 可用模型」才能定位，不必先跑一遍完整的导图生成。
-              </p>
+          <div className="llm-advanced">
+            <button
+              type="button"
+              className="llm-advanced__toggle"
+              onClick={() => setShowAdvanced(value => !value)}
+            >
+              <span>
+                <strong>高级设置</strong>
+                <small>API 地址、超时、Max Tokens、上下文、温度、请求地址预览</small>
+              </span>
+              <span>{showAdvanced ? '收起' : '展开'}</span>
+            </button>
 
-              {testResult && (
-                <div className={`conn-test__result ${testResult.ok ? 'conn-test__result--ok' : 'conn-test__result--error'}`}>
-                  <div className="conn-test__headline">
-                    <strong>{testResult.ok ? '✅ 连接成功' : '❌ 连接失败'}</strong>
-                    <span className="conn-test__latency">{testResult.latencyMs}ms</span>
-                  </div>
-                  <div className="conn-test__line">
-                    实际请求地址：<code>{testResult.url || '(未填写)'}</code>
-                  </div>
-                  <div className="conn-test__line">
-                    模型：<code>{editingConfig.model || '(未填写)'}</code>
-                  </div>
-                  <div className="conn-test__detail">{testResult.detail}</div>
-
-                  {testResult.models && testResult.models.length > 0 && (
-                    <div className="conn-test__models">
-                      <div className="conn-test__models-title">
-                        该密钥可用模型（{testResult.models.length}），点击可填入模型名称：
-                      </div>
-                      <div className="conn-test__models-list">
-                        {testResult.models.map(id => (
-                          <button
-                            key={id}
-                            type="button"
-                            className={`conn-test__model ${id === editingConfig.model?.trim() ? 'conn-test__model--active' : ''}`}
-                            onClick={() => onUpdateEditingConfig({ model: id })}
-                          >
-                            {id}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {(!testResult.models || testResult.models.length === 0) && testResult.modelsError && (
-                    <div className="conn-test__models-title">
-                      可用模型清单获取失败：{testResult.modelsError}
+            {showAdvanced && (
+              <div className="llm-advanced__body">
+                <div className="form-group">
+                  <label className="form-label">API 地址</label>
+                  <input
+                    className="form-input form-input--mono"
+                    type="text"
+                    value={editingConfig.apiUrl}
+                    onChange={(event) => onUpdateEditingConfig({ apiUrl: event.target.value })}
+                    placeholder="https://api.openai.com/v1"
+                    spellCheck={false}
+                  />
+                  <p className="form-hint">{providerNote(editingConfig.provider)}</p>
+                  {editingConfig.apiUrl && (
+                    <div className="url-preview">
+                      <div className="url-preview__label">实际请求地址</div>
+                      <code>{LLMService.getFullRequestUrl(editingConfig.provider, editingConfig.apiUrl, editingConfig.model)}</code>
                     </div>
                   )}
                 </div>
-              )}
-            </div>
+
+                <div className="llm-form-grid">
+                  <div className="form-group">
+                    <label className="form-label">超时时间（秒）</label>
+                    <input
+                      className="form-input"
+                      type="number"
+                      value={editingConfig.timeout || 60}
+                      onChange={(event) => onUpdateEditingConfig({ timeout: parseInt(event.target.value) || 60 })}
+                      min="5"
+                      max="300"
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Max Tokens</label>
+                    <input
+                      className="form-input"
+                      type="number"
+                      value={editingConfig.maxTokens || 8192}
+                      onChange={(event) => onUpdateEditingConfig({ maxTokens: parseInt(event.target.value) || 8192 })}
+                      min="1"
+                      max="128000"
+                    />
+                    <p className="form-hint">实际输出会被限制在上下文窗口的 30% 以内。</p>
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">上下文窗口</label>
+                    <input
+                      className="form-input"
+                      type="number"
+                      value={editingConfig.num_ctx || 32768}
+                      onChange={(event) => onUpdateEditingConfig({ num_ctx: parseInt(event.target.value) || 32768 })}
+                      min="512"
+                      max="1048576"
+                      step="512"
+                    />
+                    <p className="form-hint">决定长视频分段阈值；本地模型请与服务端设置一致。</p>
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">温度</label>
+                    <input
+                      className="form-input"
+                      type="number"
+                      value={editingConfig.temperature ?? 0.7}
+                      onChange={(event) => {
+                        const value = parseFloat(event.target.value);
+                        onUpdateEditingConfig({ temperature: Number.isNaN(value) ? 0.7 : value });
+                      }}
+                      step="0.1"
+                      min="0"
+                      max="2"
+                    />
+                    <p className="form-hint">思维导图建议 0.5 - 0.7，越低越稳定。</p>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
-          {/* 自动保存提示 */}
-          <div style={{ marginTop: '24px', textAlign: 'right' }}>
-            <span style={{ fontSize: '12px', color: '#64748b', fontStyle: 'italic' }}>
-              {saved ? '✓ 所有更改已自动保存' : '修改将自动保存...'}
+          <div className="llm-testbar">
+            <button
+              type="button"
+              className="btn--primary"
+              onClick={handleTestConnection}
+              disabled={testing || !editingConfig.apiUrl || !editingConfig.model}
+            >
+              {testing ? '测试中…' : '测试连接'}
+            </button>
+            <span className="form-hint">
+              用当前地址、密钥和模型发一次最小请求，并顺带取回可用模型清单。
             </span>
           </div>
 
-        </>
+          {testResult && (
+            <div className={testResult.ok ? 'conn-test__result conn-test__result--ok' : 'conn-test__result conn-test__result--error'}>
+              <div className="conn-test__headline">
+                <strong>{testResult.ok ? '✅ 连接成功' : '❌ 连接失败'}</strong>
+                <span className="conn-test__latency">{testResult.latencyMs}ms</span>
+              </div>
+              <div className="conn-test__line">
+                实际请求地址：<code>{testResult.url || '(未填写)'}</code>
+              </div>
+              <div className="conn-test__line">
+                模型：<code>{editingConfig.model || '(未填写)'}</code>
+              </div>
+              <div className="conn-test__detail">{testResult.detail}</div>
+
+              {testResult.models && testResult.models.length > 0 && (
+                <div className="conn-test__models">
+                  <div className="conn-test__models-title">
+                    该密钥可用模型（{testResult.models.length}），点击可填入：
+                  </div>
+                  <div className="conn-test__models-list">
+                    {testResult.models.map(id => {
+                      const modelClass = id === editingConfig.model?.trim()
+                        ? 'conn-test__model conn-test__model--active'
+                        : 'conn-test__model';
+                      return (
+                        <button
+                          key={id}
+                          type="button"
+                          className={modelClass}
+                          onClick={() => onUpdateEditingConfig({ model: id })}
+                        >
+                          {id}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {(!testResult.models || testResult.models.length === 0) && testResult.modelsError && (
+                <div className="conn-test__models-title">
+                  可用模型清单获取失败：{testResult.modelsError}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="llm-empty">
+          <div className="llm-empty__icon">🤖</div>
+          <div className="llm-empty__title">还没有配置大模型</div>
+          <p className="llm-empty__desc">添加一个服务商，填入密钥后即可自动生成思维导图。</p>
+          <button type="button" className="btn--primary" onClick={() => setShowProviderPicker(true)}>
+            ＋ 添加模型
+          </button>
+        </div>
       )}
     </section>
   );
