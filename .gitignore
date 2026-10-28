@@ -51,3 +51,6 @@ scripts/*.bak
 # Research reference project (third-party code I cloned for reading only)
 # and any notes I write while studying it — never push these to GitHub.
 research/
+# E2E Chrome profiles
+e2e/.profile-*/
+.chrome-profile/
