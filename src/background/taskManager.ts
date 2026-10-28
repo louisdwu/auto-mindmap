@@ -8,6 +8,7 @@ import { LoggerService } from '../services/loggerService';
 import { VideoUtils } from '../utils/videoUtils';
 import { StatsService } from '../services/statsService';
 import { normalizeAsrLanguage } from '../types/config';
+import { createAbortError, isAbortError, throwIfAborted } from '../utils/abort';
 
 const TASKS_STORAGE_KEY = 'active_tasks';
 // 用户主动选择「仅获取字幕」后，短时间内抑制同一视频的自动导图流程
@@ -18,6 +19,8 @@ const SUBTITLE_ONLY_MODE_TTL = 10 * 60 * 1000;
 const RECENT_COMPLETED_MS = 30 * 1000;
 const RECENT_FAILED_MS = 60 * 60 * 1000;
 const TASK_RETENTION_MS = 24 * 60 * 60 * 1000;
+/** 同一任务因 SW 中断自动恢复的最大次数，防止崩溃循环无限重试 */
+const MAX_AUTO_RESUME = 1;
 
 /** 服务端长任务期间保活：Chrome 会在 SW 空闲 ~30s 后回收，扩展 API 调用可重置计时 */
 const HEARTBEAT_INTERVAL_MS = 20 * 1000;
@@ -43,6 +46,8 @@ export class TaskManager {
   /** 直接生成任务的字幕原文只放在内存/字幕缓存，不写进 active_tasks */
   private taskInputs: Map<string, TaskInput> = new Map();
   private runningTaskIds: Set<string> = new Set();
+  /** 运行中任务的取消控制器；pending 任务不需要 */
+  private abortControllers: Map<string, AbortController> = new Map();
   private isScheduling = false;
   private scheduleAgain = false;
   private concurrencyLimit = 3;
@@ -101,8 +106,30 @@ export class TaskManager {
         }
 
         if (task.status === 'running') {
+          // 用户已请求取消：不要恢复
+          if (task.cancelRequested) {
+            task.status = 'cancelled';
+            task.error = '任务已取消';
+            task.updatedAt = Date.now();
+            this.tasks.set(task.id, task);
+            continue;
+          }
+
+          // SW 被浏览器回收：有字幕/阶段 1 缓存时首次自动续跑，之后才标记失败。
+          const resumeCount = Number(task.resumeCount) || 0;
+          if (resumeCount < MAX_AUTO_RESUME) {
+            task.status = 'pending';
+            task.resumeCount = resumeCount + 1;
+            task.statusMessage = '后台服务中断，正在自动恢复...';
+            task.updatedAt = Date.now();
+            task.error = undefined;
+            this.tasks.set(task.id, task);
+            console.log('[TaskManager] 自动恢复中断任务:', task.id, task.type);
+            continue;
+          }
+
           task.status = 'failed';
-          task.error = '任务由于浏览器后台服务中断而停止，建议调大超时时间并重试。';
+          task.error = '任务因浏览器后台服务多次中断而停止，请调大超时时间后重试。';
           task.updatedAt = Date.now();
           if (this.shouldKeepFailedTask(task)) this.tasks.set(task.id, task);
           continue;
@@ -244,6 +271,54 @@ export class TaskManager {
     await this.flushPersist();
     console.log('[TaskManager] 已取消排队中的导图任务:', pending.map(t => t.id));
     return pending.length;
+  }
+
+  /**
+   * 取消任务：
+   * - 排队中：直接标记 cancelled，不消耗资源；
+   * - 运行中：发出 AbortSignal，由 fetch/适配器在下一个中断点退出。
+   * 不传 taskId 时取消该视频所有活跃任务（字幕下载 + 待生成导图）。
+   */
+  async cancelTask(options: { taskId?: string; videoUrl?: string }): Promise<{ cancelled: number; taskIds: string[] }> {
+    await this.ready;
+
+    const candidates: Task[] = [];
+    if (options.taskId) {
+      const task = this.tasks.get(options.taskId);
+      if (task) candidates.push(task);
+    } else if (options.videoUrl) {
+      for (const task of this.tasks.values()) {
+        if ((task.status === 'pending' || task.status === 'running')
+          && this.isSameVideo(task.data?.videoUrl, options.videoUrl)) {
+          candidates.push(task);
+        }
+      }
+    }
+
+    const active = candidates.filter(task => task.status === 'pending' || task.status === 'running');
+    if (active.length === 0) return { cancelled: 0, taskIds: [] };
+
+    for (const task of active) {
+      task.cancelRequested = true;
+      task.updatedAt = Date.now();
+
+      if (task.status === 'pending') {
+        task.status = 'cancelled';
+        task.error = '任务已取消';
+        task.cancelledAt = Date.now();
+        this.taskInputs.delete(task.id);
+        this.broadcastTaskUpdate(task);
+      } else {
+        task.statusMessage = '正在取消任务...';
+        this.broadcastTaskUpdate(task);
+        this.abortControllers.get(task.id)?.abort();
+      }
+    }
+
+    await this.flushPersist();
+    this.schedule();
+    console.log('[TaskManager] 已请求取消任务:', active.map(t => t.id));
+    return { cancelled: active.length, taskIds: active.map(t => t.id) };
   }
 
   /**
@@ -459,32 +534,55 @@ export class TaskManager {
   }
 
   private async runTask(task: Task): Promise<void> {
+    const controller = new AbortController();
+    this.abortControllers.set(task.id, controller);
+    // 取消请求可能发生在「已认领、尚未进入 runTask」的窗口里
+    if (task.cancelRequested) controller.abort();
+
     try {
-      await this.executeTask(task);
-      task.status = 'completed';
+      await this.executeTask(task, controller.signal);
+
+      if (controller.signal.aborted || task.cancelRequested) {
+        task.status = 'cancelled';
+        task.error = '任务已取消';
+        task.cancelledAt = Date.now();
+      } else {
+        task.status = 'completed';
+      }
       task.updatedAt = Date.now();
     } catch (error: any) {
-      console.error(`[TaskManager] Task ${task.id} failed:`, error);
-      task.status = 'failed';
-      task.error = error instanceof Error ? error.message : 'Unknown error';
-      task.updatedAt = Date.now();
+      const cancelled = task.cancelRequested || controller.signal.aborted || isAbortError(error);
 
-      if (task.type === 'generate_mindmap') {
-        const videoId = VideoUtils.getCacheId(task.data.videoUrl);
-        const config = await StorageService.getConfig();
-        const selectedId = config?.selectedLLMConfigId || 'default';
-        await StatsService.recordGeneration({
-          videoId,
-          modelId: selectedId,
-          isReflectionEnabled: config?.settings.enableReflection || false,
-          isSuccess: false
-        });
+      if (cancelled) {
+        task.status = 'cancelled';
+        task.error = '任务已取消';
+        task.cancelledAt = Date.now();
+        task.updatedAt = Date.now();
+        await LoggerService.warn('TaskManager', `任务已取消 (${task.type})`, undefined, task.id);
+      } else {
+        console.error(`[TaskManager] Task ${task.id} failed:`, error);
+        task.status = 'failed';
+        task.error = error instanceof Error ? error.message : 'Unknown error';
+        task.updatedAt = Date.now();
+
+        if (task.type === 'generate_mindmap') {
+          const videoId = VideoUtils.getCacheId(task.data.videoUrl);
+          const config = await StorageService.getConfig();
+          const selectedId = config?.selectedLLMConfigId || 'default';
+          await StatsService.recordGeneration({
+            videoId,
+            modelId: selectedId,
+            isReflectionEnabled: config?.settings.enableReflection || false,
+            isSuccess: false
+          });
+        }
+
+        await LoggerService.error('TaskManager', `任务执行失败 (${task.type})`, error, task.id);
       }
-
-      await LoggerService.error('TaskManager', `任务执行失败 (${task.type})`, error, task.id);
     } finally {
+      this.abortControllers.delete(task.id);
       this.runningTaskIds.delete(task.id);
-      if (task.status === 'failed') {
+      if (task.status === 'failed' || task.status === 'cancelled') {
         this.taskInputs.delete(task.id);
       }
       this.updateHeartbeat();
@@ -494,7 +592,8 @@ export class TaskManager {
     }
   }
 
-  private async executeTask(task: Task): Promise<void> {
+  private async executeTask(task: Task, signal: AbortSignal): Promise<void> {
+    throwIfAborted(signal);
     task.statusMessage = '开始执行...';
     task.updatedAt = Date.now();
     this.broadcastTaskUpdate(task);
@@ -502,15 +601,16 @@ export class TaskManager {
 
     switch (task.type) {
       case 'download_subtitle':
-        await this.executeDownloadTask(task);
+        await this.executeDownloadTask(task, signal);
         break;
       case 'generate_mindmap':
-        await this.executeMindmapTask(task);
+        await this.executeMindmapTask(task, signal);
         break;
       default:
         throw new Error(`Unknown task type: ${task.type}`);
     }
 
+    throwIfAborted(signal);
     task.updatedAt = Date.now();
   }
 
@@ -521,12 +621,14 @@ export class TaskManager {
     this.broadcastTaskUpdate(task);
   }
 
-  private async executeDownloadTask(task: Task): Promise<void> {
+  private async executeDownloadTask(task: Task, signal: AbortSignal): Promise<void> {
+    throwIfAborted(signal);
     const { videoUrl, subtitleOnly } = task.data;
     const videoId = VideoUtils.getCacheId(videoUrl);
     const config = await StorageService.getConfig();
 
     if (subtitleOnly && videoId && task.data.force !== true) {
+      throwIfAborted(signal);
       this.reportProgress(task, '正在检索已缓存的字幕...');
 
       const subtitleCache = await StorageService.getSubtitleCache(videoId);
@@ -534,6 +636,7 @@ export class TaskManager {
         ? null
         : await StorageService.getAsrCache(videoId, normalizeAsrLanguage(config?.settings.asrLanguage));
       const cachedText = subtitleCache || asrCache;
+      throwIfAborted(signal);
       if (cachedText && /\[\d{1,2}:\d{2}/.test(cachedText)) {
         console.log('[TaskManager] 命中字幕缓存，直接返回（仅字幕模式）:', videoId);
         await this.finishSubtitleOnlyTask(task, {
@@ -550,6 +653,7 @@ export class TaskManager {
     // 普通流程也优先复用已有字幕：用户之前右键「仅获取字幕」或上次 ASR 已完成时，
     // 不必重新下载/重新识别一遍，直接进入导图生成。
     if (!subtitleOnly && videoId && task.data.force !== true && task.data.forceAsr !== true) {
+      throwIfAborted(signal);
       const subtitleCache = await StorageService.getSubtitleCache(videoId);
       const asrCache = subtitleCache
         ? null
@@ -566,7 +670,7 @@ export class TaskManager {
 
     if (videoUrl.includes('youtube.com') || videoUrl.includes('youtu.be')) {
       console.log('[TaskManager] YouTube video detected, delegating to content script for subtitle.');
-      await this.executeYouTubeDownloadTask(task, videoUrl);
+      await this.executeYouTubeDownloadTask(task, videoUrl, signal);
       return;
     }
 
@@ -578,9 +682,11 @@ export class TaskManager {
       (msg) => this.reportProgress(task, msg),
       task.data.force === true,
       task.tabId,
-      task.data.forceAsr === true
+      task.data.forceAsr === true,
+      signal
     );
 
+    throwIfAborted(signal);
     // 读取最新 data：右键可能已把进行中的普通下载任务切换为仅字幕模式
     if (task.data.subtitleOnly === true) {
       await this.finishSubtitleOnlyTask(task, { ...result, fromCache: false });
@@ -596,7 +702,8 @@ export class TaskManager {
   /**
    * YouTube 字幕获取：content script 代理 → 无 CC 时回退 ASR。
    */
-  private async executeYouTubeDownloadTask(task: Task, videoUrl: string): Promise<void> {
+  private async executeYouTubeDownloadTask(task: Task, videoUrl: string, signal: AbortSignal): Promise<void> {
+    throwIfAborted(signal);
     const tabId = task.tabId;
     if (!tabId) {
       throw new Error('YouTube 字幕获取失败：缺少标签页上下文。请刷新视频页面后再次点击悬浮球。');
@@ -612,11 +719,13 @@ export class TaskManager {
       this.reportProgress(task, '正在通过页面上下文获取 YouTube 字幕...');
       try {
         const resp = await chrome.tabs.sendMessage(tabId, { type: 'FETCH_YOUTUBE_SUBTITLE' });
+        throwIfAborted(signal);
         if (resp?.subtitleText && String(resp.subtitleText).trim()) {
           subtitleText = String(resp.subtitleText);
         }
         if (resp?.videoTitle) videoTitle = resp.videoTitle;
       } catch (e: any) {
+        if (signal.aborted || e?.name === 'AbortError') throw createAbortError();
         console.warn('[TaskManager] FETCH_YOUTUBE_SUBTITLE 失败，将尝试 ASR 回退:', e?.message || e);
       }
     }
@@ -632,9 +741,11 @@ export class TaskManager {
       let audioUrl: string | null = null;
       try {
         const audioResp = await chrome.tabs.sendMessage(tabId, { type: 'FETCH_YOUTUBE_AUDIO_URL' });
+        throwIfAborted(signal);
         audioUrl = audioResp?.audioUrl || null;
         if (audioResp?.videoTitle) videoTitle = audioResp.videoTitle;
       } catch (e: any) {
+        if (signal.aborted || e?.name === 'AbortError') throw createAbortError();
         throw new Error(`YouTube 音频流地址获取失败：无法与页面通信（${e?.message || e}）。请刷新视频页面后重试。`);
       }
       if (!audioUrl) {
@@ -649,12 +760,15 @@ export class TaskManager {
         config,
         onProgress: (msg) => this.reportProgress(task, msg),
         forceMode: task.data.force === true,
-        tabId
+        tabId,
+        signal
       });
+      throwIfAborted(signal);
       subtitleText = asrResult.subtitleText;
       isAsr = true;
     }
 
+    throwIfAborted(signal);
     if (!subtitleText || !subtitleText.trim()) {
       throw new Error('YouTube 字幕与语音识别均未能获取到文本，请稍后重试。');
     }
@@ -772,11 +886,13 @@ export class TaskManager {
     return StorageService.getAsrCache(videoId, normalizeAsrLanguage(config?.settings.asrLanguage));
   }
 
-  private async executeMindmapTask(task: Task): Promise<void> {
+  private async executeMindmapTask(task: Task, signal: AbortSignal): Promise<void> {
+    throwIfAborted(signal);
     const { videoUrl, videoTitle, force } = task.data;
     const videoId = VideoUtils.getCacheId(videoUrl);
 
     const subtitleText = await this.resolveSubtitleText(task);
+    throwIfAborted(signal);
     if (!subtitleText) {
       throw new Error('字幕已失效，请重新获取字幕后重试。');
     }
@@ -805,6 +921,12 @@ export class TaskManager {
       }
     }
 
+    const usage = { inputTokens: 0, outputTokens: 0 };
+    const onUsage = (item: { inputTokens?: number; outputTokens?: number }) => {
+      usage.inputTokens += Number(item.inputTokens) || 0;
+      usage.outputTokens += Number(item.outputTokens) || 0;
+    };
+
     const { result: mindmapMarkdown, initialResult: initialMindmapMarkdown, reflectionSuccess } = await LLMService.generateMindmap(
       config,
       subtitleText,
@@ -816,15 +938,20 @@ export class TaskManager {
         }
       },
       cachedInitialMindmap,
-      task.id
+      task.id,
+      signal,
+      onUsage
     );
 
+    throwIfAborted(signal);
     await StatsService.recordGeneration({
       videoId,
       modelId: selectedId,
       isReflectionEnabled: config.settings.enableReflection,
       reflectionSuccess,
-      isSuccess: true
+      isSuccess: true,
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens
     });
 
     if (videoId) {
@@ -959,6 +1086,7 @@ export class TaskManager {
           const timeDiff = now - (t.updatedAt || 0);
           if (t.status === 'completed') return timeDiff < RECENT_COMPLETED_MS;
           if (t.status === 'failed') return timeDiff < RECENT_FAILED_MS;
+          if (t.status === 'cancelled') return timeDiff < RECENT_COMPLETED_MS;
           return false;
         })
         .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))[0];
@@ -978,6 +1106,7 @@ export class TaskManager {
         const timeDiff = now - (t.updatedAt || 0);
         if (t.status === 'completed') return timeDiff < RECENT_COMPLETED_MS;
         if (t.status === 'failed') return timeDiff < RECENT_FAILED_MS;
+        if (t.status === 'cancelled') return timeDiff < RECENT_COMPLETED_MS;
         return false;
       })
       .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))[0];

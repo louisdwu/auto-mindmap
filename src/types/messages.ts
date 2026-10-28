@@ -76,6 +76,15 @@ export interface SetSubtitleOnlyModeMessage {
   };
 }
 
+/** 用户取消当前视频的任务（排队中直接移除；运行中通过 AbortController 中断） */
+export interface CancelTaskMessage {
+  type: 'CANCEL_TASK';
+  payload: {
+    taskId?: string;
+    videoUrl?: string;
+  };
+}
+
 // Background -> Content
 export interface SubtitleDownloadedMessage {
   type: 'SUBTITLE_DOWNLOADED';
@@ -133,7 +142,8 @@ export type ExtensionMessage =
   | ClearMindmapsMessage
   | GenerateMindmapDirectMessage
   | GetSubtitleCacheMessage
-  | SetSubtitleOnlyModeMessage;
+  | SetSubtitleOnlyModeMessage
+  | CancelTaskMessage;
 
 export type ContentMessage =
   | SubtitleDownloadedMessage

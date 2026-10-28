@@ -170,11 +170,12 @@ describe('TaskManager 调度与持久化', () => {
     expect(manager.getCurrentTask('https://www.bilibili.com/video/BV4xx?p=1')).toBeDefined();
   });
 
-  it('恢复时把中断的 running 任务标记为失败', async () => {
+  it('恢复时把已自动恢复过的 running 任务标记为失败', async () => {
     store.active_tasks = [{
       id: 't1',
       type: 'download_subtitle',
       status: 'running',
+      resumeCount: 1,
       data: { videoUrl: 'https://www.bilibili.com/video/BV5xx', subtitleOnly: true },
       createdAt: Date.now(),
       updatedAt: Date.now(),
@@ -183,6 +184,48 @@ describe('TaskManager 调度与持久化', () => {
 
     const manager = new TaskManager();
     await waitFor(() => manager.getTask('t1')?.status === 'failed');
-    expect(manager.getTask('t1')?.error).toContain('后台服务中断');
+    expect(manager.getTask('t1')?.error).toContain('多次中断');
+  });
+
+  it('首次 running 中断会自动恢复并可用缓存完成', async () => {
+    vi.mocked(StorageService.getSubtitleCache).mockResolvedValue('[00:01] 已缓存字幕');
+    store.active_tasks = [{
+      id: 't2',
+      type: 'download_subtitle',
+      status: 'running',
+      data: { videoUrl: 'https://www.bilibili.com/video/BV6xx', subtitleOnly: true },
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      tabId: 1
+    }];
+
+    const manager = new TaskManager();
+    await waitFor(() => manager.getTask('t2')?.status === 'completed');
+    expect(manager.getTask('t2')?.resumeCount).toBe(1);
+  });
+
+  it('运行中任务可通过 AbortSignal 取消，并标记为 cancelled', async () => {
+    let receivedSignal: AbortSignal | undefined;
+    vi.mocked(SubtitleService.downloadChineseSubtitle).mockImplementation(async (...args: any[]) => {
+      receivedSignal = args[6] as AbortSignal | undefined;
+      await new Promise((_resolve, reject) => {
+        receivedSignal?.addEventListener('abort', () => {
+          reject(new DOMException('cancelled', 'AbortError'));
+        }, { once: true });
+      });
+      return { videoUrl: args[0], videoTitle: 't', subtitleText: '[00:01] x' };
+    });
+
+    const manager = new TaskManager();
+    const task = await manager.createDownloadTask('https://www.bilibili.com/video/BV7xx', 1, false, true);
+    await waitFor(() => manager.getTask(task.id)?.status === 'running');
+    await waitFor(() => !!receivedSignal);
+
+    const result = await manager.cancelTask({ taskId: task.id });
+    expect(result.cancelled).toBe(1);
+    expect(receivedSignal?.aborted).toBe(true);
+
+    await waitFor(() => manager.getTask(task.id)?.status === 'cancelled');
+    expect(manager.getTask(task.id)?.error).toBe('任务已取消');
   });
 });

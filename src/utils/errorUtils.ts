@@ -6,7 +6,9 @@ export class ErrorUtils {
     const errorMessage = error instanceof Error ? error.message : String(error);
 
     if (errorMessage.includes('fetch') || errorMessage.includes('网络') || errorMessage.includes('Failed to fetch')) {
-      return `网络错误：无法连接到 API 服务器 (${errorMessage})，请检查网络连接、API 地址或 CORS 设置。系统已尝试自动重试，但未能成功。`;
+      return `网络错误：无法连接到 API 服务器 (${errorMessage})。` +
+        '请检查网络连接、API 地址或 CORS 设置；如果使用本地 Ollama / LM Studio，请确认对应服务已启动且端口正确。' +
+        '系统已尝试自动重试，但未能成功。';
     }
     if (errorMessage.includes('超时') || errorMessage.includes('timeout') || errorMessage.includes('AbortError')) {
       return `请求超时，请检查服务状态或在设置中调大超时时间。系统已尝试重试，但请求仍未在预定时间内完成。`;

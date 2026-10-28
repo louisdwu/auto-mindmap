@@ -112,3 +112,71 @@ describe('OpenAIAdapter.listModels', () => {
     }
   });
 });
+
+describe('OpenAIAdapter 取消', () => {
+  it('外部 AbortSignal 触发时立即失败且不进入重试', async () => {
+    const adapter = new OpenAIAdapter();
+    const controller = new AbortController();
+    let calls = 0;
+
+    const original = globalThis.fetch;
+    globalThis.fetch = (async (_url: any, init?: RequestInit) => {
+      calls++;
+      return await new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => {
+          reject(new DOMException('aborted', 'AbortError'));
+        }, { once: true });
+      });
+    }) as unknown as typeof fetch;
+
+    try {
+      const promise = adapter.generateMindmap(
+        { prompt: { systemPrompt: '', template: '', reflectionPrompt: '' } } as any,
+        makeConfig('custom', 'https://example.com/v1'),
+        'hello',
+        5000,
+        { signal: controller.signal }
+      );
+
+      setTimeout(() => controller.abort(), 10);
+      await expect(promise).rejects.toMatchObject({ name: 'AbortError' });
+      expect(calls).toBe(1);
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+});
+
+describe('OpenAIAdapter token 用量', () => {
+  it('从 usage 字段回调 input/output tokens', async () => {
+    const adapter = new OpenAIAdapter();
+    const original = globalThis.fetch;
+    globalThis.fetch = (async () => ({
+      ok: true,
+      status: 200,
+      headers: { get: () => null },
+      text: async () => JSON.stringify({
+        choices: [{ message: { content: '# 结果' } }],
+        usage: { prompt_tokens: 123, completion_tokens: 45 }
+      }),
+      json: async () => ({
+        choices: [{ message: { content: '# 结果' } }],
+        usage: { prompt_tokens: 123, completion_tokens: 45 }
+      })
+    })) as unknown as typeof fetch;
+
+    try {
+      const usages: Array<{ inputTokens?: number; outputTokens?: number }> = [];
+      await adapter.generateMindmap(
+        { prompt: { systemPrompt: '', template: '', reflectionPrompt: '' } } as any,
+        makeConfig('custom', 'https://example.com/v1'),
+        'hello',
+        5000,
+        { onUsage: usage => usages.push(usage) }
+      );
+      expect(usages).toEqual([{ inputTokens: 123, outputTokens: 45 }]);
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+});

@@ -1,4 +1,5 @@
 import { md5 } from '../utils/crypto';
+import { createAbortError, throwIfAborted } from '../utils/abort';
 
 export interface WbiKeys {
   img_key: string;
@@ -16,9 +17,10 @@ export class AudioService {
   /**
    * 获取最新的 WBI keys
    */
-  public static async getWbiKeys(): Promise<WbiKeys> {
+  public static async getWbiKeys(signal?: AbortSignal): Promise<WbiKeys> {
     const res = await fetch('https://api.bilibili.com/x/web-interface/nav', {
-      credentials: 'include'
+      credentials: 'include',
+      signal
     });
     const { data: { wbi_img: { img_url, sub_url } } } = await res.json();
     return {
@@ -52,8 +54,8 @@ export class AudioService {
   /**
    * 获取视频音频流 URL
    */
-  static async getAudioUrl(bvid: string, cid: number): Promise<string> {
-    const keys = await this.getWbiKeys();
+  static async getAudioUrl(bvid: string, cid: number, signal?: AbortSignal): Promise<string> {
+    const keys = await this.getWbiKeys(signal);
     const params = {
       bvid,
       cid,
@@ -63,7 +65,7 @@ export class AudioService {
     const signedQuery = await this.encWbi(params, keys);
     const url = `https://api.bilibili.com/x/player/wbi/playurl?${signedQuery}`;
     
-    const res = await fetch(url, { credentials: 'include' });
+    const res = await fetch(url, { credentials: 'include', signal });
     const data = await res.json();
     
     if (data.code !== 0) {
@@ -82,13 +84,19 @@ export class AudioService {
   /**
    * 下载音频内容为 Blob
    */
-  static async downloadAudioBlob(url: string, onProgress?: (msg: string) => void): Promise<Blob> {
+  static async downloadAudioBlob(
+    url: string,
+    onProgress?: (msg: string) => void,
+    signal?: AbortSignal
+  ): Promise<Blob> {
+    throwIfAborted(signal);
     onProgress?.('正在连接音频服务器...');
     // Service Worker 中直接设置 Referer 容易被拦截或报错
     const res = await fetch(url, {
       headers: {
         'User-Agent': navigator.userAgent
-      }
+      },
+      signal
     });
     if (!res.ok) {
       throw new Error(`HTTP ${res.status} ${res.statusText}`);
@@ -103,11 +111,18 @@ export class AudioService {
   /**
    * 带回退机制的音频下载
    */
-  static async downloadAudioWithFallback(url: string, tabId?: number, onProgress?: (msg: string) => void): Promise<Blob> {
+  static async downloadAudioWithFallback(
+    url: string,
+    tabId?: number,
+    onProgress?: (msg: string) => void,
+    signal?: AbortSignal
+  ): Promise<Blob> {
+    throwIfAborted(signal);
     try {
       console.log('[AudioService] 尝试通过 Service Worker 直接下载音频...');
-      return await this.downloadAudioBlob(url, onProgress);
+      return await this.downloadAudioBlob(url, onProgress, signal);
     } catch (e: any) {
+      if (signal?.aborted || e?.name === 'AbortError') throw createAbortError();
       console.warn('[AudioService] Service Worker 下载音频失败:', e);
       if (tabId) {
         onProgress?.('后台下载受阻，正在尝试通过页面上下文下载...');
@@ -122,6 +137,7 @@ export class AudioService {
             throw new Error(response.error);
           }
           
+          throwIfAborted(signal);
           if (response?.base64Data) {
             onProgress?.('页面上下文下载成功，正在处理音频数据...');
             console.log('[AudioService] Content Script 成功返回音频数据');
@@ -134,6 +150,7 @@ export class AudioService {
             return new Blob([bytes], { type: 'audio/mpeg' }); // DASH audio is usually m4a/mp3
           }
         } catch (csError: any) {
+          if (signal?.aborted || csError?.name === 'AbortError') throw createAbortError();
           console.error('[AudioService] Content Script 下载也失败:', csError);
         }
       }

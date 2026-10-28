@@ -18,7 +18,7 @@ export interface MindmapData {
 export interface Task {
   id: string;
   type: 'download_subtitle' | 'generate_mindmap';
-  status: 'pending' | 'running' | 'completed' | 'failed';
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
   data: any;
   result?: any;
   error?: string;
@@ -28,4 +28,9 @@ export interface Task {
   statusMessage?: string;
   /** 发起任务的标签页ID，用于将结果发送回正确的标签页 */
   tabId?: number;
+  /** 用户已请求取消（运行中的任务在下一次中断点退出） */
+  cancelRequested?: boolean;
+  /** Service Worker 中断后的自动恢复次数，防止无限重试 */
+  resumeCount?: number;
+  cancelledAt?: number;
 }

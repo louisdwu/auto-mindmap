@@ -24,11 +24,15 @@ export class StatsService {
           {
             generations: Number(value?.generations) || 0,
             videos: Number(value?.videos) || 0,
-            videoIds: Array.isArray(value?.videoIds) ? value.videoIds : []
+            videoIds: Array.isArray(value?.videoIds) ? value.videoIds : [],
+            inputTokens: Number(value?.inputTokens) || 0,
+            outputTokens: Number(value?.outputTokens) || 0
           }
         ])
       ),
-      processedVideoIds: stats.processedVideoIds || []
+      processedVideoIds: stats.processedVideoIds || [],
+      totalInputTokens: Number(stats.totalInputTokens) || 0,
+      totalOutputTokens: Number(stats.totalOutputTokens) || 0
     };
   }
 
@@ -49,6 +53,8 @@ export class StatsService {
     isReflectionEnabled: boolean;
     reflectionSuccess?: boolean; // 反思阶段是否直接通过（不需要优化）
     isSuccess: boolean;
+    inputTokens?: number;
+    outputTokens?: number;
   }): Promise<void> {
     const run = this.writeChain.then(() => this.recordGenerationUnlocked(params));
     this.writeChain = run.then(() => undefined, () => undefined);
@@ -61,6 +67,8 @@ export class StatsService {
     isReflectionEnabled: boolean;
     reflectionSuccess?: boolean;
     isSuccess: boolean;
+    inputTokens?: number;
+    outputTokens?: number;
   }): Promise<void> {
     const stats = await this.getStats();
     const today = new Date().toISOString().split('T')[0];
@@ -71,6 +79,14 @@ export class StatsService {
     }
     const modelStats = stats.modelUsage[params.modelId];
     modelStats.count += 1;
+    const inputTokens = Math.max(0, Number(params.inputTokens) || 0);
+    const outputTokens = Math.max(0, Number(params.outputTokens) || 0);
+    if (inputTokens || outputTokens) {
+      modelStats.inputTokens = (modelStats.inputTokens || 0) + inputTokens;
+      modelStats.outputTokens = (modelStats.outputTokens || 0) + outputTokens;
+      stats.totalInputTokens = (stats.totalInputTokens || 0) + inputTokens;
+      stats.totalOutputTokens = (stats.totalOutputTokens || 0) + outputTokens;
+    }
     if (params.isSuccess) {
       modelStats.success += 1;
     } else {
@@ -103,6 +119,10 @@ export class StatsService {
       }
       const daily = stats.dailyStats[today];
       daily.generations += 1;
+      if (inputTokens || outputTokens) {
+        daily.inputTokens = (daily.inputTokens || 0) + inputTokens;
+        daily.outputTokens = (daily.outputTokens || 0) + outputTokens;
+      }
 
       if (params.videoId) {
         if (!daily.videoIds) daily.videoIds = [];

@@ -3,6 +3,7 @@ import { VideoUtils } from '../utils/videoUtils';
 import { AudioService } from './audioService';
 import { LLMService } from './llmService';
 import { StorageService } from './storageService';
+import { createAbortError, throwIfAborted } from '../utils/abort';
 
 export interface SubtitleInfo {
   id: string;
@@ -15,7 +16,7 @@ export class SubtitleService {
   /**
    * 获取视频信息
    */
-  static async getVideoInfo(videoId: string, page: number = 1): Promise<{
+  static async getVideoInfo(videoId: string, page: number = 1, signal?: AbortSignal): Promise<{
     aid: number;
     bvid: string;
     cid: number;
@@ -30,7 +31,7 @@ export class SubtitleService {
     
     const response = await fetch(
       `https://api.bilibili.com/x/web-interface/view?${param}`,
-      { credentials: 'include' }
+      { credentials: 'include', signal }
     );
     const data = await response.json();
     
@@ -65,16 +66,16 @@ export class SubtitleService {
     };
   }
 
-  static async getSubtitleList(bvid: string, cid: number): Promise<SubtitleInfo[]> {
+  static async getSubtitleList(bvid: string, cid: number, signal?: AbortSignal): Promise<SubtitleInfo[]> {
     // 策略 1：带 WBI 签名请求（需要登录态 cookie，可能在 Service Worker 中不可用）
     try {
-      const keys = await AudioService.getWbiKeys();
+      const keys = await AudioService.getWbiKeys(signal);
       const params = { bvid, cid };
       const signedQuery = await AudioService.encWbi(params, keys);
       
       const response = await fetch(
         `https://api.bilibili.com/x/player/wbi/v2?${signedQuery}`,
-        { credentials: 'include' }
+        { credentials: 'include', signal }
       );
       const data = await response.json();
       if (data.code === 0) {
@@ -84,7 +85,8 @@ export class SubtitleService {
           return subtitles;
         }
       }
-    } catch (e) {
+    } catch (e: any) {
+      if (signal?.aborted || e?.name === 'AbortError') throw createAbortError();
       console.warn('[SubtitleService] WBI 签名请求失败，回退到无签名请求:', e);
     }
 
@@ -92,7 +94,7 @@ export class SubtitleService {
     try {
       const response = await fetch(
         `https://api.bilibili.com/x/player/wbi/v2?bvid=${bvid}&cid=${cid}`,
-        { credentials: 'include' }
+        { credentials: 'include', signal }
       );
       const data = await response.json();
       if (data.code === 0) {
@@ -100,7 +102,8 @@ export class SubtitleService {
         console.log('[SubtitleService] 无签名请求结果，字幕数量:', subtitles.length);
         return subtitles;
       }
-    } catch (e) {
+    } catch (e: any) {
+      if (signal?.aborted || e?.name === 'AbortError') throw createAbortError();
       console.warn('[SubtitleService] 无签名请求也失败:', e);
     }
 
@@ -108,14 +111,14 @@ export class SubtitleService {
     try {
       const viewRes = await fetch(
         `https://api.bilibili.com/x/web-interface/view?bvid=${bvid}`,
-        { credentials: 'include' }
+        { credentials: 'include', signal }
       );
       const viewData = await viewRes.json();
       const aid = viewData.data?.aid;
       if (aid) {
         const response = await fetch(
           `https://api.bilibili.com/x/player/v2?aid=${aid}&cid=${cid}`,
-          { credentials: 'include' }
+          { credentials: 'include', signal }
         );
         const data = await response.json();
         if (data.code === 0) {
@@ -124,7 +127,8 @@ export class SubtitleService {
           return subtitles;
         }
       }
-    } catch (e) {
+    } catch (e: any) {
+      if (signal?.aborted || e?.name === 'AbortError') throw createAbortError();
       console.warn('[SubtitleService] aid 请求也失败:', e);
     }
 
@@ -146,9 +150,9 @@ export class SubtitleService {
   /**
    * 下载字幕内容
    */
-  static async downloadSubtitle(subtitleUrl: string): Promise<any> {
+  static async downloadSubtitle(subtitleUrl: string, signal?: AbortSignal): Promise<any> {
     if (subtitleUrl.startsWith('//')) subtitleUrl = 'https:' + subtitleUrl;
-    const response = await fetch(subtitleUrl);
+    const response = await fetch(subtitleUrl, { signal });
     return await response.json();
   }
 
@@ -176,13 +180,15 @@ export class SubtitleService {
     onProgress?: (task: string) => void,
     forceMode: boolean = false,
     tabId?: number,
-    forceAsr: boolean = false
+    forceAsr: boolean = false,
+    signal?: AbortSignal
   ): Promise<{
     videoUrl: string;
     videoTitle: string;
     subtitleText: string;
     isAsr?: boolean;
   }> {
+     throwIfAborted(signal);
      if (videoUrl.includes('youtube.com')) {
       throw new Error('YouTube 字幕请等待视频播放自动获取');
     }
@@ -199,7 +205,7 @@ export class SubtitleService {
     console.log('[SubtitleService] videoId:', videoId, 'page:', page, 'cacheId:', cacheId);
 
     onProgress?.(page > 1 ? `正在获取视频信息（P${page}）...` : '正在获取视频信息...');
-    const videoInfo = await this.getVideoInfo(videoId, page);
+    const videoInfo = await this.getVideoInfo(videoId, page, signal);
     console.log('[SubtitleService] videoInfo:', JSON.stringify(videoInfo));
 
     // 用户点了「重新语音识别」：官方字幕一律不用（哪怕存在），
@@ -207,12 +213,12 @@ export class SubtitleService {
     if (forceAsr) {
       console.log('[SubtitleService] forceAsr=true，跳过官方字幕策略，直接语音识别');
       onProgress?.('已选择「重新语音识别」，跳过官方字幕，直接进行语音识别...');
-      return this.handleAsrFlow(videoInfo, config, onProgress, true, videoUrl, tabId, cacheId);
+      return this.handleAsrFlow(videoInfo, config, onProgress, true, videoUrl, tabId, cacheId, signal);
     }
 
     // 优先尝试官方字幕
     onProgress?.('正在检查官方字幕...');
-    const subtitles = await this.getSubtitleList(videoInfo.bvid, videoInfo.cid);
+    const subtitles = await this.getSubtitleList(videoInfo.bvid, videoInfo.cid, signal);
     console.log('[SubtitleService] 找到的官方字幕列表:', JSON.stringify(subtitles));
     
     if (subtitles && subtitles.length > 0) {
@@ -228,7 +234,7 @@ export class SubtitleService {
         onProgress?.('正在下载官方中文字幕...');
       }
 
-      const subtitleData = await this.downloadSubtitle(selectedSubtitle.subtitle_url);
+      const subtitleData = await this.downloadSubtitle(selectedSubtitle.subtitle_url, signal);
       const subtitleText = this.extractPlainText(subtitleData);
       console.log('[SubtitleService] 字幕文本长度:', subtitleText?.length || 0);
       
@@ -244,17 +250,19 @@ export class SubtitleService {
       console.log('[SubtitleService] 后台策略全部失败，尝试通过 content script 获取字幕...');
       onProgress?.('正在通过页面上下文获取字幕（需要登录态）...');
       try {
+        throwIfAborted(signal);
         const csResponse = await chrome.tabs.sendMessage(tabId, {
           type: 'FETCH_SUBTITLES',
           payload: { bvid: videoInfo.bvid, cid: videoInfo.cid }
         });
+        throwIfAborted(signal);
         console.log('[SubtitleService] content script 返回:', JSON.stringify(csResponse));
         const csSubtitles = csResponse?.subtitles || [];
         if (csSubtitles.length > 0) {
           let selectedSubtitle = this.filterChineseSubtitles(csSubtitles)[0] || csSubtitles[0];
           console.log('[SubtitleService] content script 选中字幕:', JSON.stringify(selectedSubtitle));
           onProgress?.('正在下载字幕内容...');
-          const subtitleData = await this.downloadSubtitle(selectedSubtitle.subtitle_url);
+          const subtitleData = await this.downloadSubtitle(selectedSubtitle.subtitle_url, signal);
           const subtitleText = this.extractPlainText(subtitleData);
           if (subtitleText?.trim()) {
             console.log('[SubtitleService] ===== 字幕获取成功（content script 代理）=====');
@@ -262,7 +270,8 @@ export class SubtitleService {
             return { videoUrl, videoTitle: videoInfo.title, subtitleText, isAsr: false };
           }
         }
-      } catch (e) {
+      } catch (e: any) {
+        if (signal?.aborted || e?.name === 'AbortError') throw createAbortError();
         console.warn('[SubtitleService] content script 字幕获取失败:', e);
       }
     }
@@ -276,7 +285,7 @@ export class SubtitleService {
 
     // 回退到 ASR (只有在完全没有任何字幕时才执行)
     onProgress?.('未检测到任何官方字幕，尝试进行语音识别...');
-    return this.handleAsrFlow(videoInfo, config, onProgress, forceMode, videoUrl, tabId, cacheId);
+    return this.handleAsrFlow(videoInfo, config, onProgress, forceMode, videoUrl, tabId, cacheId, signal);
   }
 
   private static asrLock: Promise<void> = Promise.resolve();
@@ -284,7 +293,10 @@ export class SubtitleService {
   /**
    * 获取 ASR 锁
    */
-  private static async acquireAsrLock(onProgress?: (msg: string) => void): Promise<() => void> {
+  private static async acquireAsrLock(
+    onProgress?: (msg: string) => void,
+    signal?: AbortSignal
+  ): Promise<() => void> {
     let release: () => void;
     const waitPromise = new Promise<void>(resolve => { release = resolve; });
 
@@ -297,8 +309,44 @@ export class SubtitleService {
       onProgress?.('ASR 资源忙，正在进入队列排队...');
     }, 200);
 
-    await previousLock;
-    clearTimeout(queueTimeout);
+    try {
+      if (signal?.aborted) throw createAbortError();
+      if (signal) {
+        await new Promise<void>((resolve, reject) => {
+          let settled = false;
+          const cleanup = () => {
+            signal.removeEventListener('abort', onAbort);
+            clearTimeout(queueTimeout);
+          };
+          const onAbort = () => {
+            if (settled) return;
+            settled = true;
+            cleanup();
+            reject(createAbortError());
+          };
+          signal.addEventListener('abort', onAbort, { once: true });
+          previousLock.then(() => {
+            if (settled) return;
+            settled = true;
+            cleanup();
+            resolve();
+          }, (error) => {
+            if (settled) return;
+            settled = true;
+            cleanup();
+            reject(error);
+          });
+        });
+      } else {
+        await previousLock;
+        clearTimeout(queueTimeout);
+      }
+    } catch (error) {
+      clearTimeout(queueTimeout);
+      // 已经排入 asrLock 链，取消时必须释放，否则后续任务会永久等待
+      release!();
+      throw error;
+    }
 
     return release!;
   }
@@ -314,11 +362,13 @@ export class SubtitleService {
     forceMode: boolean,
     videoUrl: string,
     tabId: number | undefined,
-    cacheId: string
+    cacheId: string,
+    signal?: AbortSignal
   ): Promise<any> {
     const getTime = () => `[${new Date().toLocaleTimeString('zh-CN', { hour12: false })}]`;
     onProgress?.(`${getTime()} 正在获取音频流地址...`);
-    const audioUrl = await AudioService.getAudioUrl(videoInfo.bvid, videoInfo.cid);
+    throwIfAborted(signal);
+    const audioUrl = await AudioService.getAudioUrl(videoInfo.bvid, videoInfo.cid, signal);
     return this.runAsrFlow({
       audioUrl,
       videoId: cacheId,
@@ -327,7 +377,8 @@ export class SubtitleService {
       config,
       onProgress,
       forceMode,
-      tabId
+      tabId,
+      signal
     });
   }
 
@@ -345,15 +396,17 @@ export class SubtitleService {
     onProgress?: (msg: string) => void;
     forceMode?: boolean;
     tabId?: number;
+    signal?: AbortSignal;
   }): Promise<{ videoUrl: string; videoTitle: string; subtitleText: string; isAsr: true }> {
-    const { audioUrl, videoId, videoTitle, videoUrl, config, onProgress, forceMode, tabId } = opts;
+    const { audioUrl, videoId, videoTitle, videoUrl, config, onProgress, forceMode, tabId, signal } = opts;
+    throwIfAborted(signal);
     const getTime = () => `[${new Date().toLocaleTimeString('zh-CN', { hour12: false })}]`;
     // 识别语言：'auto' 表示让引擎自动检测源语言（输出原语言原文）。
     // 缓存也按语言分档，切换语言不会命中另一种语言的旧结果。
     const asrLanguage = normalizeAsrLanguage(config.settings.asrLanguage);
     // 强制模式（重新语音识别）必须让服务端跳过字幕文本缓存，否则同一视频会瞬发旧文本
-    const asrOptions = { videoId, noCache: forceMode === true };
-    const unlock = await this.acquireAsrLock(onProgress);
+    const asrOptions = { videoId, noCache: forceMode === true, signal };
+    const unlock = await this.acquireAsrLock(onProgress, signal);
 
     try {
       if (!forceMode) {
@@ -365,6 +418,7 @@ export class SubtitleService {
           console.log('[SubtitleService] 发现旧版无时间戳 ASR 缓存，自动作废并重新识别');
           await StorageService.deleteAsrCache(videoId);
         }
+        throwIfAborted(signal);
       }
 
       const isLocal = config.settings.asrProvider === 'local';
@@ -387,9 +441,10 @@ export class SubtitleService {
           onProgress?.(`${getTime()} URL 识别受阻，正在下载音频文件...`);
           const audioBlob = await AudioService.downloadAudioWithFallback(audioUrl, tabId, (msg) => {
             onProgress?.(`${getTime()} ${msg}`);
-          });
+          }, signal);
           const sizeMB = (audioBlob.size / 1024 / 1024).toFixed(2);
           onProgress?.(`${getTime()} 音频准备完成，大小: ${sizeMB} MB`);
+          throwIfAborted(signal);
           text = await LLMService.transcribeAudio(config, audioBlob, asrOptions, (msg) => {
             onProgress?.(msg);
           });
@@ -398,14 +453,16 @@ export class SubtitleService {
         onProgress?.(`${getTime()} 正在下载音频文件...`);
         const audioBlob = await AudioService.downloadAudioWithFallback(audioUrl, tabId, (msg) => {
           onProgress?.(`${getTime()} ${msg}`);
-        });
+        }, signal);
         const sizeMB = (audioBlob.size / 1024 / 1024).toFixed(2);
         onProgress?.(`${getTime()} 音频下载完成 (${sizeMB} MB)，正在调用远程识别...`);
+        throwIfAborted(signal);
         text = await LLMService.transcribeAudio(config, audioBlob, asrOptions, (msg) => {
           onProgress?.(msg);
         });
       }
 
+      throwIfAborted(signal);
       if (text?.trim()) {
         await StorageService.saveAsrCache(videoId, text, asrLanguage);
         await StorageService.saveSubtitleCache(videoId, text);
@@ -413,6 +470,7 @@ export class SubtitleService {
       }
       throw new Error('语音识别返回内容为空');
     } catch (e: any) {
+      if (e?.name === 'AbortError') throw e;
       throw new Error(`语音识别失败: ${e.message || e}`);
     } finally {
       unlock();

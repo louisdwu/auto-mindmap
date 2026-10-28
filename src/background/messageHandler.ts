@@ -53,6 +53,9 @@ export class MessageHandler {
       case 'SET_SUBTITLE_ONLY_MODE':
         return await this.handleSetSubtitleOnlyMode(message.payload);
 
+      case 'CANCEL_TASK':
+        return await this.taskManager.cancelTask(message.payload || {});
+
       default:
         // 处理未知消息类型
         return { error: 'Unknown message type' };
