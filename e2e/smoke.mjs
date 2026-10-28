@@ -169,6 +169,19 @@ async function main() {
     if (!optionsText.includes('AutoMindmap')) throw new Error('options 页面未渲染');
     ok('options 页面加载');
 
+    // 大模型配置页：服务商优先 + 添加模型选择器
+    await options.evaluate(
+      "Array.from(document.querySelectorAll('button')).find(button => button.textContent.includes('大模型配置'))?.click()"
+    );
+    await waitFor(async () => {
+      return await options.evaluate("document.body.innerText.includes('添加模型')");
+    }, { timeout: 5000, label: 'LLM section' });
+    await options.evaluate("document.querySelector('.llm-add-btn')?.click()");
+    await waitFor(async () => {
+      return (await options.evaluate("document.querySelectorAll('.llm-provider-picker .llm-provider-card').length")) >= 6;
+    }, { timeout: 5000, label: 'provider picker' });
+    ok('LLM 配置页服务商选择器');
+
     await sleep(1000); // 等 options 自动保存的首次抖动结束，避免覆盖测试配置
 
     // 连接 service worker
