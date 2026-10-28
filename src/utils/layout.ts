@@ -131,8 +131,27 @@ function getFontConfig(level: number, fontSizeBase: number = 1.0): { chineseWidt
 }
 
 /**
+ * 节点最大宽度（随字号缩放）。
+ * 超出后换行，而不是把单个节点拉成一条几百像素的长条。
+ */
+function getMaxNodeWidth(level: number, fontSizeBase: number): number {
+  const baseWidth = level === 0
+    ? 620
+    : level === 1
+      ? 420
+      : level === 2
+        ? 360
+        : level === 3
+          ? 320
+          : 300;
+  return Math.max(100, baseWidth * fontSizeBase);
+}
+
+/**
  * 计算节点尺寸（基于文本长度和层级）
- * 对于长文本节点，增加额外的高度来避免重叠
+ *
+ * 宽度超过阈值时按最大宽度换行，并用行数计算真实高度；
+ * 布局、渲染与导出都使用同一个 height，避免「屏幕换行、导出单行」。
  */
 function calculateNodeDimensions(
   nodes: INodeData[],
@@ -145,50 +164,33 @@ function calculateNodeDimensions(
   for (const node of nodes) {
     const text = node.text;
     const fontConfig = getFontConfig(node.level, fontSizeBase);
-    
-    // 根据层级和字体大小计算宽度
-    let estimatedWidth = 0;
-    for (const char of text) {
-      // 判断是否为中文字符（包括中文标点）
-      if (/[\u4e00-\u9fa5\u3000-\u303f\uff00-\uffef]/.test(char)) {
-        estimatedWidth += fontConfig.chineseWidth;
-      } else {
-        estimatedWidth += fontConfig.englishWidth;
-      }
-    }
-    // 添加 padding
-    estimatedWidth += fontConfig.padding;
-    // 设置最小宽度
-    estimatedWidth = Math.max(60, estimatedWidth);
 
-    // 高度计算
-    const isRoot = node.id === 'root';
-    let estimatedHeight: number;
-    
-    if (isRoot) {
-      estimatedHeight = fontConfig.baseHeight;
-    } else {
-      // 基础显示高度根据层级不同
-      const baseHeight = fontConfig.baseHeight;
-      // 对于宽度超过阈值的节点，按比例增加虚拟高度
-      // 宽度 180px 以下：不增加
-      // 宽度 180-350px：增加 (width - 180) / 12 的高度
-      // 宽度 350px 以上：增加更多
-      let extraHeight = 0;
-      if (estimatedWidth > 180) {
-        if (estimatedWidth <= 350) {
-          extraHeight = Math.floor((estimatedWidth - 180) / 12);
-        } else {
-          // 180-350 的部分贡献约 14px，350以上的部分贡献更多
-          extraHeight = 14 + Math.floor((estimatedWidth - 350) / 10);
-        }
+    // 根据层级和字体大小计算文本宽度
+    let textWidth = 0;
+    for (const char of text) {
+      if (/[\u4e00-\u9fa5\u3000-\u303f\uff00-\uffef]/.test(char)) {
+        textWidth += fontConfig.chineseWidth;
+      } else {
+        textWidth += fontConfig.englishWidth;
       }
-      estimatedHeight = baseHeight + extraHeight;
     }
+
+    const estimatedWidth = Math.max(60, textWidth + fontConfig.padding);
+    const maxWidth = getMaxNodeWidth(node.level, fontSizeBase);
+    const width = Math.min(estimatedWidth, maxWidth);
+
+    // 换行后的行数与高度：至少保留基础高度
+    const availableWidth = Math.max(40, width - fontConfig.padding);
+    const lines = Math.max(1, Math.ceil(textWidth / availableWidth));
+    const lineHeight = fontConfig.fontSize * 1.4;
+    const wrappedHeight = lines * lineHeight + 10;
+    const height = node.id === 'root'
+      ? Math.max(fontConfig.baseHeight, Math.ceil(wrappedHeight))
+      : Math.max(fontConfig.baseHeight, Math.ceil(wrappedHeight));
 
     dimensions.set(node.id, {
-      width: estimatedWidth,
-      height: estimatedHeight,
+      width,
+      height,
       baseHeight: fontConfig.baseHeight,
       fontSize: fontConfig.fontSize
     });
@@ -522,11 +524,11 @@ export function generateLinkPath(
   // 父节点连接点（从节点边缘出发）
   const fromX = isLeftBranch ? from.x - from.width / 2 : from.x + from.width / 2;
   // 根节点从中心出发，其他节点从下划线（底部）出发
-  const fromY = isFromRoot ? from.y : from.y + from.baseHeight / 2;
+  const fromY = isFromRoot ? from.y : from.y + from.height / 2;
 
   // 子节点连接点（连接到节点边缘底部/下划线处）
   const toX = isLeftBranch ? to.x + to.width / 2 : to.x - to.width / 2;
-  const toY = to.y + to.baseHeight / 2;
+  const toY = to.y + to.height / 2;
 
   // 计算水平距离
   const dx = Math.abs(toX - fromX);

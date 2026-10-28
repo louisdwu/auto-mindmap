@@ -107,7 +107,30 @@ function drawRoundRect(
   ctx.closePath();
 }
 
-/** 绘制节点 */
+/** 按画布宽度逐字换行，与布局层的 max-width 规则保持一致 */
+function wrapCanvasText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string[] {
+  const lines: string[] = [];
+  for (const paragraph of (text || '').split('\n')) {
+    if (!paragraph) {
+      lines.push('');
+      continue;
+    }
+    let line = '';
+    for (const char of paragraph) {
+      const candidate = line + char;
+      if (line && ctx.measureText(candidate).width > maxWidth) {
+        lines.push(line);
+        line = char;
+      } else {
+        line = candidate;
+      }
+    }
+    if (line) lines.push(line);
+  }
+  return lines.length > 0 ? lines : [''];
+}
+
+/** 绘制节点（支持换行与真实高度） */
 function drawNode(
   ctx: CanvasRenderingContext2D,
   pos: NodePosition,
@@ -115,14 +138,16 @@ function drawNode(
 ): void {
   const isRoot = pos.id === 'root';
   const x = pos.x - pos.width / 2;
-  const y = pos.y - pos.baseHeight / 2;
+  const y = pos.y - pos.height / 2;
+  const lineHeight = pos.fontSize * 1.4;
+  const maxTextWidth = Math.max(20, pos.width - (isRoot ? 20 : 8));
 
   if (isRoot) {
     ctx.save();
     ctx.shadowColor = ROOT_STYLE.shadowColor;
     ctx.shadowBlur = ROOT_STYLE.shadowBlur;
     ctx.shadowOffsetY = ROOT_STYLE.shadowOffsetY;
-    drawRoundRect(ctx, x, y, pos.width, pos.baseHeight, ROOT_STYLE.radius);
+    drawRoundRect(ctx, x, y, pos.width, pos.height, ROOT_STYLE.radius);
     ctx.fillStyle = ROOT_STYLE.bg;
     ctx.fill();
     ctx.restore();
@@ -131,7 +156,11 @@ function drawNode(
     ctx.font = `600 ${pos.fontSize}px "Microsoft YaHei", "PingFang SC", sans-serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(pos.text, pos.x, pos.y);
+    const lines = wrapCanvasText(ctx, pos.text, maxTextWidth);
+    const startY = pos.y - ((lines.length - 1) * lineHeight) / 2;
+    lines.forEach((line, index) => {
+      ctx.fillText(line, pos.x, startY + index * lineHeight);
+    });
   } else {
     const color = branchIndex >= 0 ? BRANCH_COLORS[branchIndex] : '#444';
     const fontWeight = pos.level <= 2 ? '500' : '400';
@@ -139,10 +168,14 @@ function drawNode(
     ctx.font = `${fontWeight} ${pos.fontSize}px "Microsoft YaHei", "PingFang SC", sans-serif`;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
-    ctx.fillText(pos.text, x, pos.y);
+    const lines = wrapCanvasText(ctx, pos.text, maxTextWidth);
+    const startY = pos.y - ((lines.length - 1) * lineHeight) / 2;
+    lines.forEach((line, index) => {
+      ctx.fillText(line, x, startY + index * lineHeight);
+    });
 
     // 下划线
-    const underlineY = pos.y + pos.baseHeight / 2;
+    const underlineY = pos.y + pos.height / 2;
     ctx.beginPath();
     ctx.moveTo(x, underlineY);
     ctx.lineTo(x + pos.width, underlineY);
