@@ -243,7 +243,11 @@
   color: #444;
   font-size: 14px;
   font-weight: 400;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  line-height: 1.4;
+  box-sizing: border-box;
   cursor: pointer;
   user-select: none;
   transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
@@ -359,9 +363,13 @@
 
 /* 节点文本 */
 .mm-node-text {
-  display: inline-block;
+  display: block;
+  width: 100%;
   vertical-align: middle;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  line-height: 1.4;
 }
 
 /* 折叠指示器 */

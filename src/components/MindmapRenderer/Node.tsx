@@ -50,9 +50,9 @@ export const Node: React.FC<NodeProps> = ({
       data-level={pos.level}
       style={{
         left: pos.x - pos.width / 2,
-        top: pos.y - pos.baseHeight / 2,
+        top: pos.y - pos.height / 2,
         width: pos.width,
-        height: pos.baseHeight,
+        height: pos.height,
         fontSize: pos.fontSize
       }}
       onClick={onClick}
