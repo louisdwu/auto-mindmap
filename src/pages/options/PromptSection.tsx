@@ -50,7 +50,7 @@ export const PromptSection: React.FC<PromptSectionProps> = ({ config, llmConfigs
             <label htmlFor="enableReflection" className="switch-label"></label>
           </div>
         </div>
-        <p className="form-hint">开启后，将进行“生成 &rarr; 评估并优化”两阶段流程。显著提升导图质量，比单阶段更精准。</p>
+        <p className="form-hint">开启后先对初稿做自动校验（结构、时间戳、定量数据点），只有不达标才调用反思模型补漏纠错；校验通过则直接采用初稿，不额外消耗调用。</p>
       </div>
 
       {config.settings.enableReflection && (
@@ -98,7 +98,7 @@ export const PromptSection: React.FC<PromptSectionProps> = ({ config, llmConfigs
                 ...config,
                 prompt: { ...config.prompt, reflectionPrompt: e.target.value }
               })}
-              placeholder="评价初稿并执行优化补全"
+              placeholder="对照字幕补漏与纠错，输出完整导图"
             />
             <p className="form-hint">变量：{'{subtitle_content}'}, {'{initial_mindmap}'}</p>
             <p className="form-hint">若内容为空，将自动使用系统内置默认值。</p>

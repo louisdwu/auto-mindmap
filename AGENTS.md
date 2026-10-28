@@ -112,6 +112,7 @@ src/
 │   │   ├── base.ts            #  适配器接口
 │   │   ├── BaseAdapter.ts
 │   │   ├── tokenBudget.ts     #  长视频 token 估算与字幕切分
+│   │   ├── reflectionGate.ts  #  反思闸门：结构/时间戳/数据点确定性校验
 │   │   └── adapters/
 │   │       ├── OpenAIAdapter.ts
 │   │       ├── GeminiAdapter.ts

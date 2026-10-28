@@ -57,3 +57,27 @@ describe('StatsService token 与每日去重', () => {
     expect(stats.dailyStats[today].inputTokens).toBe(150);
   });
 });
+
+describe('StatsService 反思直通率口径', () => {
+  it('分母只统计开启反思且成功的运行', async () => {
+    const { StatsService } = await load();
+
+    await StatsService.recordGeneration({
+      videoId: 'BV1', modelId: 'm1', isReflectionEnabled: false, isSuccess: true
+    });
+    await StatsService.recordGeneration({
+      videoId: 'BV1', modelId: 'm1', isReflectionEnabled: true, reflectionSuccess: true, isSuccess: true
+    });
+    await StatsService.recordGeneration({
+      videoId: 'BV1', modelId: 'm1', isReflectionEnabled: true, reflectionSuccess: false, isSuccess: true
+    });
+    await StatsService.recordGeneration({
+      videoId: 'BV1', modelId: 'm1', isReflectionEnabled: true, reflectionSuccess: true, isSuccess: false
+    });
+
+    const stats = await StatsService.getStats();
+    expect(stats.totalGenerations).toBe(3);
+    expect(stats.reflectionRuns).toBe(2);
+    expect(stats.reflectionSuccessCount).toBe(1);
+  });
+});
