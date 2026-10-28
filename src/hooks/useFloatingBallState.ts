@@ -202,6 +202,10 @@ export function useFloatingBallState() {
         showToast('⚠️ 任务失败，请点击红色悬浮球查看报错详情', 5000);
       }
     }
+
+    if (task.status === 'cancelled' && previous?.status !== 'cancelled') {
+      showToast('任务已取消');
+    }
   }, [normalizeUrl, openSubtitleResult, showToast, startPolling, stopPolling]);
 
   const fetchCurrentTask = useCallback(async () => {
@@ -501,6 +505,32 @@ export function useFloatingBallState() {
 
   const handleCloseSubtitle = () => setShowSubtitle(false);
 
+  /** 取消当前视频的活跃任务（字幕下载 / 导图生成） */
+  const handleCancelTask = async () => {
+    if (!isContextValid.current || !chrome.runtime?.id) {
+      showToast('⚠️ 扩展已更新，请刷新页面后继续使用', 5000);
+      return;
+    }
+
+    try {
+      const result = await RuntimeUtils.sendMessage({
+        type: 'CANCEL_TASK',
+        payload: {
+          taskId: currentTaskRef.current?.id,
+          videoUrl: window.location.href
+        }
+      });
+      if (result?.cancelled > 0) {
+        showToast('🛑 已请求取消任务');
+      } else {
+        showToast('当前没有可取消的任务');
+      }
+    } catch (error) {
+      console.error('[FloatingBall] 取消任务失败:', error);
+      showToast('取消任务失败，请稍后重试');
+    }
+  };
+
   const handleRetry = async () => {
     if (!isContextValid.current || !chrome.runtime?.id) {
       showToast('⚠️ 扩展已更新，请刷新页面', 5000);
@@ -592,6 +622,7 @@ export function useFloatingBallState() {
     handleCloseSubtitle,
     handleRetry,
     handleReTranscribe,
+    handleCancelTask,
     handleForceAsrSubtitles,
     showToast
   };

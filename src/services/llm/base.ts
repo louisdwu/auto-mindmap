@@ -10,10 +10,19 @@ export interface LLMResponse {
   };
 }
 
+export interface LlmUsage {
+  inputTokens?: number;
+  outputTokens?: number;
+}
+
 export interface GenerateContext {
   isReflection?: boolean;
   systemPrompt?: string;
   taskId?: string;
+  /** 用户取消任务时中断 LLM 请求 */
+  signal?: AbortSignal;
+  /** 上游返回的 token 用量，用于统计与费用估算 */
+  onUsage?: (usage: LlmUsage) => void;
 }
 
 export interface ILLMAdapter {
@@ -58,4 +67,3 @@ export interface ILLMAdapter {
    */
   preprocessPrompt?(prompt: string): string;
 }
-

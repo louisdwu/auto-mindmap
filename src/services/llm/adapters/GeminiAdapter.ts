@@ -94,7 +94,7 @@ export class GeminiAdapter extends BaseAdapter implements ILLMAdapter {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify(requestBody)
-    }, timeout);
+    }, timeout, 3, context?.signal);
 
     const responseText = await response.text();
     let data: any;
@@ -111,6 +111,14 @@ export class GeminiAdapter extends BaseAdapter implements ILLMAdapter {
         errorMsg = '您的 IP 所在地区不在 Google Gemini 的服务范围内（如中国大陆）。请开启“全局代理”或在 API 地址处填写可用的“反向代理地址”。';
       }
       throw new Error(`HTTP ${errorCode}: ${errorMsg}`);
+    }
+
+    const usageMetadata = data.usageMetadata;
+    if (usageMetadata) {
+      context?.onUsage?.({
+        inputTokens: Number(usageMetadata.promptTokenCount) || 0,
+        outputTokens: Number(usageMetadata.candidatesTokenCount) || 0
+      });
     }
 
     const content = data.candidates?.[0]?.content?.parts?.[0]?.text;

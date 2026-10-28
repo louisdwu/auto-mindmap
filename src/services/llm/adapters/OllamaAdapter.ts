@@ -91,7 +91,7 @@ export class OllamaAdapter extends BaseAdapter implements ILLMAdapter {
       method: 'POST',
       headers,
       body: JSON.stringify(requestBody)
-    }, timeout);
+    }, timeout, 3, context?.signal);
 
     const responseText = await response.text();
     let data: any;
@@ -103,6 +103,13 @@ export class OllamaAdapter extends BaseAdapter implements ILLMAdapter {
 
     if (!response.ok) {
       throw new Error(`Ollama API 错误 (HTTP ${response.status}): ${data.error || responseText}`);
+    }
+
+    if (typeof data.prompt_eval_count === 'number' || typeof data.eval_count === 'number') {
+      context?.onUsage?.({
+        inputTokens: Number(data.prompt_eval_count) || 0,
+        outputTokens: Number(data.eval_count) || 0
+      });
     }
 
     const content = data.message?.content || data.response;

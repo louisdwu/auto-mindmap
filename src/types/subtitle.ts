@@ -23,4 +23,6 @@ export interface AsrRequestOptions {
    * 用户主动点「重新语音识别」时使用，否则同一视频会直接瞬发旧文本。
    */
   noCache?: boolean;
+  /** 取消信号：用户取消任务时中断上传/下载/推理请求 */
+  signal?: AbortSignal;
 }

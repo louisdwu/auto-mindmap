@@ -151,7 +151,7 @@ export class OpenAIAdapter extends BaseAdapter implements ILLMAdapter {
       method: 'POST',
       headers,
       body: JSON.stringify(requestBody)
-    }, timeout);
+    }, timeout, 3, context?.signal);
 
     const responseText = await response.text();
     let data: any;
@@ -167,6 +167,14 @@ export class OpenAIAdapter extends BaseAdapter implements ILLMAdapter {
       // 错误信息里带上「实际请求地址 + 模型」，否则 404/401 这类问题只能靠猜：
       // 是同名模型没开通、还是基址写错了（例如漏了 /v1），用户和日志都无从判断。
       throw new Error(`HTTP ${errorCode}: ${serverErrorMsg}（地址 ${apiUrl}；模型 ${llmConfig.model?.trim()}）`);
+    }
+
+    const usage = data.usage;
+    if (usage) {
+      context?.onUsage?.({
+        inputTokens: Number(usage.prompt_tokens) || 0,
+        outputTokens: Number(usage.completion_tokens) || 0
+      });
     }
 
     let content = data.choices?.[0]?.message?.content || data.choices?.[0]?.text;
@@ -253,7 +261,7 @@ export class OpenAIAdapter extends BaseAdapter implements ILLMAdapter {
       method: 'POST',
       headers,
       body: formData
-    }, timeout);
+    }, timeout, 3, options?.signal);
 
     if (!response.ok) {
       const responseText = await response.text();

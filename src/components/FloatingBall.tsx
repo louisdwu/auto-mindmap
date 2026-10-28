@@ -21,6 +21,8 @@ interface FloatingBallProps {
   onRightClick?: () => void;
   /** 菜单：重新语音识别（跳过官方字幕与缓存） */
   onReTranscribeAsr?: () => void;
+  /** 菜单：取消当前活跃任务 */
+  onCancelTask?: () => void;
   isFullscreen: boolean;
   onToast?: (message: string, duration?: number) => void;
 }
@@ -68,6 +70,7 @@ export const FloatingBall: React.FC<FloatingBallProps> = ({
   onClick,
   onRightClick,
   onReTranscribeAsr,
+  onCancelTask,
   isFullscreen,
   onToast
 }) => {
@@ -93,9 +96,12 @@ export const FloatingBall: React.FC<FloatingBallProps> = ({
   };
 
   const isFailed = currentTask?.status === 'failed';
+  const isCancelled = currentTask?.status === 'cancelled';
   const background = isFailed
     ? 'linear-gradient(135deg, #e74c3c 0%, #c0392b 100%)'
-    : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)';
+    : isCancelled
+      ? 'linear-gradient(135deg, #94a3b8 0%, #64748b 100%)'
+      : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)';
 
   const getTaskDescription = () => {
     if (!currentTask) return '暂无任务';
@@ -118,7 +124,8 @@ export const FloatingBall: React.FC<FloatingBallProps> = ({
       'pending': { text: '等待中', color: '#f39c12' },
       'running': { text: '进行中', color: '#27ae60' },
       'completed': { text: '已完成', color: '#3498db' },
-      'failed': { text: '失败', color: '#e74c3c' }
+      'failed': { text: '失败', color: '#e74c3c' },
+      'cancelled': { text: '已取消', color: '#94a3b8' }
     };
 
     const statusInfo = statusMap[currentTask.status] || { text: currentTask.status, color: '#95a5a6' };
@@ -165,7 +172,7 @@ export const FloatingBall: React.FC<FloatingBallProps> = ({
           setShowMenu(true);
           setShowTooltip(false);
         }}
-        title="左键：生成思维导图 · 右键：获取字幕 / 重新语音识别"
+        title="左键：生成思维导图 · 右键：获取字幕 / 重新语音识别 / 取消任务"
         onMouseEnter={(e) => {
           setShowTooltip(true);
           e.currentTarget.style.transform = 'scale(1.1)';
@@ -284,6 +291,17 @@ export const FloatingBall: React.FC<FloatingBallProps> = ({
               gap: '2px'
             }}
           >
+            {(currentTask?.status === 'running' || currentTask?.status === 'pending') && onCancelTask && (
+              <MenuAction
+                icon="🛑"
+                label="取消当前任务"
+                hint="停止字幕下载 / 语音识别 / 导图生成"
+                onClick={() => {
+                  setShowMenu(false);
+                  onCancelTask();
+                }}
+              />
+            )}
             <MenuAction
               icon="📝"
               label="获取字幕"

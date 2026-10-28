@@ -60,6 +60,7 @@ function FloatingBallContent() {
     handleCloseSubtitle,
     handleRetry,
     handleReTranscribe,
+    handleCancelTask,
     handleForceAsrSubtitles,
     showToast
   } = useFloatingBallState();
@@ -72,6 +73,7 @@ function FloatingBallContent() {
         onClick={handleBallClick}
         onRightClick={handleBallRightClick}
         onReTranscribeAsr={handleForceAsrSubtitles}
+        onCancelTask={handleCancelTask}
         isFullscreen={isFullscreen}
         onToast={showToast}
       />

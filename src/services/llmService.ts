@@ -1,6 +1,6 @@
 import { LLMProvider, PluginConfig, LLMConfig, DEFAULT_CONFIG, DEFAULT_LLM_CONFIG } from '../types/config';
 import { StorageService } from './storageService';
-import { ILLMAdapter } from './llm/base';
+import { ILLMAdapter, LlmUsage } from './llm/base';
 import { OpenAIAdapter } from './llm/adapters/OpenAIAdapter';
 import { GeminiAdapter } from './llm/adapters/GeminiAdapter';
 import { OllamaAdapter } from './llm/adapters/OllamaAdapter';
@@ -93,21 +93,32 @@ export class LLMService {
     onProgress?: (msg: string) => void,
     onPhase1Complete?: (initialMindmap: string) => Promise<void>,
     cachedInitialMindmap?: string,
-    taskId?: string
+    taskId?: string,
+    signal?: AbortSignal,
+    onUsage?: (usage: LlmUsage) => void
   ): Promise<{ result: string, initialResult?: string, reflectionSuccess?: boolean }> {
     const isReflectionEnabled = config.settings.enableReflection;
 
     if (!isReflectionEnabled) {
       const phase1 = cachedInitialMindmap
         ? { markdown: cachedInitialMindmap }
-        : await this.generateSinglePhase(config, subtitleText, taskId, onProgress);
+        : await this.generateSinglePhase(config, subtitleText, taskId, onProgress, signal, onUsage);
       if (onPhase1Complete && !cachedInitialMindmap) {
         await onPhase1Complete(phase1.markdown);
       }
       return { result: phase1.markdown };
     }
 
-    return this.generateWithReflection(config, subtitleText, onProgress, onPhase1Complete, cachedInitialMindmap, taskId);
+    return this.generateWithReflection(
+      config,
+      subtitleText,
+      onProgress,
+      onPhase1Complete,
+      cachedInitialMindmap,
+      taskId,
+      signal,
+      onUsage
+    );
   }
 
   /** 根据上下文窗口与用户配置推导实际输出预算（输出最多占上下文 30%） */
@@ -140,7 +151,9 @@ export class LLMService {
     config: PluginConfig,
     subtitleText: string,
     taskId?: string,
-    onProgress?: (msg: string) => void
+    onProgress?: (msg: string) => void,
+    signal?: AbortSignal,
+    onUsage?: (usage: LlmUsage) => void
   ): Promise<Phase1Result> {
     const llmConfig = await StorageService.getSelectedLLMConfig();
     if (!llmConfig) throw new Error('未找到有效的 LLM 配置');
@@ -170,11 +183,22 @@ export class LLMService {
 
     if (canUseSingleCall) {
       const prompt = template.split('{subtitle_content}').join(subtitleText);
-      const result = await this.callLLM(config, llmConfig, prompt, { taskId });
+      const result = await this.callLLM(config, llmConfig, prompt, { taskId, signal, onUsage });
       return { markdown: extractMarkdown(result) };
     }
 
-    return this.generateByChunks(config, llmConfig, subtitleText, template, taskId, onProgress, inputBudget, outputTokens);
+    return this.generateByChunks(
+      config,
+      llmConfig,
+      subtitleText,
+      template,
+      taskId,
+      onProgress,
+      inputBudget,
+      outputTokens,
+      signal,
+      onUsage
+    );
   }
 
   /**
@@ -189,7 +213,9 @@ export class LLMService {
     taskId: string | undefined,
     onProgress: ((msg: string) => void) | undefined,
     inputBudget: number,
-    outputTokens: number
+    outputTokens: number,
+    signal?: AbortSignal,
+    onUsage?: (usage: LlmUsage) => void
   ): Promise<Phase1Result> {
     const totalTokens = estimateTokens(subtitleText);
     onProgress?.(`字幕较长（约 ${totalTokens} tokens），将分段提炼后再生成思维导图...`);
@@ -199,7 +225,7 @@ export class LLMService {
     const chunks = splitTranscriptByBudget(subtitleText, chunkBudget);
     if (chunks.length <= 1) {
       const prompt = template.split('{subtitle_content}').join(subtitleText);
-      const result = await this.callLLM(config, llmConfig, prompt, { taskId });
+      const result = await this.callLLM(config, llmConfig, prompt, { taskId, signal, onUsage });
       return { markdown: extractMarkdown(result) };
     }
 
@@ -219,7 +245,9 @@ export class LLMService {
 
       const raw = await this.callLLM(config, mapLlmConfig, prompt, {
         systemPrompt: CHUNK_SYSTEM_PROMPT,
-        taskId
+        taskId,
+        signal,
+        onUsage
       });
       const outline = this.cleanChunkText(raw);
       if (!outline) {
@@ -231,12 +259,12 @@ export class LLMService {
     // 合并后的提纲必须能塞进最终生成请求，否则递归压缩
     const targetTokens = Math.max(800, inputBudget - 400);
     onProgress?.(`阶段 2/3: 正在合并 ${outlines.length} 段提纲...`);
-    const merged = await this.reduceOutlines(config, llmConfig, outlines, targetTokens, taskId, onProgress);
+    const merged = await this.reduceOutlines(config, llmConfig, outlines, targetTokens, taskId, onProgress, signal, onUsage);
 
     onProgress?.('阶段 3/3: 正在生成最终思维导图...');
     const header = '[说明] 原视频字幕过长，以下内容为按时间顺序分段提炼的提纲（保留原始时间戳与关键数据），请据此生成完整思维导图。\n\n';
     const finalPrompt = template.split('{subtitle_content}').join(header + merged);
-    const result = await this.callLLM(config, llmConfig, finalPrompt, { taskId });
+    const result = await this.callLLM(config, llmConfig, finalPrompt, { taskId, signal, onUsage });
 
     return {
       markdown: extractMarkdown(result),
@@ -251,7 +279,9 @@ export class LLMService {
     outlines: string[],
     targetTokens: number,
     taskId: string | undefined,
-    onProgress: ((msg: string) => void) | undefined
+    onProgress: ((msg: string) => void) | undefined,
+    signal?: AbortSignal,
+    onUsage?: (usage: LlmUsage) => void
   ): Promise<string> {
     let current = outlines;
     let round = 0;
@@ -275,7 +305,9 @@ export class LLMService {
         const prompt = CHUNK_REDUCE_PROMPT.replace('{outlines}', group.join('\n\n'));
         const raw = await this.callLLM(config, reduceLlmConfig, prompt, {
           systemPrompt: CHUNK_REDUCE_SYSTEM_PROMPT,
-          taskId
+          taskId,
+          signal,
+          onUsage
         });
         const cleaned = this.cleanChunkText(raw);
         if (cleaned) next.push(cleaned);
@@ -345,7 +377,9 @@ export class LLMService {
     onProgress?: (msg: string) => void,
     onPhase1Complete?: (initialMindmap: string) => Promise<void>,
     cachedInitialMindmap?: string,
-    taskId?: string
+    taskId?: string,
+    signal?: AbortSignal,
+    onUsage?: (usage: LlmUsage) => void
   ): Promise<{ result: string, initialResult?: string, reflectionSuccess?: boolean }> {
     await LoggerService.info('LLMService', '开始反思模式生成流程', undefined, taskId);
 
@@ -358,7 +392,7 @@ export class LLMService {
       const mainLLMConfig = await StorageService.getSelectedLLMConfig();
       onProgress?.(`阶段 1/2: 正在通过 ${mainLLMConfig?.model || '主模型'} 生成初步思维导图...`);
       await LoggerService.info('LLMService', `阶段 1: 正在调用主模型 ${mainLLMConfig?.name || '默认'} (${mainLLMConfig?.model || '未知'}) 生成初稿`, undefined, taskId);
-      phase1 = await this.generateSinglePhase(config, subtitleText, taskId, onProgress);
+      phase1 = await this.generateSinglePhase(config, subtitleText, taskId, onProgress, signal, onUsage);
       await LoggerService.debug('LLMService', '阶段 1 完成，收到初稿内容', undefined, taskId);
 
       if (onPhase1Complete) {
@@ -428,7 +462,9 @@ export class LLMService {
     const reflectionResult = await this.callLLM(config, reflectionLLMConfig, reflectionPrompt, {
       isReflection: true,
       systemPrompt: reflectionSystemPrompt,
-      taskId
+      taskId,
+      signal,
+      onUsage
     });
 
     await LoggerService.debug('LLMService', '阶段 2 完成，收到反思结果', undefined, taskId);
