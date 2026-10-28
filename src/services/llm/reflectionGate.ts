@@ -143,9 +143,13 @@ export function evaluateMindmapDraft(markdown: string, source: string): GateResu
     reasons.push('结构：列表缩进不是 2 的空格整数倍，解析会塌陷');
   }
 
+  const sourceEndSec = maxStampIn(source || '');
+  // 短视频本来就撑不起 6 个节点：按「平均 2 分钟一个节点」放宽下限
+  const minNodes = Math.max(4, Math.min(MIN_NODE_COUNT, Math.floor(sourceEndSec / 120) + 3));
+
   const nodeCount = lines.length;
-  if (nodeCount < MIN_NODE_COUNT) {
-    reasons.push(`结构：仅 ${nodeCount} 个列表节点，明显少于一份完整导图`);
+  if (nodeCount < minNodes) {
+    reasons.push(`结构：仅 ${nodeCount} 个列表节点，明显少于一份完整导图（下限 ${minNodes}）`);
   }
 
   const stamped = lines.filter(l => l.stampSec !== null);
@@ -156,7 +160,6 @@ export function evaluateMindmapDraft(markdown: string, source: string): GateResu
 
   const startSec = stamped.length ? Math.min(...stamped.map(l => l.stampSec as number)) : 0;
   const endSec = stamped.length ? Math.max(...stamped.map(l => l.stampSec as number)) : 0;
-  const sourceEndSec = maxStampIn(source || '');
 
   if (sourceEndSec > 0) {
     const slack = Math.max(START_TOLERANCE_SEC, sourceEndSec * 0.1);
