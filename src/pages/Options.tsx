@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { PluginConfig, DEFAULT_CONFIG, LLMConfig, createDefaultLLMConfig } from '../types/config';
+import { PluginConfig, DEFAULT_CONFIG, LLMConfig, LLMProvider, LLM_PROVIDER_PRESETS, createDefaultLLMConfig } from '../types/config';
 import { StorageService } from '../services/storageService';
 
 // 子组件
@@ -32,7 +32,6 @@ export default function Options() {
   const [llmConfigs, setLLMConfigs] = useState<LLMConfig[]>([]);
   const [editingConfigId, setEditingConfigId] = useState<string>(''); // 当前正在编辑的配置 ID
   const [editingConfig, setEditingConfig] = useState<LLMConfig | null>(null);
-  const [isAddingNew, setIsAddingNew] = useState(false);
   const [saved, setSaved] = useState(false);
   const [importStatus, setImportStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const configLoadedRef = useRef(false);
@@ -102,7 +101,7 @@ export default function Options() {
   // 注意：切换配置时不能在 cleanup 里 clearTimeout，否则 800ms 内的编辑会丢；
   // 由 flushEditingSave 在切换/删除/卸载前主动落盘。
   useEffect(() => {
-    if (!editingConfig || isAddingNew) return;
+    if (!editingConfig) return;
     if (skipEditingSaveRef.current) {
       skipEditingSaveRef.current = false;
       return;
@@ -119,7 +118,7 @@ export default function Options() {
       });
     }, 700);
     pendingEditingSaveRef.current = { config: editingConfig, timer };
-  }, [editingConfig, isAddingNew]);
+  }, [editingConfig]);
 
   const flushEditingSave = useCallback(async () => {
     const pending = pendingEditingSaveRef.current;
@@ -150,14 +149,21 @@ export default function Options() {
     const selected = llmConfigs.find(c => c.id === id);
     if (selected) {
       setEditingConfig(selected);
-      setIsAddingNew(false);
     }
   };
 
-  const handleAddNewConfig = async () => {
+  const handleAddNewConfig = async (provider: LLMProvider = 'custom') => {
     await flushEditingSave();
-    const newConfig = createDefaultLLMConfig('custom');
-    newConfig.name = `新配置 ${llmConfigs.length + 1}`;
+    const preset = LLM_PROVIDER_PRESETS[provider];
+    const newConfig = createDefaultLLMConfig(provider);
+
+    const baseName = preset.defaultName;
+    let name = baseName;
+    let suffix = 2;
+    while (llmConfigs.some(config => config.name === name)) {
+      name = `${baseName} ${suffix++}`;
+    }
+    newConfig.name = name;
 
     // 立即保存到存储，实现“即刻生效”
     await StorageService.saveLLMConfig(newConfig);
@@ -166,8 +172,15 @@ export default function Options() {
 
     setEditingConfig(newConfig);
     setEditingConfigId(newConfig.id);
-    setIsAddingNew(false);
     skipEditingSaveRef.current = true;
+  };
+
+  const handleSetActiveConfig = async (id: string) => {
+    await flushEditingSave();
+    await StorageService.setSelectedLLMConfig(id);
+    const latest = await StorageService.getConfig();
+    if (latest) setConfig(latest);
+    markSaved();
   };
 
 
@@ -268,11 +281,11 @@ export default function Options() {
               llmConfigs={llmConfigs}
               editingConfigId={editingConfigId}
               editingConfig={editingConfig}
-              isAddingNew={isAddingNew}
               saved={saved}
               onEditConfig={handleEditConfig}
               onDeleteConfig={handleDeleteConfig}
               onAddNewConfig={handleAddNewConfig}
+              onSetActiveConfig={handleSetActiveConfig}
               onUpdateEditingConfig={updateEditingConfig}
             />
           )}

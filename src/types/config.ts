@@ -10,8 +10,16 @@ export type LLMProvider = 'openai' | 'gemini' | 'sensenova' | 'custom' | 'lmstud
 export interface LLMProviderPreset {
   /** 配置列表里展示的提供商名称 */
   label: string;
+  /** 窄卡片里使用的短名称 */
+  shortLabel?: string;
   /** 新建配置时的默认名称 */
   defaultName: string;
+  /** 提供商图标（选项页卡片） */
+  icon: string;
+  /** 一句话说明 */
+  tagline: string;
+  /** 形态标签：云端 / 本地 / 兼容 */
+  badge: '云端' | '本地' | '兼容';
   /** 基址（不是完整 URL，适配器会补 /chat/completions 等路径） */
   apiUrl: string;
   model: string;
@@ -23,7 +31,11 @@ export interface LLMProviderPreset {
 export const LLM_PROVIDER_PRESETS: Record<LLMProvider, LLMProviderPreset> = {
   openai: {
     label: 'OpenAI',
+    shortLabel: 'OpenAI',
     defaultName: 'OpenAI GPT',
+    icon: '🟢',
+    tagline: 'GPT-4o / 4o-mini',
+    badge: '云端',
     apiUrl: 'https://api.openai.com/v1',
     model: 'gpt-4o-mini',
     maxTokens: 8192,
@@ -32,7 +44,11 @@ export const LLM_PROVIDER_PRESETS: Record<LLMProvider, LLMProviderPreset> = {
   },
   gemini: {
     label: 'Gemini',
+    shortLabel: 'Gemini',
     defaultName: 'Google Gemini',
+    icon: '✨',
+    tagline: '1.5 Flash，长上下文',
+    badge: '云端',
     apiUrl: 'https://generativelanguage.googleapis.com/v1beta',
     model: 'gemini-1.5-flash',
     maxTokens: 8192,
@@ -44,7 +60,11 @@ export const LLM_PROVIDER_PRESETS: Record<LLMProvider, LLMProviderPreset> = {
   // 文档：https://github.com/OpenSenseNova/SenseNova6.8/blob/main/API_CN.md
   sensenova: {
     label: '商汤 SenseNova',
+    shortLabel: '商汤',
     defaultName: '商汤 SenseNova',
+    icon: '🧠',
+    tagline: '6.8，国内直连',
+    badge: '云端',
     apiUrl: 'https://token.sensenova.cn/v1',
     model: 'sensenova-6.8-flash-lite',
     maxTokens: 8192,
@@ -53,7 +73,11 @@ export const LLM_PROVIDER_PRESETS: Record<LLMProvider, LLMProviderPreset> = {
   },
   custom: {
     label: '自定义',
+    shortLabel: '自定义',
     defaultName: '自定义配置',
+    icon: '🛠️',
+    tagline: 'OpenAI 兼容端点',
+    badge: '兼容',
     apiUrl: '',
     model: '',
     maxTokens: 8192,
@@ -61,7 +85,11 @@ export const LLM_PROVIDER_PRESETS: Record<LLMProvider, LLMProviderPreset> = {
   },
   lmstudio: {
     label: 'LM Studio',
+    shortLabel: 'LM Studio',
     defaultName: 'LM Studio (本地)',
+    icon: '🧩',
+    tagline: '本地兼容服务',
+    badge: '本地',
     apiUrl: 'http://localhost:1234/v1',
     model: 'qwen_qwen3.5-9b',
     maxTokens: 16384,
@@ -70,7 +98,11 @@ export const LLM_PROVIDER_PRESETS: Record<LLMProvider, LLMProviderPreset> = {
   },
   ollama: {
     label: 'Ollama',
+    shortLabel: 'Ollama',
     defaultName: 'Ollama (本地/云端)',
+    icon: '🖥️',
+    tagline: '本地模型，免密钥',
+    badge: '本地',
     apiUrl: 'http://localhost:11434/api',
     model: 'llama3',
     maxTokens: 16384,
