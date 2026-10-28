@@ -67,6 +67,13 @@ export function StatsSection({ llmConfigs }: StatsSectionProps) {
             <span className="stats-card__sub">初稿即优秀的比例</span>
           </div>
         </div>
+        <div className="stats-card">
+          <span className="stats-card__label">累计 Tokens</span>
+          <span className="stats-card__value">{((stats.totalInputTokens || 0) + (stats.totalOutputTokens || 0)).toLocaleString()}</span>
+          <span className="stats-card__sub">
+            输入 {((stats.totalInputTokens || 0)).toLocaleString()} · 输出 {((stats.totalOutputTokens || 0)).toLocaleString()}
+          </span>
+        </div>
       </div>
 
       <div className="options-section">
@@ -105,6 +112,9 @@ export function StatsSection({ llmConfigs }: StatsSectionProps) {
                     </div>
                     <div className="form-hint">
                       使用 {usage.count} 次 · 成功 {usage.success} 次 · 失败 {usage.failure} 次
+                      {(usage.inputTokens || usage.outputTokens) ? (
+                        <> · Tokens 输入 {(usage.inputTokens || 0).toLocaleString()} / 输出 {(usage.outputTokens || 0).toLocaleString()}</>
+                      ) : null}
                     </div>
                   </div>
                   <div style={{ textAlign: 'right' }}>
