@@ -235,8 +235,7 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
             <p className="form-hint">
               密钥只保存在本机 <code>chrome.storage.local</code>，不会同步到云端；导出配置时默认脱敏。
             </p>
-            {editingConfig.provider !== 'lmstudio'
-              && editingConfig.provider !== 'ollama'
+            {['openai', 'gemini', 'sensenova'].includes(editingConfig.provider)
               && !editingConfig.apiKey.trim() && (
                 <div className="alert--warning" style={{ marginTop: '8px' }}>
                   ⚠️ 该提供商需要 API 密钥，留空会导致生成任务失败。可先点「测试连接」验证，或切换到本地 Ollama。
