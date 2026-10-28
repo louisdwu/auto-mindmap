@@ -1,4 +1,4 @@
-import { LLMProvider, PluginConfig, LLMConfig, DEFAULT_CONFIG, DEFAULT_LLM_CONFIG } from '../types/config';
+import { LLMProvider, PluginConfig, LLMConfig, DEFAULT_CONFIG, DEFAULT_LLM_CONFIG, REFLECTION_PROMPT_MARKER } from '../types/config';
 import { StorageService } from './storageService';
 import { ILLMAdapter, LlmUsage } from './llm/base';
 import { OpenAIAdapter } from './llm/adapters/OpenAIAdapter';
@@ -9,6 +9,7 @@ import { extractMarkdown } from '../utils/markdownParser';
 import { ErrorUtils } from '../utils/errorUtils';
 import { AsrRequestOptions } from '../types/subtitle';
 import { computeInputBudget, estimateTokens, splitTranscriptByBudget } from './llm/tokenBudget';
+import { evaluateMindmapDraft, compareDrafts } from './llm/reflectionGate';
 
 /** 连通性测试结果（供选项页展示） */
 export interface ConnectionTestResult {
@@ -405,24 +406,40 @@ export class LLMService {
     }
 
     const initialMindmap = phase1.markdown;
+    // 闸门与反思阶段使用同一份输入：长字幕时是压缩稿，否则是原字幕
+    const gateSource = phase1.reflectionSource ?? subtitleText;
 
-    onProgress?.('阶段 2/2: 正在评估并优化思维导图...');
+    onProgress?.('阶段 2/2: 正在校验初稿完整度...');
+    const gate = evaluateMindmapDraft(initialMindmap, gateSource);
+    await LoggerService.info(
+      'LLMService',
+      `阶段 2 预检：${gate.pass ? '通过，无需重写' : `未通过（${gate.reasons.join('；')}）`}｜列表节点 ${gate.metrics.nodeCount}｜定量数据点 ${gate.metrics.dataPointCovered}/${gate.metrics.dataPointTotal}`,
+      undefined,
+      taskId
+    );
+
+    if (gate.pass) {
+      onProgress?.('初稿通过自动校验，无需重写');
+      return { result: initialMindmap, initialResult: initialMindmap, reflectionSuccess: true };
+    }
+
     const reflectionConfigId = config.settings.reflectionLLMConfigId;
     const reflectionLLMConfig = reflectionConfigId === 'default'
       ? await StorageService.getSelectedLLMConfig()
       : await StorageService.getLLMConfigById(reflectionConfigId);
 
     if (!reflectionLLMConfig) {
-      await LoggerService.error('LLMService', '未找到反思阶段的 LLM 配置', undefined, taskId);
-      throw new Error('未找到反思阶段的 LLM 配置');
+      await LoggerService.error('LLMService', '未找到反思阶段的 LLM 配置，已回退初稿', undefined, taskId);
+      onProgress?.('未找到反思模型配置，已采用初稿');
+      return { result: initialMindmap, initialResult: initialMindmap, reflectionSuccess: false };
     }
 
-    await LoggerService.info('LLMService', `阶段 2: 正在调用反思模型 ${reflectionLLMConfig.name} (${reflectionLLMConfig.model}) 进行评估与优化`, undefined, taskId);
+    await LoggerService.info('LLMService', `阶段 2: 正在调用反思模型 ${reflectionLLMConfig.name} (${reflectionLLMConfig.model}) 补漏与纠错`, undefined, taskId);
 
     let reflectionPromptTemplate = config.prompt.reflectionPrompt || DEFAULT_CONFIG.prompt.reflectionPrompt;
-    // 兼容性处理：如果检测到用户仍在使用旧版三阶段 Prompt，则自动 fallback 到系统内置的新版两阶段 Prompt
-    if (!reflectionPromptTemplate.includes('补充优化后的完整 Markdown')) {
-      await LoggerService.warn('LLMService', '检测到旧版反思 Prompt，已自动切换为两阶段合并逻辑', undefined, taskId);
+    // 兼容性处理：旧版「自评是否优秀」的 Prompt 已废弃，自动切换到「补漏纠错」版
+    if (!reflectionPromptTemplate.includes(REFLECTION_PROMPT_MARKER)) {
+      await LoggerService.warn('LLMService', '检测到旧版反思 Prompt，已自动切换为补漏纠错版', undefined, taskId);
       reflectionPromptTemplate = DEFAULT_CONFIG.prompt.reflectionPrompt;
     }
 
@@ -430,12 +447,13 @@ export class LLMService {
       .split('{subtitle_content}').join(source)
       .split('{initial_mindmap}').join(initialMindmap);
 
-    const reflectionSystemPrompt = `你是一个资深知识分析师与思维导图可视化专家。你的任务是基于原视频带时间戳的字幕稿，严格评价初步生成的思维导图质量，并在必要时直接执行优化。
+    const reflectionSystemPrompt = `你是一个资深知识分析师与思维导图可视化专家。你的任务是在初稿基础上做补漏与纠错：对照带时间戳的字幕稿，补齐被漏掉的板块、数据与结论，修正错误，然后输出完整导图。
 必须遵循以下准则：
 1. 定性概括与时间对齐：将口语化表达转化为书面逻辑观点，保留节点末尾的视频时间戳 [mm:ss]。
-2. 数据敏感：精准保留所有价格、日期、百分比等数字点位。
-3. 结构规范：最高层级唯一(#)，严禁标题编号，严格采用标准 Markdown 无序列表缩进，拒绝单纯按时间流水账罗列。
-4. 严禁输出任何开场白、解释或结束语。`;
+2. 数据敏感：字幕中的价格、百分比、日期、机构名必须全部落到叶子上，一个都不能少。
+3. 结构规范：最高层级唯一(#)，严禁标题编号，严格采用标准 Markdown 无序列表缩进，按主题逻辑归并而非时间流水账。
+4. 与初稿一致的正确内容可以沿用，但不要为了"看起来不同"而改写；确实有误的才改。
+5. 只输出完整的 Markdown 导图，不要输出评价、解释、开场白或结束语。`;
 
     const maxReflectionPromptTokens = this.maxPromptTokens(reflectionLLMConfig);
     let reflectionPrompt = buildPrompt(subtitleText);
@@ -459,25 +477,43 @@ export class LLMService {
       }
     }
 
-    const reflectionResult = await this.callLLM(config, reflectionLLMConfig, reflectionPrompt, {
-      isReflection: true,
-      systemPrompt: reflectionSystemPrompt,
-      taskId,
-      signal,
-      onUsage
-    });
+    let reflectionResult: string;
+    try {
+      reflectionResult = await this.callLLM(config, reflectionLLMConfig, reflectionPrompt, {
+        isReflection: true,
+        systemPrompt: reflectionSystemPrompt,
+        taskId,
+        signal,
+        onUsage
+      });
+    } catch (err) {
+      // 用户主动取消要如实上报，不能吞掉
+      if (signal?.aborted) throw err;
+      // 反思只是加分项：出错就回退已经拿到的初稿，绝不连累整单任务
+      await LoggerService.warn('LLMService', '反思阶段调用失败，已回退初稿', err, taskId);
+      onProgress?.('反思阶段失败，已采用初稿');
+      return { result: initialMindmap, initialResult: initialMindmap, reflectionSuccess: false };
+    }
 
     await LoggerService.debug('LLMService', '阶段 2 完成，收到反思结果', undefined, taskId);
 
     const cleanedResult = extractMarkdown(reflectionResult);
+    // 兼容旧版 Prompt 的「优秀」直通：没有改动就保留初稿
     if (cleanedResult === '优秀' || (cleanedResult.includes('优秀') && cleanedResult.length < 10)) {
-      await LoggerService.info('LLMService', '评价结果为“优秀”，使用初稿', undefined, taskId);
-      onProgress?.('评价结果：质量优秀，采用初稿');
+      await LoggerService.info('LLMService', '反思模型未做改动，使用初稿', undefined, taskId);
+      onProgress?.('反思模型未做改动，采用初稿');
       return { result: initialMindmap, initialResult: initialMindmap, reflectionSuccess: true };
     }
 
-    await LoggerService.info('LLMService', '发现优化内容，采用优化后的版本', undefined, taskId);
-    onProgress?.('发现遗漏点，已完成自动优化');
+    const verdict = compareDrafts(initialMindmap, cleanedResult, gateSource);
+    if (!verdict.adopt) {
+      await LoggerService.warn('LLMService', `重写稿未被采用：${verdict.reason}`, undefined, taskId);
+      onProgress?.('重写结果未通过复核，保留初稿');
+      return { result: initialMindmap, initialResult: initialMindmap, reflectionSuccess: false };
+    }
+
+    await LoggerService.info('LLMService', `已采用重写稿：${verdict.reason}`, undefined, taskId);
+    onProgress?.('已完成补漏与纠错');
     return { result: cleanedResult, initialResult: initialMindmap, reflectionSuccess: false };
   }
 

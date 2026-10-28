@@ -1,4 +1,4 @@
-import { PluginConfig, LLMConfig, DEFAULT_CONFIG, normalizeAsrLanguage, getProviderLabel } from '../../types/config';
+import { PluginConfig, LLMConfig, DEFAULT_CONFIG, normalizeAsrLanguage, getProviderLabel, REFLECTION_PROMPT_MARKER } from '../../types/config';
 
 export class StorageMigration {
   /**
@@ -17,10 +17,16 @@ export class StorageMigration {
       ? DEFAULT_CONFIG.prompt.template
       : userTemplate;
 
+    // 旧版反思 Prompt 把「是否优秀」交给模型自评（实测几乎恒为优秀），
+    // 新版改为在初稿基础上补漏纠错，因此缺少新版标记的旧文案一律替换。
     const userReflectionPrompt = config.prompt?.reflectionPrompt;
-    const reflectionPrompt = (!userReflectionPrompt || !userReflectionPrompt.includes('时间戳'))
-      ? DEFAULT_CONFIG.prompt.reflectionPrompt
-      : userReflectionPrompt;
+    const reflectionPrompt = (
+      typeof userReflectionPrompt === 'string'
+      && userReflectionPrompt.includes('时间戳')
+      && userReflectionPrompt.includes(REFLECTION_PROMPT_MARKER)
+    )
+      ? userReflectionPrompt
+      : DEFAULT_CONFIG.prompt.reflectionPrompt;
 
     return {
       ...DEFAULT_CONFIG,

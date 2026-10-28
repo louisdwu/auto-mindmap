@@ -32,7 +32,8 @@ export class StatsService {
       ),
       processedVideoIds: stats.processedVideoIds || [],
       totalInputTokens: Number(stats.totalInputTokens) || 0,
-      totalOutputTokens: Number(stats.totalOutputTokens) || 0
+      totalOutputTokens: Number(stats.totalOutputTokens) || 0,
+      reflectionRuns: Number(stats.reflectionRuns) || 0
     };
   }
 
@@ -108,9 +109,12 @@ export class StatsService {
         }
       }
 
-      // 4. 反思成功统计
-      if (params.isReflectionEnabled && params.reflectionSuccess) {
-        stats.reflectionSuccessCount += 1;
+      // 4. 反思统计：分母只算「开启反思且成功」的运行，直通 = 初稿无需重写
+      if (params.isReflectionEnabled) {
+        stats.reflectionRuns += 1;
+        if (params.reflectionSuccess) {
+          stats.reflectionSuccessCount += 1;
+        }
       }
 
       // 5. 每日统计：按当日视频 ID 去重，而不是把累计总数写进每日次数

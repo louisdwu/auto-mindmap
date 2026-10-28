@@ -31,10 +31,11 @@ export function StatsSection({ llmConfigs }: StatsSectionProps) {
     return <div className="options-section">加载中...</div>;
   }
 
-  // 计算反思成功率
-  const reflectionSuccessRate = stats.totalGenerations > 0
-    ? Math.round((stats.reflectionSuccessCount / stats.totalGenerations) * 100)
-    : 0;
+  // 直通率只统计「开启反思且成功」的运行；分母为 0 时没有意义，显示占位符
+  const reflectionRuns = stats.reflectionRuns || 0;
+  const reflectionSuccessRate = reflectionRuns > 0
+    ? Math.round((stats.reflectionSuccessCount / reflectionRuns) * 100)
+    : null;
 
   const todayKey = new Date().toISOString().split('T')[0];
   const today = stats.dailyStats[todayKey] || { generations: 0, videos: 0 };
@@ -59,12 +60,18 @@ export function StatsSection({ llmConfigs }: StatsSectionProps) {
         </div>
         <div className="stats-card">
           <span className="stats-card__label">反思直通率</span>
-          <span className="stats-card__value">{reflectionSuccessRate}%</span>
+          <span className="stats-card__value">
+            {reflectionSuccessRate === null ? '—' : `${reflectionSuccessRate}%`}
+          </span>
           <div className="stats-progress-container">
             <div className="stats-progress-bar">
-              <div className="stats-progress-fill" style={{ width: `${reflectionSuccessRate}%` }}></div>
+              <div className="stats-progress-fill" style={{ width: `${reflectionSuccessRate ?? 0}%` }}></div>
             </div>
-            <span className="stats-card__sub">初稿即优秀的比例</span>
+            <span className="stats-card__sub">
+              {reflectionRuns > 0
+                ? `初稿通过自动校验、无需重写的比例（${stats.reflectionSuccessCount}/${reflectionRuns}）`
+                : '暂无开启反思的运行'}
+            </span>
           </div>
         </div>
         <div className="stats-card">

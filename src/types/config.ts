@@ -217,6 +217,9 @@ import systemPromptRaw from '../prompts/System.txt?raw';
 import userPromptRaw from '../prompts/User.txt?raw';
 import reflectionPromptRaw from '../prompts/Reflection.txt?raw';
 
+// 新版反思 Prompt 的识别标记：旧版把「判定是否优秀」交给模型，新版只做补漏纠错
+export const REFLECTION_PROMPT_MARKER = '在初稿基础上';
+
 // 导出原始默认提示词，用于 UI 对比显示来源
 export const DEFAULT_PROMPTS = {
   systemPrompt: systemPromptRaw.trim(),

@@ -112,3 +112,99 @@ describe('LLMService 长视频分段', () => {
     expect(result.reflectionSuccess).toBe(false);
   });
 });
+
+describe('反思闸门与失败回退', () => {
+  const subtitle = [
+    '[00:00] 开场，今天聊财报',
+    '[00:10] 公司营收 133.8 亿美元，同比增长 7.4%',
+    '[00:20] 调整后每股收益 91 美分',
+    '[00:30] 全年自由现金流 130 亿美元，指引上调至少 11%',
+    '[00:40] 以上就是今天的全部内容'
+  ].join('\n');
+
+  const weakDraft = [
+    '# 财报 [00:00]',
+    '- 核心数据 [00:10]',
+    '  - 营收增长 [00:10]',
+    '  - 每股收益提升 [00:20]',
+    '- 现金流与指引 [00:30]',
+    '  - 现金流充裕 [00:30]',
+    '  - 指引上调 [00:30]'
+  ].join('\n');
+
+  const goodDraft = [
+    '# 财报 [00:00]',
+    '- 核心数据 [00:10]',
+    '  - 营收 133.8 亿美元 [00:10]',
+    '  - 同比增长 7.4% [00:10]',
+    '  - 每股收益 91 美分 [00:20]',
+    '- 现金流与指引 [00:30]',
+    '  - 自由现金流 130 亿美元 [00:30]',
+    '  - 指引上调至少 11% [00:30]'
+  ].join('\n');
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(StorageService.getSelectedLLMConfig).mockResolvedValue(modelConfig);
+    vi.mocked(StorageService.getLLMConfigById).mockResolvedValue(modelConfig);
+  });
+
+  it('初稿通过闸门时不再调用反思模型', async () => {
+    const spy = vi.spyOn(LLMService as any, 'callLLM').mockResolvedValue(goodDraft);
+
+    const result = await LLMService.generateMindmap(
+      buildConfig({ enableReflection: true, enableChunking: false }),
+      subtitle
+    );
+
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(result.result).toContain('133.8');
+    expect(result.reflectionSuccess).toBe(true);
+  });
+
+  it('反思模型调用失败时回退初稿，不连累任务', async () => {
+    const spy = vi.spyOn(LLMService as any, 'callLLM')
+      .mockResolvedValueOnce(weakDraft)
+      .mockRejectedValueOnce(new Error('HTTP 429: rate limited'));
+
+    const result = await LLMService.generateMindmap(
+      buildConfig({ enableReflection: true, enableChunking: false }),
+      subtitle
+    );
+
+    expect(spy).toHaveBeenCalledTimes(2);
+    expect(result.result).toBe(weakDraft);
+    expect(result.reflectionSuccess).toBe(false);
+  });
+
+  it('重写稿更完整时采用重写稿', async () => {
+    const spy = vi.spyOn(LLMService as any, 'callLLM')
+      .mockResolvedValueOnce(weakDraft)
+      .mockResolvedValueOnce(goodDraft);
+
+    const result = await LLMService.generateMindmap(
+      buildConfig({ enableReflection: true, enableChunking: false }),
+      subtitle
+    );
+
+    expect(spy).toHaveBeenCalledTimes(2);
+    expect(result.result).toContain('133.8');
+    expect(result.initialResult).toBe(weakDraft);
+  });
+
+  it('重写稿还不如初稿时保留初稿', async () => {
+    const worse = '# 财报 [00:00]\n- 一句话 [00:10]';
+    const spy = vi.spyOn(LLMService as any, 'callLLM')
+      .mockResolvedValueOnce(weakDraft)
+      .mockResolvedValueOnce(worse);
+
+    const result = await LLMService.generateMindmap(
+      buildConfig({ enableReflection: true, enableChunking: false }),
+      subtitle
+    );
+
+    expect(spy).toHaveBeenCalledTimes(2);
+    expect(result.result).toBe(weakDraft);
+    expect(result.reflectionSuccess).toBe(false);
+  });
+});
