@@ -1,6 +1,26 @@
-import { AppStats, DEFAULT_STATS } from '../types/stats';
+import { AppStats, DEFAULT_STATS, DailyStats, ModelUsageStats } from '../types/stats';
 
 const STATS_STORAGE_KEY = 'app_statistics';
+/**
+ * 统计数据在 chrome.storage.sync 里的镜像 key。
+ *
+ * 背景：统计只存 chrome.storage.local 时，「移除扩展后重新加载」会把
+ * storage.local 一起清掉（这是 unpacked 扩展更新插件的常见操作），统计就丢了。
+ * sync 跟 Chrome 账号走：重装扩展、换设备都能自动恢复。
+ * 统计是纯数字不含密钥，因此允许进 sync（配置与密钥仍然禁止，见 AGENTS 约定）。
+ */
+const STATS_SYNC_BACKUP_KEY = 'app_statistics_backup_v1';
+
+/** chrome.storage.sync 单条目配额是 8KB（QUOTA_BYTES_PER_ITEM），留安全余量 */
+const SYNC_ITEM_LIMIT = 8000;
+
+/** 备份裁剪档位：按「最近 N 天 / 最多 M 个视频 ID」逐级降级，直到塞进 sync 配额 */
+const BACKUP_TIERS: Array<{ days: number; dailyVideoIds: number; videoIds: number }> = [
+  { days: 90, dailyVideoIds: 30, videoIds: 200 },
+  { days: 30, dailyVideoIds: 20, videoIds: 100 },
+  { days: 14, dailyVideoIds: 10, videoIds: 50 },
+  { days: 7, dailyVideoIds: 0, videoIds: 0 }
+];
 
 export class StatsService {
   /** 并发任务可能同时记录统计，串行化读改写避免丢计数 */
@@ -11,9 +31,14 @@ export class StatsService {
    */
   static async getStats(): Promise<AppStats> {
     const result = await chrome.storage.local.get(STATS_STORAGE_KEY);
-    const stats = result[STATS_STORAGE_KEY] || { ...DEFAULT_STATS };
-    
-    // 确保对象结构完整 (防抖处理旧版本数据)
+    return this.normalizeStats(result[STATS_STORAGE_KEY]);
+  }
+
+  /**
+   * 把任意来源（旧版本数据 / sync 备份）的结构补全成完整的 AppStats
+   */
+  private static normalizeStats(raw: any): AppStats {
+    const stats = raw || {};
     return {
       ...DEFAULT_STATS,
       ...stats,
@@ -38,11 +63,94 @@ export class StatsService {
   }
 
   /**
-   * 保存统计数据
+   * 保存统计数据，并镜像一份到 chrome.storage.sync 作为更新/重装后的恢复源
    */
   static async saveStats(stats: AppStats): Promise<void> {
     stats.lastUpdated = Date.now();
     await chrome.storage.local.set({ [STATS_STORAGE_KEY]: stats });
+    await this.mirrorToSync(stats);
+  }
+
+  /**
+   * 构建可塞进 sync 配额的备份副本：
+   * - dailyStats 只保留最近 N 天，且较老的天次剥掉 videoIds（去重精度换体积）
+   * - processedVideoIds 只保留最新的 M 个（列表尾部是最新的）
+   * 裁剪只影响备份副本，本地完整数据不受影响。
+   */
+  private static buildBackup(stats: AppStats): AppStats | null {
+    const days = Object.keys(stats.dailyStats).sort();
+    const ids = stats.processedVideoIds;
+
+    for (const tier of BACKUP_TIERS) {
+      const keptDays = days.slice(-tier.days);
+      const recentDays = new Set(keptDays.slice(-3));
+      const dailyStats: Record<string, DailyStats> = {};
+      for (const day of keptDays) {
+        const value = stats.dailyStats[day];
+        dailyStats[day] = {
+          generations: value.generations,
+          videos: value.videos,
+          // 最近 3 天保留少量 videoIds，保住「当天/近几天去重」精度；更早的剥掉
+          videoIds: recentDays.has(day) ? (value.videoIds || []).slice(-tier.dailyVideoIds) : [],
+          inputTokens: value.inputTokens,
+          outputTokens: value.outputTokens
+        };
+      }
+
+      const candidate: AppStats = {
+        ...stats,
+        dailyStats,
+        processedVideoIds: tier.videoIds > 0 ? ids.slice(-tier.videoIds) : [],
+        lastUpdated: stats.lastUpdated
+      };
+
+      if (JSON.stringify(candidate).length <= SYNC_ITEM_LIMIT) {
+        return candidate;
+      }
+    }
+
+    // 最小档位仍超限（理论上不会发生）就放弃镜像，统计继续留在 local
+    return null;
+  }
+
+  /**
+   * 把统计镜像到 sync。sync 可能被企业策略禁用或配额不足，失败时静默降级：
+   * 统计仍然完整保存在 local，只是少了「重装后自动恢复」的能力。
+   */
+  private static async mirrorToSync(stats: AppStats): Promise<void> {
+    try {
+      const backup = this.buildBackup(stats);
+      if (!backup) return;
+      await chrome.storage.sync.set({ [STATS_SYNC_BACKUP_KEY]: backup });
+    } catch (error) {
+      console.debug('[StatsService] 统计镜像到 sync 失败（不影响本地统计）:', error);
+    }
+  }
+
+  /**
+   * 从 sync 恢复统计到 local（用于重装/更新后 storage.local 被清的场景）。
+   * 以 lastUpdated 判新旧：local 缺失或落后于备份时才覆盖，绝不回滚更新数据。
+   * 幂等，Service Worker 每次启动、统计页打开时都可以安全调用。
+   */
+  static async restoreFromSync(): Promise<boolean> {
+    try {
+      const syncResult = await chrome.storage.sync.get(STATS_SYNC_BACKUP_KEY);
+      const backup = syncResult?.[STATS_SYNC_BACKUP_KEY];
+      if (!backup || typeof backup !== 'object') return false;
+
+      const localResult = await chrome.storage.local.get(STATS_STORAGE_KEY);
+      const backupTime = Number((backup as any).lastUpdated) || 0;
+      const localTime = Number(localResult?.[STATS_STORAGE_KEY]?.lastUpdated) || 0;
+      if (backupTime <= localTime) return false;
+
+      const restored = this.normalizeStats(backup);
+      restored.lastUpdated = backupTime;
+      await chrome.storage.local.set({ [STATS_STORAGE_KEY]: restored });
+      return true;
+    } catch (error) {
+      console.debug('[StatsService] 从 sync 恢复统计失败（可能被禁用）:', error);
+      return false;
+    }
   }
 
   /**
@@ -78,7 +186,7 @@ export class StatsService {
     if (!stats.modelUsage[params.modelId]) {
       stats.modelUsage[params.modelId] = { count: 0, success: 0, failure: 0 };
     }
-    const modelStats = stats.modelUsage[params.modelId];
+    const modelStats: ModelUsageStats = stats.modelUsage[params.modelId];
     modelStats.count += 1;
     const inputTokens = Math.max(0, Number(params.inputTokens) || 0);
     const outputTokens = Math.max(0, Number(params.outputTokens) || 0);
@@ -142,9 +250,14 @@ export class StatsService {
   }
 
   /**
-   * 清空统计数据
+   * 清空统计数据（本地与 sync 备份一起清，保持「清空」语义一致）
    */
   static async clearStats(): Promise<void> {
     await chrome.storage.local.remove(STATS_STORAGE_KEY);
+    try {
+      await chrome.storage.sync.remove(STATS_SYNC_BACKUP_KEY);
+    } catch {
+      // sync 不可用时忽略，本地已清空
+    }
   }
 }

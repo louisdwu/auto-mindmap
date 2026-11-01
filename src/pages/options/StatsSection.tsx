@@ -16,6 +16,8 @@ export function StatsSection({ llmConfigs }: StatsSectionProps) {
   }, []);
 
   const loadStats = async () => {
+    // 打开统计页时兜底恢复一次（Service Worker 启动钩子可能还没跑过）
+    await StatsService.restoreFromSync();
     const data = await StatsService.getStats();
     setStats(data);
     setLoading(false);
@@ -44,7 +46,7 @@ export function StatsSection({ llmConfigs }: StatsSectionProps) {
     <div className="stats-container animate-fade-in">
       <div className="content-header">
         <h1>数据统计</h1>
-        <p className="form-hint">回顾你的知识挖掘历程</p>
+        <p className="form-hint">回顾你的知识挖掘历程 · 每次生成后自动备份到浏览器账号同步，重装扩展后自动恢复</p>
       </div>
 
       <div className="stats-grid">

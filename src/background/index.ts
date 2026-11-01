@@ -2,6 +2,7 @@ import { TaskManager } from './taskManager';
 import { MessageHandler } from './messageHandler';
 import { DEFAULT_CONFIG } from '../types/config';
 import { StorageService } from '../services/storageService';
+import { StatsService } from '../services/statsService';
 
 // 初始化配置
 async function initConfig() {
@@ -42,6 +43,13 @@ initConfig().then(async () => {
   // 缓存索引迁移 + 过期缓存清理（失败不阻塞主流程）
   await StorageService.initializeStorage().catch((error) => {
     console.warn('[Background] 初始化存储治理失败:', error);
+  });
+
+  // 从账号同步恢复统计（重装/更新导致 storage.local 被清时兜底；幂等，失败静默）
+  StatsService.restoreFromSync().then((restored) => {
+    if (restored) console.log('[Background] 已从账号同步恢复统计数据');
+  }).catch((error) => {
+    console.warn('[Background] 统计恢复失败:', error);
   });
 
   // 初始化任务管理器
