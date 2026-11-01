@@ -56,6 +56,9 @@ export class MessageHandler {
       case 'CANCEL_TASK':
         return await this.taskManager.cancelTask(message.payload || {});
 
+      case 'GET_CONFIG':
+        return { config: await StorageService.getConfig() };
+
       default:
         // 处理未知消息类型
         return { error: 'Unknown message type' };

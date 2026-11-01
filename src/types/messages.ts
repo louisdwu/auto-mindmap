@@ -85,6 +85,11 @@ export interface CancelTaskMessage {
   };
 }
 
+/** Content 读取插件配置（走后台 StorageService，复用其迁移与默认值兜底） */
+export interface GetConfigMessage {
+  type: 'GET_CONFIG';
+}
+
 // Background -> Content
 export interface SubtitleDownloadedMessage {
   type: 'SUBTITLE_DOWNLOADED';
@@ -143,7 +148,8 @@ export type ExtensionMessage =
   | GenerateMindmapDirectMessage
   | GetSubtitleCacheMessage
   | SetSubtitleOnlyModeMessage
-  | CancelTaskMessage;
+  | CancelTaskMessage
+  | GetConfigMessage;
 
 export type ContentMessage =
   | SubtitleDownloadedMessage

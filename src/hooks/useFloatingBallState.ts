@@ -326,7 +326,8 @@ export function useFloatingBallState() {
   }, [applyTask, fetchCurrentTask, openSubtitleResult, showToast, stopPolling]);
 
   /**
-   * 已有字幕文本时直接进入思维导图生成，避免重复下载字幕 / 重复 ASR
+   * 已有字幕文本时直接进入思维导图生成，避免重复下载字幕 / 重复 ASR。
+   * 提示文案由调用方负责，便于携带「省流已跳转」等上下文信息。
    */
   const startMindmapFromSubtitle = async (subtitleText: string, videoTitle?: string) => {
     await RuntimeUtils.sendMessage({
@@ -338,7 +339,6 @@ export function useFloatingBallState() {
         origin: 'user'
       }
     });
-    showToast('正在生成思维导图...');
     fetchCurrentTask();
   };
 
@@ -348,29 +348,6 @@ export function useFloatingBallState() {
       return;
     }
     setShowNotification(false);
-
-    // 获取当前配置，检查是否启用「跳到末尾」功能
-    let enableSkipToEnd = false;
-    try {
-      const configResponse = await RuntimeUtils.sendMessage({
-        type: 'GET_CONFIG',
-        payload: {}
-      });
-      enableSkipToEnd = configResponse?.config?.settings?.enableSkipToEnd || false;
-    } catch (e) {
-      console.error('[FloatingBall] 获取配置失败:', e);
-    }
-
-    // 如果启用跳转，且视频时长 > 1 分钟，则跳到末尾
-    if (enableSkipToEnd) {
-      const videoDuration = VideoUtils.getCurrentVideoDuration();
-      if (videoDuration && videoDuration > 60) {
-        const seekSuccess = VideoUtils.seekVideoTo(videoDuration);
-        if (seekSuccess) {
-          showToast('🎬 已跳转到视频末尾，节省流量');
-        }
-      }
-    }
 
     if (currentTask?.status === 'running' || currentTask?.status === 'pending') {
       showToast('任务正在进行中，请稍候...');
@@ -401,9 +378,23 @@ export function useFloatingBallState() {
         return;
       }
 
+      // 省流模式：确认要启动新任务（下载字幕 / 复用字幕生成）后才跳到末尾并暂停，
+      // 仅查看已有导图时不打扰播放。播放器不再缓冲中间未播放的分段，节省流量。
+      let seekedToEnd = false;
+      try {
+        const configResponse = await RuntimeUtils.sendMessage({ type: 'GET_CONFIG' });
+        if (configResponse?.config?.settings?.enableSkipToEnd) {
+          seekedToEnd = VideoUtils.seekVideoToEnd();
+        }
+      } catch {
+        // 配置读取失败不影响主流程
+      }
+      const saveDataPrefix = seekedToEnd ? '🎬 已跳到视频末尾省流，' : '';
+
       // 没有导图，但字幕已经就绪：直接基于现有字幕生成，跳过字幕下载 / ASR
       if (currentTask?.subtitleText) {
         await startMindmapFromSubtitle(currentTask.subtitleText, currentTask.videoTitle);
+        showToast(`${saveDataPrefix}正在生成思维导图...`);
         return;
       }
 
@@ -416,6 +407,7 @@ export function useFloatingBallState() {
           cachedSubtitle.subtitleText,
           currentTask?.videoTitle || getPageVideoTitle()
         );
+        showToast(`${saveDataPrefix}正在生成思维导图...`);
         return;
       }
 
@@ -424,7 +416,7 @@ export function useFloatingBallState() {
         type: 'DOWNLOAD_SUBTITLE',
         payload: { videoUrl: window.location.href, videoTitle: getPageVideoTitle(), origin: 'user' }
       });
-      showToast('正在获取字幕并生成思维导图...');
+      showToast(`${saveDataPrefix}正在获取字幕并生成思维导图...`);
       fetchCurrentTask();
     } catch (error: any) {
       const errMsg = String(error?.message || error);

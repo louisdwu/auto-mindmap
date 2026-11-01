@@ -90,25 +90,36 @@ export const VideoUtils = {
   },
 
   /**
-   * 获取当前页面的视频时长（秒）
-   * 如果找不到视频或视频时长无效，返回 null
+   * 省流：把播放器跳到视频末尾附近并暂停。
+   *
+   * 点击悬浮球生成导图后用户通常不再观看，播放器却会继续缓冲后续内容；
+   * 跳到末尾后播放器不再请求中间未播放的分段，节省这部分流量。
+   *
+   * 细节：
+   * - 提前 1.5s 而不是正好 duration，避免触发 ended 导致 B 站 / YouTube 自动连播
+   * - 跳转后暂停而不是播放，理由同上
+   * - 直播流 duration 为 Infinity，用 Number.isFinite 过滤
+   * - 短视频（<= 60s）没有省流价值，已在末尾附近时无需跳动
    */
-  getCurrentVideoDuration(): number | null {
+  seekVideoToEnd(): boolean {
     try {
       const videos = Array.from(document.querySelectorAll('video')) as HTMLVideoElement[];
-      if (videos.length === 0) {
-        return null;
+      const targetVideo = videos.find(v => Number.isFinite(v.duration) && v.duration > 0);
+      if (!targetVideo) {
+        return false;
       }
-
-      // 优先选取有效时长或正在播放的视频
-      const targetVideo = videos.find(v => !isNaN(v.duration) && v.duration > 0) || videos[0];
-      if (targetVideo && !isNaN(targetVideo.duration) && targetVideo.duration > 0) {
-        return targetVideo.duration;
+      if (targetVideo.duration <= 60) {
+        return false;
       }
-      return null;
+      if (targetVideo.currentTime >= targetVideo.duration - 2) {
+        return false;
+      }
+      targetVideo.currentTime = targetVideo.duration - 1.5;
+      targetVideo.pause();
+      return true;
     } catch (e) {
-      console.error('[VideoUtils] 获取视频时长失败:', e);
-      return null;
+      console.error('[VideoUtils] 跳转到视频末尾失败:', e);
+      return false;
     }
   }
 };
