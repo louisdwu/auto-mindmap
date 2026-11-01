@@ -161,6 +161,8 @@ export interface PluginConfig {
     clearLogsOnClose: boolean;         // 退出日志页面时是否清空记录
     enableSoundNotification: boolean;  // 生成完成后是否播放提示音
     soundNotificationVolume: number;   // 提示音音量 (0-1)
+    /** 点击悬浮球时是否自动跳到视频末尾，避免浏览器从头缓存整个视频 */
+    enableSkipToEnd: boolean;
   };
   // 排除关键词列表
   exclusionKeywords: string[];
@@ -280,7 +282,8 @@ export const DEFAULT_CONFIG: PluginConfig = {
     enableChunking: true,
     clearLogsOnClose: true,
     enableSoundNotification: true,
-    soundNotificationVolume: 0.8
+    soundNotificationVolume: 0.8,
+    enableSkipToEnd: false
   },
   exclusionKeywords: []
 };

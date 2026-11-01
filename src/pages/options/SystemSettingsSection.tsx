@@ -65,6 +65,33 @@ export const SystemSettingsSection: React.FC<SystemSettingsSectionProps> = ({ co
       <div className="section-divider" style={{ margin: '20px 0' }} />
 
       <div className="form-group">
+        <div className="flex-row" style={{ alignItems: 'center', gap: '12px' }}>
+          <label className="flex-row" style={{ cursor: 'pointer', gap: '8px', flex: 1 }}>
+            <input
+              type="checkbox"
+              checked={config.settings.enableSkipToEnd || false}
+              onChange={e => onConfigChange({
+                ...config,
+                settings: {
+                  ...config.settings,
+                  enableSkipToEnd: e.target.checked
+                }
+              })}
+            />
+            <span className="form-label" style={{ margin: 0 }}>🎬 点击悬浮球时自动跳到视频末尾</span>
+          </label>
+        </div>
+
+        <p className="form-hint">
+          启用后，点击悬浮球生成思维导图时，会自动将视频跳到末尾，避免浏览器从头缓存整个视频，节省流量。
+          <br />
+          <strong>注意：</strong>仅对时长超过 1 分钟的视频有效；短视频跳转无实际效果。
+        </p>
+      </div>
+
+      <div className="section-divider" style={{ margin: '20px 0' }} />
+
+      <div className="form-group">
         <label className="flex-row" style={{ cursor: 'pointer', gap: '8px' }}>
           <input 
             type="checkbox" 

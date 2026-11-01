@@ -87,5 +87,28 @@ export const VideoUtils = {
       console.error('[VideoUtils] 跳转视频位置失败:', e);
       return false;
     }
+  },
+
+  /**
+   * 获取当前页面的视频时长（秒）
+   * 如果找不到视频或视频时长无效，返回 null
+   */
+  getCurrentVideoDuration(): number | null {
+    try {
+      const videos = Array.from(document.querySelectorAll('video')) as HTMLVideoElement[];
+      if (videos.length === 0) {
+        return null;
+      }
+
+      // 优先选取有效时长或正在播放的视频
+      const targetVideo = videos.find(v => !isNaN(v.duration) && v.duration > 0) || videos[0];
+      if (targetVideo && !isNaN(targetVideo.duration) && targetVideo.duration > 0) {
+        return targetVideo.duration;
+      }
+      return null;
+    } catch (e) {
+      console.error('[VideoUtils] 获取视频时长失败:', e);
+      return null;
+    }
   }
 };

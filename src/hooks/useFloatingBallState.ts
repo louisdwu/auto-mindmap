@@ -349,6 +349,29 @@ export function useFloatingBallState() {
     }
     setShowNotification(false);
 
+    // 获取当前配置，检查是否启用「跳到末尾」功能
+    let enableSkipToEnd = false;
+    try {
+      const configResponse = await RuntimeUtils.sendMessage({
+        type: 'GET_CONFIG',
+        payload: {}
+      });
+      enableSkipToEnd = configResponse?.config?.settings?.enableSkipToEnd || false;
+    } catch (e) {
+      console.error('[FloatingBall] 获取配置失败:', e);
+    }
+
+    // 如果启用跳转，且视频时长 > 1 分钟，则跳到末尾
+    if (enableSkipToEnd) {
+      const videoDuration = VideoUtils.getCurrentVideoDuration();
+      if (videoDuration && videoDuration > 60) {
+        const seekSuccess = VideoUtils.seekVideoTo(videoDuration);
+        if (seekSuccess) {
+          showToast('🎬 已跳转到视频末尾，节省流量');
+        }
+      }
+    }
+
     if (currentTask?.status === 'running' || currentTask?.status === 'pending') {
       showToast('任务正在进行中，请稍候...');
       return;
