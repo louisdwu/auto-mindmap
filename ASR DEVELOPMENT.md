@@ -146,10 +146,11 @@ run_whisper.bat D:\Videos\a.mp4
 | `ASR_EAGER_LOAD` | `0` | 设 `1` 回到旧版「启动即加载模型」 |
 | `ASR_IDLE_UNLOAD_SEC` | `900` | 空闲多少秒后自动卸载；`0` = 不自动卸载 |
 | `ASR_IDLE_CHECK_SEC` | `30` | 看门狗检查间隔（最小 5s） |
+| `ASR_CACHE_DIR` | `E:\Temp\asr-mindmap-cache` | 字幕 / 音频缓存目录（`.txt` / `.srt` / `.mp3`） |
 | `ASR_MP3_TTL_DAYS` | `7` | `.mp3` 音频缓存保留天数，过期自动删除；`0` = 不清理 |
 | `ASR_MP3_CLEANUP_INTERVAL_SEC` | `86400` | `.mp3` 周期清理间隔（默认每天） |
 
-> 缓存取舍：`cache/*.txt` 与 `*.srt` 体积小、命中即可免加载模型（不触显存），长期保留；`cache/*.mp3` 体积大、仅重新转录同一视频时省一次下载，故按 TTL 回收。
+> 缓存放 `E:\Temp\asr-mindmap-cache`（`ASR_CACHE_DIR` 可改）。取舍：`*.txt` 与 `*.srt` 体积小、命中即可免加载模型（不触显存），长期保留；`*.mp3` 体积大、仅重新转录同一视频时省一次下载，故按 TTL 回收。
 
 ### 3.7 冒烟测试（不加载模型，不占 GPU）
 

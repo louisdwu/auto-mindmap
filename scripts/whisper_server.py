@@ -27,9 +27,9 @@ HTTP 接口契约与旧版（Faster-Whisper 后端）**完全不变**，
   * 缓存命中（同 video_id 的 .txt）会在加载模型前直接返回，故命中不触显存。
   * 设 ASR_EAGER_LOAD=1 可回到旧版「启动即加载」。
 
-音频缓存策略：
-  * cache/*.txt 与 *.srt 体积小且命中可免加载模型，长期保留。
-  * cache/*.mp3 体积大，仅按 ASR_MP3_TTL_DAYS（默认 7 天）回收；0=不清理。
+音频缓存策略（目录默认 E:\\Temp\\asr-mindmap-cache，可用 ASR_CACHE_DIR 覆盖）：
+  * *.txt 与 *.srt 体积小且命中可免加载模型，长期保留。
+  * *.mp3 体积大，仅按 ASR_MP3_TTL_DAYS（默认 7 天）回收；0=不清理。
     启动时清一次，之后每 ASR_MP3_CLEANUP_INTERVAL_SEC（默认 86400s）周期清理。
 
 网页版前端：浏览器直接访问 http://<host>:2233 即为
@@ -331,7 +331,8 @@ def next_infer_index():
 # ------------------------------------------------------------------ #
 # .mp3 音频缓存 TTL 清理（仅清大体积音频；.txt/.srt 体积小且命中可免加载，保留）
 # ------------------------------------------------------------------ #
-CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cache")
+# 缓存目录：默认放用户 E:\Temp（大体积 .mp3 不占仓库盘），可用 ASR_CACHE_DIR 覆盖
+CACHE_DIR = os.getenv("ASR_CACHE_DIR", os.path.join("E:\\", "Temp", "asr-mindmap-cache"))
 _MP3_TTL_DAYS = float(os.getenv("ASR_MP3_TTL_DAYS", "7"))        # 0 = 不清理
 _MP3_CLEANUP_INTERVAL_SEC = int(os.getenv("ASR_MP3_CLEANUP_INTERVAL_SEC", "86400"))
 
