@@ -19,7 +19,7 @@ export class OllamaAdapter extends BaseAdapter implements ILLMAdapter {
   /**
    * 由 api 基址推出模型列表地址（Ollama 的模型清单在 /api/tags）
    */
-  getTagsUrl(llmConfig: LLMConfig): string {
+  getModelsUrl(llmConfig: LLMConfig): string {
     const url = this.normalizeUrl(llmConfig.apiUrl).replace(/\/(chat|generate)$/, '');
     return url.includes('/api') ? `${url}/tags` : `${url}/api/tags`;
   }
@@ -29,7 +29,7 @@ export class OllamaAdapter extends BaseAdapter implements ILLMAdapter {
    */
   async listModels(llmConfig: LLMConfig, timeout: number): Promise<string[]> {
     const response = await this.fetchWithRetry(
-      this.getTagsUrl(llmConfig),
+      this.getModelsUrl(llmConfig),
       { method: 'GET', headers: { Accept: 'application/json' } },
       timeout
     );

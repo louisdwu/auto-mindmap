@@ -16,7 +16,7 @@ vi.mock('./loggerService', () => ({
   }
 }));
 
-import { DEFAULT_CONFIG } from '../types/config';
+import { DEFAULT_CONFIG, DEFAULT_LLM_CONFIG } from '../types/config';
 import { LLMService } from './llmService';
 import { StorageService } from './storageService';
 
@@ -206,5 +206,80 @@ describe('反思闸门与失败回退', () => {
     expect(spy).toHaveBeenCalledTimes(2);
     expect(result.result).toBe(weakDraft);
     expect(result.reflectionSuccess).toBe(false);
+  });
+});
+
+describe('LLMService.fetchModels 通过 API 端点获取模型清单', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('成功时返回模型清单与实际请求地址', async () => {
+    const spy = vi.spyOn(LLMService as any, 'getAdapter').mockReturnValue({
+      getModelsUrl: (cfg: any) => `${cfg.apiUrl}/models`,
+      listModels: async () => ['gpt-4o-mini', 'gpt-4o']
+    });
+
+    const result = await LLMService.fetchModels(modelConfig);
+
+    expect(spy).toHaveBeenCalledWith('openai');
+    expect(result.ok).toBe(true);
+    expect(result.models).toEqual(['gpt-4o-mini', 'gpt-4o']);
+    expect(result.url).toBe('https://example.com/v1/models');
+    expect(result.error).toBeUndefined();
+  });
+
+  it('适配器不支持清单时如实返回失败原因', async () => {
+    vi.spyOn(LLMService as any, 'getAdapter').mockReturnValue({
+      getModelsUrl: (cfg: any) => `${cfg.apiUrl}/models`
+    });
+
+    const result = await LLMService.fetchModels(modelConfig);
+
+    expect(result.ok).toBe(false);
+    expect(result.models).toEqual([]);
+    expect(result.error).toContain('不支持查询模型列表');
+    expect(result.url).toBe('https://example.com/v1/models');
+  });
+
+  it('getModelsUrl 抛异常时回退 apiUrl 继续拉清单', async () => {
+    vi.spyOn(LLMService as any, 'getAdapter').mockReturnValue({
+      getModelsUrl: () => { throw new Error('bad url'); },
+      listModels: async () => ['m1']
+    });
+
+    const result = await LLMService.fetchModels(modelConfig);
+
+    expect(result.ok).toBe(true);
+    expect(result.models).toEqual(['m1']);
+    expect(result.url).toBe('https://example.com/v1');
+  });
+
+  it('listModels 请求失败时返回错误信息', async () => {
+    vi.spyOn(LLMService as any, 'getAdapter').mockReturnValue({
+      getModelsUrl: (cfg: any) => `${cfg.apiUrl}/models`,
+      listModels: async () => { throw new Error('HTTP 401: invalid key'); }
+    });
+
+    const result = await LLMService.fetchModels(modelConfig);
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('HTTP 401');
+    expect(result.models).toEqual([]);
+  });
+
+  it('默认配置（id=default）把内置 apiKey 透传给适配器', async () => {
+    let seen: any;
+    vi.spyOn(LLMService as any, 'getAdapter').mockImplementation(() => ({
+      getModelsUrl: (cfg: any) => { seen = cfg; return `${cfg.apiUrl}/models`; },
+      // 本地构建未注入内置 key 时 DEFAULT_LLM_CONFIG.apiKey 为空串，这里只校验透传值
+      listModels: async (cfg: any) => [cfg.apiKey === DEFAULT_LLM_CONFIG.apiKey ? 'key-passthrough' : 'unexpected']
+    }));
+
+    const result = await LLMService.fetchModels({ ...modelConfig, id: 'default', apiKey: '' });
+
+    expect(seen.apiKey).toBe(DEFAULT_LLM_CONFIG.apiKey);
+    expect(result.ok).toBe(true);
+    expect(result.models).toEqual(['key-passthrough']);
   });
 });

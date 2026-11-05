@@ -63,6 +63,13 @@ export interface ILLMAdapter {
   listModels?(llmConfig: LLMConfig, timeout: number): Promise<string[]>;
 
   /**
+   * 由基址推出模型清单端点（可选实现，与 listModels 配套）。
+   *
+   * 供 UI 在发起请求前展示「实际会请求哪个地址」，失败时也便于用户自查。
+   */
+  getModelsUrl?(llmConfig: LLMConfig): string;
+
+  /**
    * 在发送前对 Prompt 进行预处理（可选）
    */
   preprocessPrompt?(prompt: string): string;

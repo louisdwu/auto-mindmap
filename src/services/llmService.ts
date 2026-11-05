@@ -26,6 +26,19 @@ export interface ConnectionTestResult {
   modelsError?: string;
 }
 
+/** 通过 API 端点获取模型清单的结果（供选项页展示） */
+export interface ModelsFetchResult {
+  ok: boolean;
+  /** 实际请求的模型清单端点（GET） */
+  url: string;
+  /** 模型清单；失败时为空数组 */
+  models: string[];
+  /** 失败原因 */
+  error?: string;
+  /** 往返耗时（毫秒） */
+  latencyMs: number;
+}
+
 /** 探针 Prompt：只要最短回复，避免连通性测试本身消耗大量 token */
 const CONNECTION_TEST_PROMPT = '连通性测试：本次只回复「收到」两个字，不要输出任何其他内容。';
 const CONNECTION_TEST_SYSTEM_PROMPT = '你是连通性测试助手，严格按用户要求给出最短回复。';
@@ -683,6 +696,56 @@ export class LLMService {
       models,
       modelsError
     };
+  }
+
+  /**
+   * 通过 API 端点获取该配置可用的模型清单（GET /models、/models、/api/tags）。
+   *
+   * 与 testConnection 的分工：这里只读清单端点，不发探测请求、不消耗 token，
+   * 用于「还不知道该填哪个模型」的场景——填好地址和密钥后先拉清单再选模型。
+   * 适配器未实现 listModels 时如实返回失败原因，不静默吞掉。
+   */
+  static async fetchModels(
+    llmConfig: LLMConfig,
+    timeoutSeconds: number = 15
+  ): Promise<ModelsFetchResult> {
+    const startedAt = Date.now();
+    const fail = (error: string, url: string): ModelsFetchResult => ({
+      ok: false,
+      url,
+      models: [],
+      error,
+      latencyMs: Date.now() - startedAt
+    });
+
+    const apiKey = llmConfig.apiKey || (llmConfig.id === 'default' ? DEFAULT_LLM_CONFIG.apiKey : '');
+    const probeConfig: LLMConfig = { ...llmConfig, apiKey };
+
+    let adapter: ILLMAdapter;
+    try {
+      adapter = this.getAdapter(llmConfig.provider);
+    } catch (error: any) {
+      return fail(error?.message || String(error), llmConfig.apiUrl || '');
+    }
+
+    // 先推出清单端点用于展示；个别网关 URL 异常时退回 apiUrl，不影响主流程
+    let url = llmConfig.apiUrl || '';
+    if (typeof adapter.getModelsUrl === 'function') {
+      try {
+        url = adapter.getModelsUrl(probeConfig);
+      } catch { /* 仅展示用 */ }
+    }
+
+    if (!adapter.listModels) {
+      return fail('该提供商暂不支持查询模型列表', url);
+    }
+
+    try {
+      const models = await adapter.listModels(probeConfig, timeoutSeconds * 1000);
+      return { ok: true, url, models, latencyMs: Date.now() - startedAt };
+    } catch (error: any) {
+      return fail(error?.message || String(error), url);
+    }
   }
 
   /**

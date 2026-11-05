@@ -24,13 +24,13 @@ describe('OllamaAdapter 模型清单', () => {
   const adapter = new OllamaAdapter();
 
   it('基址推 /api/tags，不会重复拼 /api', () => {
-    expect(adapter.getTagsUrl(makeConfig('ollama', 'http://localhost:11434/api'))).toBe(
+    expect(adapter.getModelsUrl(makeConfig('ollama', 'http://localhost:11434/api'))).toBe(
       'http://localhost:11434/api/tags'
     );
-    expect(adapter.getTagsUrl(makeConfig('ollama', 'http://localhost:11434'))).toBe(
+    expect(adapter.getModelsUrl(makeConfig('ollama', 'http://localhost:11434'))).toBe(
       'http://localhost:11434/api/tags'
     );
-    expect(adapter.getTagsUrl(makeConfig('ollama', 'https://ollama.com/api/chat'))).toBe(
+    expect(adapter.getModelsUrl(makeConfig('ollama', 'https://ollama.com/api/chat'))).toBe(
       'https://ollama.com/api/tags'
     );
   });

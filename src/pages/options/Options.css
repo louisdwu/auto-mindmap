@@ -1368,6 +1368,37 @@ input:checked + .switch-label:before {
   font-weight: 600;
 }
 
+/* 模型清单较长时限制高度滚动，避免撑开表单 */
+.llm-model-chips--scroll {
+  max-height: 168px;
+  overflow-y: auto;
+}
+
+/* 「获取模型」按钮的拉取结果状态行 */
+.llm-fetch-status {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.llm-fetch-status--ok {
+  color: #15803d;
+}
+
+.llm-fetch-status--error {
+  color: #b91c1c;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.llm-fetch-status code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  background: rgba(15, 23, 42, 0.06);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
 .llm-advanced {
   margin: 4px 0 18px;
   border: 1px solid #e2e8f0;

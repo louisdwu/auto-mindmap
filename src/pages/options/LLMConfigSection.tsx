@@ -6,7 +6,7 @@ import {
   PluginConfig,
   getProviderLabel
 } from '../../types/config';
-import { ConnectionTestResult, LLMService } from '../../services/llmService';
+import { ConnectionTestResult, LLMService, ModelsFetchResult } from '../../services/llmService';
 
 interface LLMConfigSectionProps {
   config: PluginConfig;
@@ -36,7 +36,7 @@ function providerNote(provider: LLMProvider): string {
     case 'openai':
       return '基址通常以 /v1 结尾，插件会自动补 /chat/completions。';
     case 'gemini':
-      return '中国大陆通常需要全局代理或反向代理地址；模型名可点「测试连接」后从清单里选。';
+      return '中国大陆通常需要全局代理或反向代理地址；填好密钥后可点「获取模型」从清单里选。';
     case 'sensenova':
       return '内地基址必须带 /v1（https://token.sensenova.cn/v1），与海外 Key 不通用。';
     case 'ollama':
@@ -64,6 +64,8 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
 }) => {
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<ConnectionTestResult | null>(null);
+  const [fetchingModels, setFetchingModels] = useState(false);
+  const [fetchedModels, setFetchedModels] = useState<ModelsFetchResult | null>(null);
   const [showApiKey, setShowApiKey] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [showProviderPicker, setShowProviderPicker] = useState(false);
@@ -78,15 +80,24 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
     ? ['custom', 'ollama', 'lmstudio'].includes(editingConfig.provider)
     : false;
 
+  /** 通过 API 端点获取到的模型清单（成功时非空） */
+  const fetchedList = fetchedModels?.ok ? fetchedModels.models : [];
+
   const modelSuggestions = useMemo(() => {
+    const fetched = fetchedModels?.ok ? fetchedModels.models : [];
     const values = [
       preset?.model,
+      ...fetched,
       ...(testResult?.models || [])
     ].filter((value): value is string => Boolean(value && value.trim()));
     return Array.from(new Set(values)).slice(0, 8);
-  }, [preset?.model, testResult]);
+  }, [preset?.model, fetchedModels, testResult]);
 
-  const resetTestResult = () => setTestResult(null);
+  /** 地址/密钥/服务商变化后，旧的探测与清单结果都不再可信，一起清空 */
+  const resetModelInfo = () => {
+    setTestResult(null);
+    setFetchedModels(null);
+  };
 
   const handleTestConnection = async () => {
     if (!editingConfig || testing) return;
@@ -100,6 +111,17 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
     }
   };
 
+  const handleFetchModels = async () => {
+    if (!editingConfig || fetchingModels) return;
+    setFetchingModels(true);
+    try {
+      const result = await LLMService.fetchModels(editingConfig);
+      setFetchedModels(result);
+    } finally {
+      setFetchingModels(false);
+    }
+  };
+
   const applyProvider = (provider: LLMProvider) => {
     const nextPreset = LLM_PROVIDER_PRESETS[provider];
     const updates: Partial<LLMConfig> = {
@@ -110,7 +132,7 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
     if (nextPreset.maxTokens) updates.maxTokens = nextPreset.maxTokens;
     if (nextPreset.numCtx) updates.num_ctx = nextPreset.numCtx;
     if (nextPreset.temperature !== undefined) updates.temperature = nextPreset.temperature;
-    resetTestResult();
+    resetModelInfo();
     onUpdateEditingConfig(updates);
   };
 
@@ -189,13 +211,13 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
               role="button"
               tabIndex={0}
               onClick={() => {
-                resetTestResult();
+                resetModelInfo();
                 onEditConfig(cfg.id);
               }}
               onKeyDown={(event) => {
                 if (event.key === 'Enter' || event.key === ' ') {
                   event.preventDefault();
-                  resetTestResult();
+                  resetModelInfo();
                   onEditConfig(cfg.id);
                 }
               }}
@@ -263,7 +285,7 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
                   type="button"
                   className="btn--secondary-outline"
                   onClick={() => {
-                    resetTestResult();
+                    resetModelInfo();
                     onSetActiveConfig(editingConfig.id);
                   }}
                 >
@@ -288,21 +310,32 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
 
             <div className="form-group">
               <label className="form-label">模型</label>
-              <input
-                className="form-input"
-                type="text"
-                value={editingConfig.model}
-                onChange={(event) => onUpdateEditingConfig({ model: event.target.value })}
-                placeholder={preset?.model || '例如：gpt-4o-mini'}
-                list="llm-model-suggestions"
-                spellCheck={false}
-              />
+              <div className="llm-key-row">
+                <input
+                  className="form-input"
+                  type="text"
+                  value={editingConfig.model}
+                  onChange={(event) => onUpdateEditingConfig({ model: event.target.value })}
+                  placeholder={preset?.model || '例如：gpt-4o-mini'}
+                  list="llm-model-suggestions"
+                  spellCheck={false}
+                />
+                <button
+                  type="button"
+                  className="btn--secondary-outline"
+                  onClick={handleFetchModels}
+                  disabled={fetchingModels || !editingConfig.apiUrl.trim()}
+                  title={`通过 API 端点拉取可用模型清单，不发探测请求${fetchedModels?.url ? `\n${fetchedModels.url}` : ''}`}
+                >
+                  {fetchingModels ? '获取中…' : '获取模型'}
+                </button>
+              </div>
               <datalist id="llm-model-suggestions">
                 {modelSuggestions.map(model => <option key={model} value={model} />)}
               </datalist>
-              {modelSuggestions.length > 1 && (
-                <div className="llm-model-chips">
-                  {modelSuggestions.slice(0, 6).map(model => {
+              {(fetchedList.length > 0 || modelSuggestions.length > 1) && (
+                <div className={'llm-model-chips' + (fetchedList.length > 1 ? ' llm-model-chips--scroll' : '')}>
+                  {(fetchedList.length > 0 ? fetchedList : modelSuggestions.slice(0, 6)).map(model => {
                     const chipClass = model === editingConfig.model
                       ? 'llm-model-chip llm-model-chip--active'
                       : 'llm-model-chip';
@@ -318,6 +351,19 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
                     );
                   })}
                 </div>
+              )}
+              {fetchedModels && (
+                fetchedModels.ok ? (
+                  <p className="llm-fetch-status llm-fetch-status--ok">
+                    已从清单端点获取 {fetchedModels.models.length} 个模型（{fetchedModels.latencyMs}ms），点击上方模型名即可填入。
+                  </p>
+                ) : (
+                  <p className="llm-fetch-status llm-fetch-status--error">
+                    获取模型清单失败：{fetchedModels.error}
+                    <br />
+                    <code>{fetchedModels.url || '(未填写 API 地址)'}</code>
+                  </p>
+                )
               )}
             </div>
           </div>
