@@ -17,14 +17,14 @@ async function updateBadgeState() {
   const isPaused = await StorageService.isPaused();
   
   if (isPaused) {
-    // 暂停状态：显示红色 "||" 标记
+    // 关闭状态：显示红色 "||" 标记
     await chrome.action.setBadgeText({ text: '||' });
     await chrome.action.setBadgeBackgroundColor({ color: '#FF4444' });
-    await chrome.action.setTitle({ title: '自动思维导图（已暂停）- 点击恢复' });
+    await chrome.action.setTitle({ title: '自动思维导图（已关闭）- 点击开启' });
   } else {
-    // 运行状态：清除 badge
+    // 开启状态：清除 badge
     await chrome.action.setBadgeText({ text: '' });
-    await chrome.action.setTitle({ title: '自动思维导图（运行中）- 点击暂停' });
+    await chrome.action.setTitle({ title: '自动思维导图（已开启）- 点击关闭' });
   }
 }
 

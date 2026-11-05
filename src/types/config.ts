@@ -260,6 +260,13 @@ export interface ExtensionState {
   isPaused: boolean;
 }
 
+/**
+ * 默认关闭自动生成。
+ *
+ * 自动思维导图会在用户打开视频页面时自动消耗 LLM tokens（甚至触发 ASR 转录），
+ * 属于「未经当次确认的开销」，因此默认不开启；用户点击扩展图标手动开启。
+ * 手动点击悬浮球生成不受此状态影响。
+ */
 export const DEFAULT_EXTENSION_STATE: ExtensionState = {
-  isPaused: false
+  isPaused: true
 };
