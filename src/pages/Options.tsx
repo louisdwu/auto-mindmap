@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { PluginConfig, DEFAULT_CONFIG, LLMConfig, LLMProvider, LLM_PROVIDER_PRESETS, createDefaultLLMConfig } from '../types/config';
+import { PluginConfig, DEFAULT_CONFIG, LLMConfig, LLM_PROVIDER_PRESETS, createDefaultLLMConfig } from '../types/config';
 import { StorageService } from '../services/storageService';
 
 // 子组件
@@ -152,10 +152,10 @@ export default function Options() {
     }
   };
 
-  const handleAddNewConfig = async (provider: LLMProvider = 'custom') => {
+  const handleAddNewConfig = async () => {
     await flushEditingSave();
-    const preset = LLM_PROVIDER_PRESETS[provider];
-    const newConfig = createDefaultLLMConfig(provider);
+    const preset = LLM_PROVIDER_PRESETS.custom;
+    const newConfig = createDefaultLLMConfig('custom');
 
     const baseName = preset.defaultName;
     let name = baseName;

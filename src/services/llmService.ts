@@ -1,4 +1,4 @@
-import { LLMProvider, PluginConfig, LLMConfig, DEFAULT_CONFIG, DEFAULT_LLM_CONFIG, REFLECTION_PROMPT_MARKER } from '../types/config';
+import { LLMProvider, PluginConfig, LLMConfig, DEFAULT_CONFIG, DEFAULT_LLM_CONFIG, REFLECTION_PROMPT_MARKER, getModelChain } from '../types/config';
 import { StorageService } from './storageService';
 import { ILLMAdapter, LlmUsage } from './llm/base';
 import { OpenAIAdapter } from './llm/adapters/OpenAIAdapter';
@@ -78,6 +78,9 @@ export class LLMService {
     gemini: new GeminiAdapter(),
     ollama: new OllamaAdapter()
   };
+
+  /** 记录每个配置最近一次成功使用的模型：后续调用优先尝试它，避免在已下线模型上反复失败 */
+  private static lastGoodModel = new Map<string, string>();
 
   private static getAdapter(provider: LLMProvider): ILLMAdapter {
     const adapter = this.adapters[provider];
@@ -189,7 +192,7 @@ export class LLMService {
     await LoggerService.info(
       'LLMService',
       canUseSingleCall
-        ? `正在调用模型 ${llmConfig.name} (${llmConfig.model}) 生成思维导图`
+        ? `正在调用配置 ${llmConfig.name} 的模型链 [${getModelChain(llmConfig).join(' → ')}] 生成思维导图`
         : `字幕约 ${subtitleTokens} tokens，超过单次输入预算 ${inputBudget}，启用分段提炼`,
       undefined,
       taskId
@@ -568,18 +571,48 @@ export class LLMService {
     // 构造最终的 LLM 配置（包含补全后的 API Key）
     const finalLLMConfig = { ...llmConfig, apiKey };
 
-    try {
-      const content = await adapter.generateMindmap(config, finalLLMConfig, finalPrompt, timeout, finalContext);
-      
-      if (!content || typeof content !== 'string' || content.trim().length === 0) {
-        throw new Error('大模型返回的内容为空（可能是由于触发了敏感词过滤或政治文明敏感字符拒绝工作，请检查输入或更换模型）');
-      }
-
-      return content;
-    } catch (error: any) {
-      console.error(`[LLMService] 调用 ${llmConfig.provider} 失败:`, error);
-      throw new Error(ErrorUtils.parseError(error));
+    // 模型优先级链：从链首开始，前一个失败自动切换下一个
+    const chain = getModelChain(llmConfig);
+    if (chain.length === 0) {
+      throw new Error('未配置模型名称，请前往设置页面添加模型或通过「获取模型」拉取可用清单');
     }
+
+    // 上次成功的模型优先尝试：长任务（分段/反思）会连续调用多次，
+    // 若链首已下线，不去反复在它身上浪费每次的失败等待。
+    const preferred = this.lastGoodModel.get(llmConfig.id);
+    const orderedModels = preferred && chain.includes(preferred)
+      ? [preferred, ...chain.filter(m => m !== preferred)]
+      : chain;
+
+    let lastError: any;
+    for (let i = 0; i < orderedModels.length; i++) {
+      const model = orderedModels[i];
+      try {
+        const content = await adapter.generateMindmap(config, { ...finalLLMConfig, model }, finalPrompt, timeout, finalContext);
+
+        if (!content || typeof content !== 'string' || content.trim().length === 0) {
+          throw new Error('大模型返回的内容为空（可能是由于触发了敏感词过滤或政治文明敏感字符拒绝工作，请检查输入或更换模型）');
+        }
+
+        this.lastGoodModel.set(llmConfig.id, model);
+        return content;
+      } catch (error: any) {
+        lastError = error;
+        // 用户主动取消属于意图中断，不切换备选模型，如实抛出
+        if (context?.signal?.aborted) throw error;
+        if (i < orderedModels.length - 1) {
+          await LoggerService.warn(
+            'LLMService',
+            `模型 ${model} 调用失败，切换到备选模型 ${orderedModels[i + 1]}（${i + 2}/${orderedModels.length}）`,
+            error,
+            context?.taskId
+          );
+        }
+      }
+    }
+
+    console.error(`[LLMService] 调用 ${llmConfig.provider} 失败（已尝试 ${orderedModels.length} 个模型）:`, lastError);
+    throw new Error(ErrorUtils.parseError(lastError));
   }
 
   /**
@@ -756,7 +789,7 @@ export class LLMService {
     if (!llmConfig.apiKey && llmConfig.provider !== 'lmstudio' && llmConfig.provider !== 'ollama') {
       return { valid: false, error: 'API 密钥不能为空' };
     }
-    if (!llmConfig.model) return { valid: false, error: '模型名称不能为空' };
+    if (getModelChain(llmConfig).length === 0) return { valid: false, error: '至少需要配置一个模型' };
     if (!pluginConfig.prompt.template) return { valid: false, error: 'Prompt 模板不能为空' };
     return { valid: true };
   }

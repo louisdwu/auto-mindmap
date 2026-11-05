@@ -283,3 +283,110 @@ describe('LLMService.fetchModels 通过 API 端点获取模型清单', () => {
     expect(result.models).toEqual(['key-passthrough']);
   });
 });
+
+describe('LLMService 模型优先级链故障切换', () => {
+  beforeEach(() => {
+    // 前面的 describe 在 callLLM 上留有带实现的 spy，会拦截这里的直接调用，先恢复
+    vi.restoreAllMocks();
+    vi.clearAllMocks();
+    (LLMService as any).lastGoodModel.clear();
+  });
+
+  function makeChainConfig(models: string[]) {
+    return { ...modelConfig, model: models[0], models };
+  }
+
+  it('链首失败自动切换到下一个，成功后返回', async () => {
+    const adapter = {
+      generateMindmap: vi.fn()
+        .mockRejectedValueOnce(new Error('HTTP 404: model not found'))
+        .mockResolvedValueOnce('# 导图\n- 一')
+    };
+    vi.spyOn(LLMService as any, 'getAdapter').mockReturnValue(adapter);
+
+    const result = await (LLMService as any).callLLM(
+      buildConfig(),
+      makeChainConfig(['m-primary', 'm-backup']),
+      '测试 prompt'
+    );
+
+    expect(result).toContain('# 导图');
+    expect(adapter.generateMindmap).toHaveBeenCalledTimes(2);
+    // 第一次用链首，第二次用备选
+    expect(adapter.generateMindmap.mock.calls[0][1].model).toBe('m-primary');
+    expect(adapter.generateMindmap.mock.calls[1][1].model).toBe('m-backup');
+  });
+
+  it('全部模型失败时抛出最后一个错误', async () => {
+    const adapter = { generateMindmap: vi.fn().mockRejectedValue(new Error('HTTP 429: limited')) };
+    vi.spyOn(LLMService as any, 'getAdapter').mockReturnValue(adapter);
+
+    await expect((LLMService as any).callLLM(
+      buildConfig(),
+      makeChainConfig(['m1', 'm2', 'm3']),
+      '测试 prompt'
+    )).rejects.toThrow('HTTP 429');
+
+    expect(adapter.generateMindmap).toHaveBeenCalledTimes(3);
+  });
+
+  it('成功过的模型在后续调用中优先尝试', async () => {
+    const adapter = {
+      generateMindmap: vi.fn()
+        .mockRejectedValueOnce(new Error('HTTP 404: gone'))
+        .mockResolvedValue('# ok')
+    };
+    vi.spyOn(LLMService as any, 'getAdapter').mockReturnValue(adapter);
+    const cfg = makeChainConfig(['dead-model', 'alive-model']);
+
+    await (LLMService as any).callLLM(buildConfig(), cfg, '第一次调用');
+    await (LLMService as any).callLLM(buildConfig(), cfg, '第二次调用');
+
+    // 第二次直接用上次成功的 alive-model，不再碰 dead-model
+    expect(adapter.generateMindmap).toHaveBeenCalledTimes(3);
+    expect(adapter.generateMindmap.mock.calls[1][1].model).toBe('alive-model');
+    expect(adapter.generateMindmap.mock.calls[2][1].model).toBe('alive-model');
+  });
+
+  it('用户取消时不切换备选模型，直接抛出', async () => {
+    const abortError = new Error('aborted');
+    abortError.name = 'AbortError';
+    const adapter = { generateMindmap: vi.fn().mockRejectedValue(abortError) };
+    vi.spyOn(LLMService as any, 'getAdapter').mockReturnValue(adapter);
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect((LLMService as any).callLLM(
+      buildConfig(),
+      makeChainConfig(['m1', 'm2']),
+      '测试 prompt',
+      { signal: controller.signal }
+    )).rejects.toThrow('aborted');
+
+    expect(adapter.generateMindmap).toHaveBeenCalledTimes(1);
+  });
+
+  it('模型链为空时给出可操作的错误提示', async () => {
+    vi.spyOn(LLMService as any, 'getAdapter').mockReturnValue({ generateMindmap: vi.fn() });
+
+    await expect((LLMService as any).callLLM(
+      buildConfig(),
+      { ...modelConfig, model: '', models: [] },
+      '测试 prompt'
+    )).rejects.toThrow('未配置模型名称');
+  });
+
+  it('旧配置只有单 model 字段也能正常走链（兼容回退）', async () => {
+    const adapter = { generateMindmap: vi.fn().mockResolvedValue('# ok') };
+    vi.spyOn(LLMService as any, 'getAdapter').mockReturnValue(adapter);
+
+    const result = await (LLMService as any).callLLM(
+      buildConfig(),
+      { ...modelConfig, model: 'legacy-model', models: undefined },
+      '测试 prompt'
+    );
+
+    expect(result).toBe('# ok');
+    expect(adapter.generateMindmap.mock.calls[0][1].model).toBe('legacy-model');
+  });
+});

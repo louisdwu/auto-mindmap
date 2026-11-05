@@ -2,8 +2,8 @@ import React, { useMemo, useState } from 'react';
 import {
   LLMConfig,
   LLMProvider,
-  LLM_PROVIDER_PRESETS,
   PluginConfig,
+  getModelChain,
   getProviderLabel
 } from '../../types/config';
 import { ConnectionTestResult, LLMService, ModelsFetchResult } from '../../services/llmService';
@@ -16,38 +16,17 @@ interface LLMConfigSectionProps {
   saved: boolean;
   onEditConfig: (id: string) => void;
   onDeleteConfig: (id: string) => void;
-  onAddNewConfig: (provider?: LLMProvider) => void;
+  onAddNewConfig: () => void;
   onSetActiveConfig: (id: string) => void;
   onUpdateEditingConfig: (updates: Partial<LLMConfig>) => void;
 }
 
-const PROVIDER_ORDER: LLMProvider[] = [
-  'openai',
-  'gemini',
-  'sensenova',
-  'ollama',
-  'lmstudio',
-  'custom'
-];
-
-/** 每个提供商只保留一条真正需要用户知道的信息，避免表单变成说明书 */
 function providerNote(provider: LLMProvider): string {
-  switch (provider) {
-    case 'openai':
-      return '基址通常以 /v1 结尾，插件会自动补 /chat/completions。';
-    case 'gemini':
-      return '中国大陆通常需要全局代理或反向代理地址；填好密钥后可点「获取模型」从清单里选。';
-    case 'sensenova':
-      return '内地基址必须带 /v1（https://token.sensenova.cn/v1），与海外 Key 不通用。';
-    case 'ollama':
-      return '本地默认 http://localhost:11434/api；Ollama Cloud 用 https://ollama.com/api 并填写 Key。';
-    case 'lmstudio':
-      return '本地默认 http://localhost:1234/v1；通常不需要 API Key。';
-    case 'custom':
-      return '填写任意兼容 OpenAI /chat/completions 的基址即可。';
-    default:
-      return '';
+  if (provider === 'custom') {
+    return '填写任意兼容 OpenAI /chat/completions 的基址即可，插件会自动补全请求路径。';
   }
+  const label = getProviderLabel(provider);
+  return `该配置沿用历史 ${label} 协议，可继续正常使用；新建配置已统一为自定义（OpenAI 兼容）。`;
 }
 
 export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
@@ -68,32 +47,34 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
   const [fetchedModels, setFetchedModels] = useState<ModelsFetchResult | null>(null);
   const [showApiKey, setShowApiKey] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
-  const [showProviderPicker, setShowProviderPicker] = useState(false);
+  const [modelInput, setModelInput] = useState('');
 
   const activeId = llmConfigs.some(cfg => cfg.id === config.selectedLLMConfigId)
     ? config.selectedLLMConfigId
     : (llmConfigs[0]?.id || '');
 
-  const preset = editingConfig ? LLM_PROVIDER_PRESETS[editingConfig.provider] : null;
   const isActive = !!editingConfig && editingConfig.id === activeId;
-  const needsManualUrl = editingConfig
-    ? ['custom', 'ollama', 'lmstudio'].includes(editingConfig.provider)
-    : false;
+  const provider = editingConfig?.provider || 'custom';
 
   /** 通过 API 端点获取到的模型清单（成功时非空） */
   const fetchedList = fetchedModels?.ok ? fetchedModels.models : [];
 
+  /** 当前编辑配置的模型优先级链（兼容旧单模型字段） */
+  const modelChain = useMemo(
+    () => editingConfig ? getModelChain(editingConfig) : [],
+    [editingConfig]
+  );
+
   const modelSuggestions = useMemo(() => {
-    const fetched = fetchedModels?.ok ? fetchedModels.models : [];
     const values = [
-      preset?.model,
-      ...fetched,
+      ...fetchedList,
       ...(testResult?.models || [])
     ].filter((value): value is string => Boolean(value && value.trim()));
     return Array.from(new Set(values)).slice(0, 8);
-  }, [preset?.model, fetchedModels, testResult]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fetchedModels, testResult]);
 
-  /** 地址/密钥/服务商变化后，旧的探测与清单结果都不再可信，一起清空 */
+  /** 地址/密钥变化后，旧的探测与清单结果都不再可信，一起清空 */
   const resetModelInfo = () => {
     setTestResult(null);
     setFetchedModels(null);
@@ -122,23 +103,32 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
     }
   };
 
-  const applyProvider = (provider: LLMProvider) => {
-    const nextPreset = LLM_PROVIDER_PRESETS[provider];
-    const updates: Partial<LLMConfig> = {
-      provider,
-      apiUrl: nextPreset.apiUrl,
-      model: nextPreset.model
-    };
-    if (nextPreset.maxTokens) updates.maxTokens = nextPreset.maxTokens;
-    if (nextPreset.numCtx) updates.num_ctx = nextPreset.numCtx;
-    if (nextPreset.temperature !== undefined) updates.temperature = nextPreset.temperature;
-    resetModelInfo();
-    onUpdateEditingConfig(updates);
+  // === 模型优先级链管理 ===
+
+  /** 写回链，并保持 model 字段与链首一致（兼容旧展示与旧数据） */
+  const persistChain = (models: string[]) => {
+    onUpdateEditingConfig({ models, model: models[0] || '' });
   };
 
-  const handlePickProvider = (provider: LLMProvider) => {
-    setShowProviderPicker(false);
-    onAddNewConfig(provider);
+  /** 新模型追加到链尾（添加顺序即优先级），已存在则不重复添加 */
+  const addModel = (raw: string) => {
+    const name = (raw || '').trim();
+    if (!name) return;
+    setModelInput('');
+    if (modelChain.includes(name)) return;
+    persistChain([...modelChain, name]);
+  };
+
+  const removeModel = (name: string) => {
+    persistChain(modelChain.filter(m => m !== name));
+  };
+
+  const moveModel = (index: number, dir: -1 | 1) => {
+    const target = index + dir;
+    if (target < 0 || target >= modelChain.length) return;
+    const next = [...modelChain];
+    [next[index], next[target]] = [next[target], next[index]];
+    persistChain(next);
   };
 
   return (
@@ -147,57 +137,21 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
         <div>
           <h2 className="llm-section__title">大模型</h2>
           <p className="llm-section__desc">
-            选一个服务商，填入密钥和模型即可。超时、上下文等参数默认折叠，通常不需要改。
+            填入兼容 OpenAI 的 API 地址、密钥和模型即可；可配置多个模型按序兜底。
           </p>
         </div>
         <button
           type="button"
           className="btn--primary llm-add-btn"
-          onClick={() => setShowProviderPicker(value => !value)}
+          onClick={onAddNewConfig}
         >
-          ＋ 添加模型
+          ＋ 添加配置
         </button>
       </div>
 
-      {showProviderPicker && (
-        <div className="llm-provider-picker">
-          <div className="llm-provider-picker__head">
-            <strong>选择服务商</strong>
-            <span>添加后可在下方填写密钥与模型</span>
-          </div>
-          <div className="llm-provider-grid">
-            {PROVIDER_ORDER.map(provider => {
-              const item = LLM_PROVIDER_PRESETS[provider];
-              const badgeClass = item.badge === '本地'
-                ? 'llm-provider-card__badge--local'
-                : item.badge === '兼容'
-                  ? 'llm-provider-card__badge--compat'
-                  : 'llm-provider-card__badge--cloud';
-              return (
-                <button
-                  key={provider}
-                  type="button"
-                  className="llm-provider-card"
-                  onClick={() => handlePickProvider(provider)}
-                >
-                  <span className="llm-provider-card__icon">{item.icon}</span>
-                  <span className="llm-provider-card__body">
-                    <strong>{item.label}</strong>
-                    <small title={item.tagline}>{item.tagline}</small>
-                  </span>
-                  <span className={'llm-provider-card__badge ' + badgeClass}>
-                    {item.badge}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
       <div className="llm-config-list">
         {llmConfigs.map(cfg => {
-          const item = LLM_PROVIDER_PRESETS[cfg.provider];
+          const chain = getModelChain(cfg);
           const active = cfg.id === activeId;
           const cardClass = [
             'llm-config-card',
@@ -222,14 +176,16 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
                 }
               }}
             >
-              <div className="llm-config-card__icon">{item?.icon || '🤖'}</div>
+              <div className="llm-config-card__icon">🤖</div>
               <div className="llm-config-card__body">
                 <div className="llm-config-card__name">
                   {cfg.name || '未命名配置'}
                   {active && <span className="llm-config-card__badge">使用中</span>}
                 </div>
                 <div className="llm-config-card__detail">
-                  {getProviderLabel(cfg.provider)} · {cfg.model || '未填写模型'}
+                  {chain.length > 0
+                    ? (chain.length > 1 ? `${chain[0]} 等 ${chain.length} 个模型` : chain[0])
+                    : '未填写模型'}
                 </div>
               </div>
               <div className="llm-config-card__actions">
@@ -273,7 +229,7 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
                 编辑 · {editingConfig.name || '未命名配置'}
               </div>
               <div className="llm-editor__sub">
-                {getProviderLabel(editingConfig.provider)}
+                {getProviderLabel(provider)}
                 {isActive ? ' · 当前生成使用此配置' : ' · 尚未设为当前使用'}
               </div>
             </div>
@@ -304,66 +260,26 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
                 type="text"
                 value={editingConfig.name}
                 onChange={(event) => onUpdateEditingConfig({ name: event.target.value })}
-                placeholder="例如：GPT-4o、SenseNova、本地 Ollama"
+                placeholder="例如：主力配置、本地兜底"
               />
             </div>
 
             <div className="form-group">
-              <label className="form-label">模型</label>
-              <div className="llm-key-row">
-                <input
-                  className="form-input"
-                  type="text"
-                  value={editingConfig.model}
-                  onChange={(event) => onUpdateEditingConfig({ model: event.target.value })}
-                  placeholder={preset?.model || '例如：gpt-4o-mini'}
-                  list="llm-model-suggestions"
-                  spellCheck={false}
-                />
-                <button
-                  type="button"
-                  className="btn--secondary-outline"
-                  onClick={handleFetchModels}
-                  disabled={fetchingModels || !editingConfig.apiUrl.trim()}
-                  title={`通过 API 端点拉取可用模型清单，不发探测请求${fetchedModels?.url ? `\n${fetchedModels.url}` : ''}`}
-                >
-                  {fetchingModels ? '获取中…' : '获取模型'}
-                </button>
-              </div>
-              <datalist id="llm-model-suggestions">
-                {modelSuggestions.map(model => <option key={model} value={model} />)}
-              </datalist>
-              {(fetchedList.length > 0 || modelSuggestions.length > 1) && (
-                <div className={'llm-model-chips' + (fetchedList.length > 1 ? ' llm-model-chips--scroll' : '')}>
-                  {(fetchedList.length > 0 ? fetchedList : modelSuggestions.slice(0, 6)).map(model => {
-                    const chipClass = model === editingConfig.model
-                      ? 'llm-model-chip llm-model-chip--active'
-                      : 'llm-model-chip';
-                    return (
-                      <button
-                        key={model}
-                        type="button"
-                        className={chipClass}
-                        onClick={() => onUpdateEditingConfig({ model })}
-                      >
-                        {model}
-                      </button>
-                    );
-                  })}
+              <label className="form-label">API 地址</label>
+              <input
+                className="form-input form-input--mono"
+                type="text"
+                value={editingConfig.apiUrl}
+                onChange={(event) => onUpdateEditingConfig({ apiUrl: event.target.value })}
+                placeholder="https://example.com/v1"
+                spellCheck={false}
+              />
+              <p className="form-hint">{providerNote(provider)}</p>
+              {editingConfig.apiUrl && (
+                <div className="url-preview">
+                  <div className="url-preview__label">实际请求地址</div>
+                  <code>{LLMService.getFullRequestUrl(editingConfig.provider, editingConfig.apiUrl, modelChain[0] || '')}</code>
                 </div>
-              )}
-              {fetchedModels && (
-                fetchedModels.ok ? (
-                  <p className="llm-fetch-status llm-fetch-status--ok">
-                    已从清单端点获取 {fetchedModels.models.length} 个模型（{fetchedModels.latencyMs}ms），点击上方模型名即可填入。
-                  </p>
-                ) : (
-                  <p className="llm-fetch-status llm-fetch-status--error">
-                    获取模型清单失败：{fetchedModels.error}
-                    <br />
-                    <code>{fetchedModels.url || '(未填写 API 地址)'}</code>
-                  </p>
-                )
               )}
             </div>
           </div>
@@ -376,7 +292,7 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
                 type={showApiKey ? 'text' : 'password'}
                 value={editingConfig.apiKey}
                 onChange={(event) => onUpdateEditingConfig({ apiKey: event.target.value })}
-                placeholder={editingConfig.provider === 'ollama' ? '本地 Ollama 可留空；云端需填写' : 'sk-...'}
+                placeholder={provider === 'ollama' ? '本地 Ollama 可留空；云端需填写' : 'sk-...'}
                 autoComplete="off"
                 spellCheck={false}
               />
@@ -392,54 +308,127 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
             <p className="form-hint">
               只保存在本机 <code>chrome.storage.local</code>，不会同步到云端；导出配置时默认脱敏。
             </p>
-            {['openai', 'gemini', 'sensenova'].includes(editingConfig.provider)
-              && !editingConfig.apiKey.trim() && (
-                <div className="llm-inline-warning">
-                  该服务商需要 API 密钥，留空会导致生成任务失败。
-                </div>
-              )}
+            {provider !== 'ollama' && !editingConfig.apiKey.trim() && (
+              <div className="llm-inline-warning">
+                该端点通常需要 API 密钥，留空会导致生成任务失败。
+              </div>
+            )}
           </div>
 
-          {needsManualUrl && (
-            <div className="form-group">
-              <label className="form-label">API 地址</label>
+          <div className="form-group">
+            <label className="form-label">模型（按顺序尝试，失败自动切换）</label>
+            {modelChain.length > 0 && (
+              <div className="llm-model-chain">
+                {modelChain.map((model, index) => (
+                  <div
+                    key={model}
+                    className={index === 0 ? 'llm-model-chain__item llm-model-chain__item--primary' : 'llm-model-chain__item'}
+                  >
+                    <span className="llm-model-chain__order">{index + 1}</span>
+                    <code className="llm-model-chain__name" title={model}>{model}</code>
+                    {index === 0 && <span className="llm-model-chain__badge">优先</span>}
+                    <div className="llm-model-chain__ops">
+                      <button
+                        type="button"
+                        onClick={() => moveModel(index, -1)}
+                        disabled={index === 0}
+                        title="上移（提高优先级）"
+                        aria-label={`上移模型 ${model}`}
+                      >↑</button>
+                      <button
+                        type="button"
+                        onClick={() => moveModel(index, 1)}
+                        disabled={index === modelChain.length - 1}
+                        title="下移（降低优先级）"
+                        aria-label={`下移模型 ${model}`}
+                      >↓</button>
+                      <button
+                        type="button"
+                        onClick={() => removeModel(model)}
+                        title="从链中移除"
+                        aria-label={`移除模型 ${model}`}
+                      >×</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="llm-key-row">
               <input
-                className="form-input form-input--mono"
+                className="form-input"
                 type="text"
-                value={editingConfig.apiUrl}
-                onChange={(event) => onUpdateEditingConfig({ apiUrl: event.target.value })}
-                placeholder={preset?.apiUrl || 'https://example.com/v1'}
+                value={modelInput}
+                onChange={(event) => setModelInput(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    addModel(modelInput);
+                  }
+                }}
+                placeholder="输入模型名后回车添加，如 gpt-4o-mini"
+                list="llm-model-suggestions"
                 spellCheck={false}
               />
-              <p className="form-hint">{providerNote(editingConfig.provider)}</p>
+              <button
+                type="button"
+                className="btn--secondary-outline"
+                onClick={() => addModel(modelInput)}
+                disabled={!modelInput.trim()}
+              >
+                添加
+              </button>
+              <button
+                type="button"
+                className="btn--secondary-outline"
+                onClick={handleFetchModels}
+                disabled={fetchingModels || !editingConfig.apiUrl.trim()}
+                title={`通过 API 端点拉取可用模型清单，不发探测请求${fetchedModels?.url ? `\n${fetchedModels.url}` : ''}`}
+              >
+                {fetchingModels ? '获取中…' : '获取模型'}
+              </button>
             </div>
-          )}
-
-          <div className="form-group">
-            <label className="form-label">服务商</label>
-            <div className="llm-provider-grid llm-provider-grid--compact">
-              {PROVIDER_ORDER.map(provider => {
-                const item = LLM_PROVIDER_PRESETS[provider];
-                const providerClass = editingConfig.provider === provider
-                  ? 'llm-provider-card llm-provider-card--compact llm-provider-card--active'
-                  : 'llm-provider-card llm-provider-card--compact';
-                return (
-                  <button
-                    key={provider}
-                    type="button"
-                    className={providerClass}
-                    onClick={() => applyProvider(provider)}
-                  >
-                    <span className="llm-provider-card__icon">{item.icon}</span>
-                    <span className="llm-provider-card__body">
-                      <strong>{item.shortLabel || item.label}</strong>
-                      <small>{item.badge}</small>
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-            {!needsManualUrl && <p className="form-hint">{providerNote(editingConfig.provider)}</p>}
+            <datalist id="llm-model-suggestions">
+              {modelSuggestions.map(model => <option key={model} value={model} />)}
+            </datalist>
+            {(fetchedList.length > 0 || modelSuggestions.length > 0) && (
+              <div className={'llm-model-chips' + (fetchedList.length > 1 ? ' llm-model-chips--scroll' : '')}>
+                {(fetchedList.length > 0 ? fetchedList : modelSuggestions).map(model => {
+                  const inChain = modelChain.includes(model);
+                  const chipClass = inChain
+                    ? 'llm-model-chip llm-model-chip--active'
+                    : 'llm-model-chip';
+                  return (
+                    <button
+                      key={model}
+                      type="button"
+                      className={chipClass}
+                      onClick={() => addModel(model)}
+                      title={inChain ? '已在模型链中' : '点击添加到模型链末尾'}
+                    >
+                      {model}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            {fetchedModels && (
+              fetchedModels.ok ? (
+                <p className="llm-fetch-status llm-fetch-status--ok">
+                  已从清单端点获取 {fetchedModels.models.length} 个模型（{fetchedModels.latencyMs}ms），点击模型名即可加入模型链。
+                </p>
+              ) : (
+                <p className="llm-fetch-status llm-fetch-status--error">
+                  获取模型清单失败：{fetchedModels.error}
+                  <br />
+                  <code>{fetchedModels.url || '(未填写 API 地址)'}</code>
+                </p>
+              )
+            )}
+            {modelChain.length > 1 && (
+              <p className="form-hint">
+                生成时按 1 → {modelChain.length} 顺序尝试：当前模型请求失败会自动切换到下一个，全部失败才报错。
+              </p>
+            )}
           </div>
 
           <div className="llm-advanced">
@@ -450,32 +439,13 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
             >
               <span>
                 <strong>高级设置</strong>
-                <small>API 地址、超时、Max Tokens、上下文、温度、请求地址预览</small>
+                <small>超时、Max Tokens、上下文、温度</small>
               </span>
               <span>{showAdvanced ? '收起' : '展开'}</span>
             </button>
 
             {showAdvanced && (
               <div className="llm-advanced__body">
-                <div className="form-group">
-                  <label className="form-label">API 地址</label>
-                  <input
-                    className="form-input form-input--mono"
-                    type="text"
-                    value={editingConfig.apiUrl}
-                    onChange={(event) => onUpdateEditingConfig({ apiUrl: event.target.value })}
-                    placeholder="https://api.openai.com/v1"
-                    spellCheck={false}
-                  />
-                  <p className="form-hint">{providerNote(editingConfig.provider)}</p>
-                  {editingConfig.apiUrl && (
-                    <div className="url-preview">
-                      <div className="url-preview__label">实际请求地址</div>
-                      <code>{LLMService.getFullRequestUrl(editingConfig.provider, editingConfig.apiUrl, editingConfig.model)}</code>
-                    </div>
-                  )}
-                </div>
-
                 <div className="llm-form-grid">
                   <div className="form-group">
                     <label className="form-label">超时时间（秒）</label>
@@ -539,12 +509,12 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
               type="button"
               className="btn--primary"
               onClick={handleTestConnection}
-              disabled={testing || !editingConfig.apiUrl || !editingConfig.model}
+              disabled={testing || !editingConfig.apiUrl.trim() || modelChain.length === 0}
             >
               {testing ? '测试中…' : '测试连接'}
             </button>
             <span className="form-hint">
-              用当前地址、密钥和模型发一次最小请求，并顺带取回可用模型清单。
+              用当前地址、密钥和链首模型发一次最小请求，并顺带取回可用模型清单。
             </span>
           </div>
 
@@ -558,18 +528,19 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
                 实际请求地址：<code>{testResult.url || '(未填写)'}</code>
               </div>
               <div className="conn-test__line">
-                模型：<code>{editingConfig.model || '(未填写)'}</code>
+                模型：<code>{modelChain[0] || '(未填写)'}</code>
               </div>
               <div className="conn-test__detail">{testResult.detail}</div>
 
               {testResult.models && testResult.models.length > 0 && (
                 <div className="conn-test__models">
                   <div className="conn-test__models-title">
-                    该密钥可用模型（{testResult.models.length}），点击可填入：
+                    该密钥可用模型（{testResult.models.length}），点击可加入模型链：
                   </div>
                   <div className="conn-test__models-list">
                     {testResult.models.map(id => {
-                      const modelClass = id === editingConfig.model?.trim()
+                      const inChain = modelChain.includes(id);
+                      const modelClass = inChain
                         ? 'conn-test__model conn-test__model--active'
                         : 'conn-test__model';
                       return (
@@ -577,7 +548,8 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
                           key={id}
                           type="button"
                           className={modelClass}
-                          onClick={() => onUpdateEditingConfig({ model: id })}
+                          onClick={() => addModel(id)}
+                          title={inChain ? '已在模型链中' : '点击添加到模型链末尾'}
                         >
                           {id}
                         </button>
@@ -599,9 +571,9 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
         <div className="llm-empty">
           <div className="llm-empty__icon">🤖</div>
           <div className="llm-empty__title">还没有配置大模型</div>
-          <p className="llm-empty__desc">添加一个服务商，填入密钥后即可自动生成思维导图。</p>
-          <button type="button" className="btn--primary" onClick={() => setShowProviderPicker(true)}>
-            ＋ 添加模型
+          <p className="llm-empty__desc">添加配置，填入 API 地址与密钥后即可自动生成思维导图。</p>
+          <button type="button" className="btn--primary" onClick={onAddNewConfig}>
+            ＋ 添加配置
           </button>
         </div>
       )}
