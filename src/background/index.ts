@@ -69,15 +69,25 @@ initConfig().then(async () => {
   
   // 监听扩展安装事件
   chrome.runtime.onInstalled.addListener(async (details) => {
-    if (details.reason === 'install') {
-      console.log('[Background] Extension installed');
-      // 安装时初始化 badge 状态，并直接打开设置页引导填写 LLM
+    if (details.reason === 'install' || details.reason === 'update') {
+      // 安装/更新后把自动生成重置为关闭。
+      // 存储里的 isPaused 会跨版本存留：只要历史上有过「开启」状态，
+      // 每次更新插件后一进视频页就会自动开始生成——这是默认值无法覆盖的，
+      // 必须在更新时机显式重置。手动点击悬浮球生成不受影响。
+      try {
+        const state = await StorageService.getExtensionState();
+        if (!state.isPaused) {
+          await StorageService.saveExtensionState({ ...state, isPaused: true });
+          console.log('[Background] 扩展安装/更新：自动思维导图已重置为关闭');
+        }
+      } catch (error) {
+        console.warn('[Background] 重置自动生成状态失败:', error);
+      }
       await updateBadgeState();
-      chrome.runtime.openOptionsPage();
-    } else if (details.reason === 'update') {
-      console.log('[Background] Extension updated');
-      // 更新时也更新 badge 状态
-      await updateBadgeState();
+      if (details.reason === 'install') {
+        // 安装时直接打开设置页引导填写 LLM
+        chrome.runtime.openOptionsPage();
+      }
     }
   });
   

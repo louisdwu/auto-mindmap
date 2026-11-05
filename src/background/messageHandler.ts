@@ -75,6 +75,14 @@ export class MessageHandler {
     const isSubtitleOnly = payload.subtitleOnly === true;
     const isAutoRequest = payload.origin === 'auto';
 
+    // 后台兜底拦截：自动流程的总开关只在后台这一处最可靠。
+    // content 侧的检查会被「扩展更新后残留的旧 content script」等路径绕过，
+    // 导致更新后一打开视频页就开始自动生成。
+    if (isAutoRequest && await StorageService.isPaused()) {
+      console.log('[MessageHandler] 自动思维导图已关闭，忽略自动字幕下载请求:', payload.videoUrl);
+      return { skipped: true, reason: 'auto-disabled' };
+    }
+
     const config = await StorageService.getConfig();
     const videoId = VideoUtils.getCacheId(payload.videoUrl);
 
@@ -214,6 +222,12 @@ export class MessageHandler {
       throw new Error('生成思维导图缺少视频地址或字幕内容');
     }
     const isAutoRequest = payload.origin === 'auto';
+
+    // 后台兜底拦截：理由同 handleDownloadSubtitle
+    if (isAutoRequest && await StorageService.isPaused()) {
+      console.log('[MessageHandler] 自动思维导图已关闭，忽略自动生成请求:', payload.videoUrl);
+      return { skipped: true, reason: 'auto-disabled' };
+    }
 
     // 用户已选择仅字幕时，页面自动流程不得再生成导图
     if (isAutoRequest && await this.taskManager.isSubtitleOnlyMode(payload.videoUrl)) {
