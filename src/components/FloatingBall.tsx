@@ -13,6 +13,10 @@ interface FloatingBallProps {
     videoTitle?: string;
     errorMessage?: string;
     statusMessage?: string;
+    /** 生成导图使用的 LLM 配置名称（失败诊断用） */
+    llmConfigName?: string;
+    /** 生成导图使用的模型标识（失败诊断用） */
+    llmModel?: string;
     subtitleText?: string;
     subtitleOnly?: boolean;
   };
@@ -138,18 +142,38 @@ export const FloatingBall: React.FC<FloatingBallProps> = ({
             ? currentTask.statusMessage 
             : statusInfo.text}
         </div>
-        {isFailed && currentTask.errorMessage && (
-          <div style={{
-            color: '#f39c12',
-            fontSize: '11px',
-            marginTop: '6px',
-            maxWidth: '220px',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap'
-          }}>
-            {currentTask.subtitleText ? '点击复制字幕 / 查看详情' : '点击查看详情'}
-          </div>
+        {isFailed && (
+          <>
+            {(currentTask.llmConfigName || currentTask.llmModel) && (
+              <div style={{ marginTop: '4px', fontSize: '11px', lineHeight: 1.6, color: 'rgba(255, 255, 255, 0.85)' }}>
+                {currentTask.llmConfigName && <div>配置：{currentTask.llmConfigName}</div>}
+                {currentTask.llmModel && <div>模型：{currentTask.llmModel}</div>}
+              </div>
+            )}
+            {currentTask.errorMessage && (
+              <div style={{
+                marginTop: '6px',
+                paddingTop: '6px',
+                borderTop: '1px solid rgba(255, 255, 255, 0.2)',
+                color: '#fca5a5',
+                fontSize: '11px',
+                lineHeight: 1.5,
+                maxHeight: '110px',
+                overflowY: 'auto',
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-word'
+              }}>
+                {currentTask.errorMessage}
+              </div>
+            )}
+            <div style={{
+              color: '#f39c12',
+              fontSize: '11px',
+              marginTop: '6px'
+            }}>
+              {currentTask.subtitleText ? '点击复制字幕 / 查看详情' : '点击查看详情'}
+            </div>
+          </>
         )}
       </div>
     );
@@ -422,6 +446,26 @@ export const FloatingBall: React.FC<FloatingBallProps> = ({
                 {currentTask?.subtitleOnly ? '字幕获取失败' : '任务失败'}
               </h3>
             </div>
+
+            {/* 失败时的 LLM 上下文：与悬停提示一致，直接给出配置名与模型名 */}
+            {(currentTask?.llmConfigName || currentTask?.llmModel) && (
+              <div style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '2px',
+                background: '#f8fafc',
+                border: '1px solid #e2e8f0',
+                borderRadius: '8px',
+                padding: '8px 12px',
+                fontSize: '12px',
+                lineHeight: 1.6,
+                color: '#475569',
+                marginBottom: '12px'
+              }}>
+                {currentTask?.llmConfigName && <div>配置：{currentTask.llmConfigName}</div>}
+                {currentTask?.llmModel && <div>模型：{currentTask.llmModel}</div>}
+              </div>
+            )}
 
             {/* 针对 429 额度耗尽的特别提示（仅字幕模式不涉及 LLM） */}
             {!currentTask?.subtitleOnly && (currentTask?.errorMessage?.includes('429') ||

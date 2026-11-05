@@ -912,6 +912,10 @@ export class TaskManager {
     const validation = LLMService.validateConfig(llmConfig, config);
     if (!validation.valid) throw new Error(validation.error);
 
+    // 记录本次生成使用的 LLM 上下文：任务失败时随快照透传给悬浮球，
+    // 用户悬停即可看到「报错信息 + 配置名称 + 模型名」，不必去运行日志翻。
+    task.llmContext = { configName: llmConfig.name, model: llmConfig.model };
+
     let cachedInitialMindmap: string | undefined;
     if (videoId && config.settings.enableReflection) {
       const cache = await StorageService.getPhase1Cache(videoId);

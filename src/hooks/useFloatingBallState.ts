@@ -11,6 +11,10 @@ export interface CurrentTask {
   result?: any;
   errorMessage?: string;
   statusMessage?: string;
+  /** 生成导图使用的 LLM 配置名称（失败诊断用，来自任务快照 llmContext） */
+  llmConfigName?: string;
+  /** 生成导图使用的模型标识（失败诊断用） */
+  llmModel?: string;
   subtitleText?: string;
   /** 是否为「仅获取字幕」任务（不生成思维导图） */
   subtitleOnly?: boolean;
@@ -158,6 +162,8 @@ export function useFloatingBallState() {
       result: task.result,
       errorMessage: task.error,
       statusMessage: task.statusMessage,
+      llmConfigName: task.llmContext?.configName,
+      llmModel: task.llmContext?.model,
       subtitleText,
       subtitleOnly,
       isAsr: task.result?.isAsr === true,

@@ -15,6 +15,14 @@ export interface MindmapData {
   style?: MindmapStyle;
 }
 
+/** 任务实际使用的 LLM 调用上下文：悬浮球悬停提示与错误弹窗展示「配置名称 + 模型名」用 */
+export interface TaskLLMContext {
+  /** LLM 配置名称（配置列表里的显示名） */
+  configName?: string;
+  /** 模型标识（如 sensenova-6.8-flash-lite） */
+  model?: string;
+}
+
 export interface Task {
   id: string;
   type: 'download_subtitle' | 'generate_mindmap';
@@ -22,6 +30,8 @@ export interface Task {
   data: any;
   result?: any;
   error?: string;
+  /** 导图任务解析出 LLM 配置后记录，失败时可随任务快照透传给 UI 做诊断 */
+  llmContext?: TaskLLMContext;
   createdAt: number;
   updatedAt: number;
   /** 任务执行过程中的进度消息 */
